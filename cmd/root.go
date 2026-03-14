@@ -10,6 +10,7 @@ import (
 var (
 	cfgFile string
 	verbose bool
+	dataDir string
 
 	// Cfg holds the loaded config, accessible to all subcommands.
 	Cfg *config.Config
@@ -45,4 +46,5 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "/etc/herald/config.yml", "Path to config file")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "/etc/herald/", "Directory for age key and secrets file")
 }

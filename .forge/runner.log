@@ -113,3 +113,48 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:09:56  (3m 36s)
   Status:   ✓ OK
+  Commit:   ✓ 279ee16  wu-02: Add config file parser
+  Changes:   18 files changed, 698 insertions(+), 3 deletions(-)
+  Moved:    → .forge/done/wu-02.md
+  ─────────────────────────────────────────────────────
+
+
+wu-03: Add age-encrypted secrets store
+model: sonnet
+
+  Prompt:  156 lines  (8290 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-03.log
+
+  Started: 2026-03-14 17:09:56
+
+  [17:10:02]  ⚙  Glob  {"pattern":"**/*.go"}
+  [17:10:03]  ⚙  Bash  {"command":"cat /home/nogo/Development/projects/deploy/go.mod","description":"Re…
+  [17:10:05]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go"}
+  [17:10:06]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:10:06]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:11:46]  💬 Now I have a clear picture. Let me implement this in parallel steps:
+1. Add the `filippo.io/age` dependency
+2. Create th
+  [17:11:47]  ⚙  Bash  {"command":"go get filippo.io/age@latest 2>&1","description":"Add filippo.io/age…
+  [17:11:50]  ⚙  Bash  {"command":"mkdir -p /home/nogo/Development/projects/deploy/internal/secrets","d…
+  [17:12:15]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go",…
+  [17:12:54]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store_test…
+  [17:12:57]  💬 Now update `cmd/root.go` to add `--data-dir` and fix the secret command config-skip logic:
+  [17:13:01]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/cmd/roo…
+  [17:13:05]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/cmd/roo…
+  [17:13:09]  💬 Now replace `cmd/secret.go` with the full implementation:
+  [17:13:17]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go","content":"p…
+  [17:13:20]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:13:23]  ⚙  Bash  {"command":"go test ./internal/secrets/... -v 2>&1","description":"Run secrets p…
+  [17:13:26]  💬 All 19 tests pass. Let me run a quick integration smoke test:
+  [17:13:30]  ⚙  Bash  {"command":"go build -o /tmp/herald . && HERALD_DATA_DIR=$(mktemp -d) && \\\n  /…
+  [17:13:37]  💬 Everything works. Here's a summary of what was created/modified:
+
+**Created:**
+- `internal/secrets/store.go` — `Store` w
+
+  [17:13:37]  ✅ Done — tokens: 15 in / 17578 out | cost: $0.5362254000000001
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:13:38  (3m 42s)
+  Status:   ✓ OK
