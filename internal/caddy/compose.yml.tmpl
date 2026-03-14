@@ -1,0 +1,29 @@
+services:
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.9
+    container_name: herald-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - CADDY_INGRESS_NETWORKS=caddy
+    networks:
+      - caddy
+    labels:
+      caddy.email: "{{.AcmeEmail}}"
+      caddy_0: "{{.DeployDomain}}"
+      caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  caddy:
+    external: true

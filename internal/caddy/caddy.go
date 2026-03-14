@@ -3,6 +3,7 @@ package caddy
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,10 +12,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/nogo/herald/internal/config"
 )
+
+//go:embed compose.yml.tmpl
+var composeTemplate string
+
+var composeTmpl = template.Must(template.New("compose").Parse(composeTemplate))
 
 const (
 	caddyNetwork       = "caddy"
@@ -222,40 +229,26 @@ func formatUptime(startedAt string) string {
 	}
 }
 
+type composeData struct {
+	AcmeEmail    string
+	DeployDomain string
+	GatewayIP    string
+	HeraldPort   int
+}
+
 func generateComposeContent(acmeEmail, deployDomain string, heraldPort int) string {
-	// Get the Docker bridge gateway IP — this is how containers reach the host.
-	gatewayIP := getDockerGatewayIP()
-
-	return fmt.Sprintf(`services:
-  caddy:
-    image: lucaslorentz/caddy-docker-proxy:2.9
-    container_name: herald-caddy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      - CADDY_INGRESS_NETWORKS=caddy
-    networks:
-      - caddy
-    labels:
-      caddy.email: "%s"
-      caddy_0: "%s"
-      caddy_0.reverse_proxy: "%s:%d"
-
-volumes:
-  caddy_data:
-  caddy_config:
-
-networks:
-  caddy:
-    external: true
-`, acmeEmail, deployDomain, gatewayIP, heraldPort)
+	var buf bytes.Buffer
+	data := composeData{
+		AcmeEmail:    acmeEmail,
+		DeployDomain: deployDomain,
+		GatewayIP:    getDockerGatewayIP(),
+		HeraldPort:   heraldPort,
+	}
+	if err := composeTmpl.Execute(&buf, data); err != nil {
+		// Template is embedded and tested — this should never fail.
+		panic(fmt.Sprintf("caddy compose template: %v", err))
+	}
+	return buf.String()
 }
 
 // getDockerGatewayIP returns the gateway IP of the default Docker bridge network.
