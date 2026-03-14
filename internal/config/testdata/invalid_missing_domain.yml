@@ -1,0 +1,10 @@
+server:
+  name: srv2
+  deploy_domain: deploy.example.com
+  stacks_dir: /opt/deploy
+
+apps:
+  budget:
+    repo: nogo/budget-app
+    branch: main
+    # domain intentionally omitted

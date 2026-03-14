@@ -1,0 +1,49 @@
+server:
+  name: srv2
+  deploy_domain: deploy.example.com
+  stacks_dir: /opt/deploy
+  github_token: ${GITHUB_TOKEN}
+
+apps:
+  budget:
+    repo: nogo/budget-app
+    branch: main
+    domain: budget.example.com
+    env_file: .env.budget
+    compose: compose.yml
+    override: |
+      services:
+        app:
+          volumes:
+            - /srv/budget/data:/data
+    secrets:
+      - key: budget/db_password
+        type: env
+        target: DB_PASSWORD
+    preview:
+      enabled: false
+      domain: "*.preview.example.com"
+
+  tracker:
+    repo: nogo/budget-app
+    branch: main
+    domain: tracker.example.com
+    env_file: .env.tracker
+    override: |
+      services:
+        app:
+          volumes:
+            - /srv/tracker/data:/data
+
+stacks:
+  nextcloud:
+    path: stacks/nextcloud
+    domain: cloud.example.com
+    auto_deploy: false
+    update_script: stacks/nextcloud/update.sh
+
+  ghost:
+    path: stacks/ghost
+    domain: blog.example.com
+    auto_deploy: false
+    update_script: stacks/ghost/update.sh

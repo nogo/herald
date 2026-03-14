@@ -47,3 +47,69 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:06:20  (1m 4s)
   Status:   ✓ OK
+  Commit:   ✓ 964f3ea  wu-01: Scaffold herald Go project
+  Changes:   34 files changed, 3455 insertions(+)
+  Moved:    → .forge/done/wu-01.md
+  ─────────────────────────────────────────────────────
+
+
+wu-02: Add config file parser
+model: sonnet
+
+  Prompt:  173 lines  (8715 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-02.log
+
+  Started: 2026-03-14 17:06:20
+
+  [17:06:27]  ⚙  Agent  {"description":"Explore herald project structure","subagent_type":"Explore","pro…
+  [17:06:29]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" -…
+  [17:06:30]  ⚙  Bash  {"command":"tree -a /home/nogo/Development/projects/deploy -I '.git|.forge' 2>/d…
+  [17:06:31]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:06:31]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/main.go"}
+  [17:06:31]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:06:31]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/status.go"}
+  [17:06:33]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/Makefile"}
+  [17:06:34]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/herald 2>/dev/null | h…
+  [17:06:34]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go"}
+  [17:06:34]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go"}
+  [17:06:35]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/version.go"}
+  [17:06:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:06:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/preview.go"}
+  [17:06:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/sync.go"}
+  [17:06:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/update.go"}
+  [17:06:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go"}
+  [17:07:40]  ⚙  Bash  {"command":"cat /home/nogo/Development/projects/deploy/go.sum","description":"Ch…
+  [17:07:41]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/version.go"}
+  [17:07:59]  💬 yaml.v3 is already in go.sum as an indirect dep. Now let me implement everything.
+  [17:08:00]  ⚙  Bash  {"command":"go get gopkg.in/yaml.v3","description":"Add yaml.v3 as direct depend…
+  [17:08:03]  ⚙  Bash  {"command":"mkdir -p /home/nogo/Development/projects/deploy/internal/config/test…
+  [17:08:21]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go",…
+  [17:08:28]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/testdata/va…
+  [17:08:31]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/testdata/in…
+  [17:08:34]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/testdata/in…
+  [17:08:54]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config_test…
+  [17:08:57]  💬 The `containsStr` helper is unnecessary — let me fix that:
+  [17:08:58]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:09:03]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:09:05]  💬 Now update `cmd/root.go` and `cmd/status.go`:
+  [17:09:14]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go","content":"pac…
+  [17:09:18]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:09:24]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go","content":"pac…
+  [17:09:31]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/status.go","content":"p…
+  [17:09:34]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/status.go"}
+  [17:09:39]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/status.go","content":"p…
+  [17:09:41]  💬 Now verify everything compiles and tests pass:
+  [17:09:41]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:09:45]  ⚙  Bash  {"command":"go vet ./... && go test ./internal/config/... -v 2>&1","description"…
+  [17:09:48]  💬 All 10 tests pass. Now run the verification commands from the spec:
+  [17:09:49]  ⚙  Bash  {"command":"go build -o herald . && GITHUB_TOKEN=ghp_test ./herald --config inte…
+  [17:09:56]  💬 All verification checks pass. Here's what was implemented:
+
+**New files:**
+- `internal/config/config.go` — `Config`, `Se
+
+  [17:09:56]  ✅ Done — tokens: 23 in / 13505 out | cost: $0.569429
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:09:56  (3m 36s)
+  Status:   ✓ OK
