@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/spf13/cobra"
@@ -19,6 +20,7 @@ var (
 // skipConfigCommands are commands that run without a config file.
 var skipConfigCommands = map[string]bool{
 	"version": true,
+	"init":    true,
 }
 
 var rootCmd = &cobra.Command{
@@ -28,6 +30,16 @@ var rootCmd = &cobra.Command{
 		if skipConfigCommands[cmd.Name()] {
 			return nil
 		}
+
+		// Auto-detect config from <data-dir>/repo/config.yml if --config was not
+		// explicitly provided and the default path doesn't exist.
+		if !cmd.Flags().Changed("config") {
+			autoPath := filepath.Join(filepath.Clean(dataDir), "repo", "config.yml")
+			if _, err := os.Stat(autoPath); err == nil {
+				cfgFile = autoPath
+			}
+		}
+
 		cfg, err := config.Load(cfgFile)
 		if err != nil {
 			return err

@@ -334,3 +334,63 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:33:18  (4m 53s)
   Status:   ✓ OK
+  Commit:   ✓ 95a2a54  wu-07: Add GitHub webhook auto-registration
+  Changes:   11 files changed, 928 insertions(+)
+  Moved:    → .forge/done/wu-07.md
+  ─────────────────────────────────────────────────────
+
+
+wu-08: Add init command
+model: sonnet
+
+  Prompt:  240 lines  (9615 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-08.log
+
+  Started: 2026-03-14 17:33:18
+
+  [17:33:27]  ⚙  Agent  {"description":"Explore codebase structure","subagent_type":"Explore","prompt":"…
+  [17:33:29]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" -…
+  [17:33:30]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/","description":"List …
+  [17:33:30]  ⚙  Bash  {"command":"tree -L 3 /home/nogo/Development/projects/deploy/ 2>/dev/null || fin…
+  [17:33:32]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go"}
+  [17:33:32]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:33:32]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:33:32]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go"}
+  [17:33:33]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/caddy/caddy.go"}
+  [17:33:33]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer.…
+  [17:33:33]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/github/webhooks.go…
+  [17:33:33]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:33:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config_test…
+  [17:33:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store_test…
+  [17:33:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/caddy/caddy_test.g…
+  [17:33:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer_…
+  [17:33:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/github/webhooks_te…
+  [17:33:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server_tes…
+  [17:35:53]  💬 Let me check `cmd/deploy.go` and the memory index before implementing.
+  [17:35:53]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go"}
+  [17:35:54]  ⚙  Read  {"file_path":"/home/nogo/.claude/projects/-home-nogo-Development-projects-deploy…
+  [17:36:08]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:38:19]  💬 Now I have everything I need. Let me implement all the files.
+  [17:39:22]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/init/bootstrap.go"…
+  [17:39:35]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go","content":"pac…
+  [17:39:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go"}
+  [17:39:44]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go","content":"pac…
+  [17:39:47]  💬 Now update `cmd/root.go` to add `"init"` to `skipConfigCommands` and auto-detect config:
+  [17:39:48]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/cmd/roo…
+  [17:39:52]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:40:00]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go","content":"pac…
+  [17:40:03]  💬 Now add `--all` to `cmd/deploy.go`:
+  [17:40:11]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go","content":"p…
+  [17:40:13]  💬 Now build to verify:
+  [17:40:14]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:40:17]  ⚙  Bash  {"command":"go test ./... 2>&1","description":"Run all tests"}
+  [17:40:26]  💬 Clean build and all tests pass. Here's what was implemented:
+
+**`internal/init/bootstrap.go`** — new file with:
+- `Check
+
+  [17:40:26]  ✅ Done — tokens: 16 in / 22580 out | cost: $0.913249
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:40:27  (7m 9s)
+  Status:   ✓ OK

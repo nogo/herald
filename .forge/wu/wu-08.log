@@ -1,0 +1,14 @@
+Clean build and all tests pass. Here's what was implemented:
+
+**`internal/init/bootstrap.go`** — new file with:
+- `CheckPrerequisites` — checks Docker, Docker Compose, Git, ports 80/443 (via `ss -tlnp`), and data dir writability, with formatted pass/fail output
+- `Bootstrap` — 9-step orchestration: clone IaC repo (or pull if exists), load config, init age key, set webhook secret, store GitHub token, create directories, start Caddy (idempotent), register GitHub webhooks (including server repo self-update hook), clone app repos
+- All steps are idempotent — re-running skips work already done
+
+**`cmd/init.go`** — replaced stub with full implementation: `herald init <github-repo>` with `--github-token`, `--data-dir`, `--stacks-dir` flags; reads `GITHUB_TOKEN` env var
+
+**`cmd/root.go`** — two changes:
+- Added `"init"` to `skipConfigCommands` so init skips config loading
+- Auto-detects `<data-dir>/repo/config.yml` as config path if `--config` wasn't explicitly set and that file exists
+
+**`cmd/deploy.go`** — added `--all` flag that deploys all configured apps sequentially, collecting failures
