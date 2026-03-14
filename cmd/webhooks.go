@@ -35,7 +35,8 @@ var webhooksSyncCmd = &cobra.Command{
 		store := secrets.NewStore(dataDir)
 		client := github.NewGitHubClient(Cfg.Server.GithubToken, slog.Default())
 
-		results, err := github.SyncWebhooks(context.Background(), Cfg, store, client)
+		force, _ := cmd.Flags().GetBool("force")
+		results, err := github.SyncWebhooks(context.Background(), Cfg, store, client, force)
 		if err != nil {
 			return err
 		}
@@ -102,6 +103,7 @@ var webhooksListCmd = &cobra.Command{
 }
 
 func init() {
+	webhooksSyncCmd.Flags().Bool("force", false, "Delete and recreate all webhooks (use after changing webhook secret)")
 	webhooksCmd.AddCommand(webhooksSyncCmd, webhooksListCmd)
 	rootCmd.AddCommand(webhooksCmd)
 }

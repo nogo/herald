@@ -290,7 +290,8 @@ func formatAPIError(repo string, err error) error {
 }
 
 // SyncWebhooks ensures herald webhooks are registered on all repos referenced in config.
-func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store, client *GitHubClient) ([]SyncResult, error) {
+// When force is true, existing webhooks are deleted and recreated (use after changing the webhook secret).
+func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store, client *GitHubClient, force bool) ([]SyncResult, error) {
 	webhookSecret, err := store.Get("herald/webhook_secret")
 	if err != nil {
 		return nil, fmt.Errorf("getting webhook secret: %w", err)
@@ -302,13 +303,13 @@ func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store,
 
 	results := make([]SyncResult, 0, len(repos))
 	for _, repoFull := range repos {
-		results = append(results, syncRepo(ctx, cfg, client, repoFull, targetURL, webhookSecret))
+		results = append(results, syncRepo(ctx, cfg, client, repoFull, targetURL, webhookSecret, force))
 	}
 
 	return results, nil
 }
 
-func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, repoFull, targetURL, webhookSecret string) SyncResult {
+func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, repoFull, targetURL, webhookSecret string, force bool) SyncResult {
 	result := SyncResult{Repo: repoFull}
 
 	owner, repoName, err := splitRepo(repoFull)
@@ -333,13 +334,13 @@ func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, rep
 		}
 	}
 
-	if heraldHook != nil && heraldHook.Active {
+	if heraldHook != nil && heraldHook.Active && !force {
 		result.Action = "exists"
 		result.ID = heraldHook.ID
 		return result
 	}
 
-	// Delete inactive hook before recreating.
+	// Delete existing hook before recreating (inactive, or force mode).
 	if heraldHook != nil {
 		if err := client.DeleteWebhook(ctx, owner, repoName, heraldHook.ID); err != nil {
 			result.Action = "error"

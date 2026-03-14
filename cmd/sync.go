@@ -80,7 +80,7 @@ var syncCmd = &cobra.Command{
 		webhookEnabled := cfg.Server.GithubToken != ""
 		if webhookEnabled {
 			client := github.NewGitHubClient(cfg.Server.GithubToken, slog.Default())
-			results, syncErr := github.SyncWebhooks(ctx, cfg, store, client)
+			results, syncErr := github.SyncWebhooks(ctx, cfg, store, client, false)
 			if syncErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: webhook sync failed: %v\n", syncErr)
 			} else {

@@ -271,7 +271,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if token != "" {
 		ghClient := github.NewGitHubClient(token, slog.Default())
 
-		results, err := github.SyncWebhooks(ctx, cfg, store, ghClient)
+		results, err := github.SyncWebhooks(ctx, cfg, store, ghClient, false)
 		if err != nil {
 			return fmt.Errorf("syncing webhooks: %w", err)
 		}
