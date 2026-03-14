@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
@@ -17,11 +19,33 @@ var secretCmd = &cobra.Command{
 }
 
 var secretSetCmd = &cobra.Command{
-	Use:   "set <key> <value>",
-	Short: "Set a secret",
-	Args:  cobra.ExactArgs(2),
+	Use:   "set <key> [value]",
+	Short: "Set a secret (reads from stdin if value omitted)",
+	Long: `Set a secret in the encrypted store.
+
+If value is provided as an argument, it will be used directly.
+WARNING: CLI arguments are visible in process listings.
+
+For sensitive values, pipe from stdin instead:
+  echo "my-secret" | herald secret set mykey
+  herald secret set mykey < /path/to/secret-file`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		key, value := args[0], args[1]
+		key := args[0]
+		var value string
+		if len(args) == 2 {
+			value = args[1]
+		} else {
+			// Read from stdin
+			data, err := io.ReadAll(cmd.InOrStdin())
+			if err != nil {
+				return fmt.Errorf("reading from stdin: %w", err)
+			}
+			value = strings.TrimRight(string(data), "\n\r")
+			if value == "" {
+				return fmt.Errorf("no value provided (pass as argument or pipe to stdin)")
+			}
+		}
 		store := secrets.NewStore(dataDir)
 		if err := store.Init(); err != nil {
 			return err

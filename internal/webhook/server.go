@@ -11,12 +11,50 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/web"
 )
 
 const maxBodySize = 10 << 20 // 10 MB
+
+// rateLimiter implements a simple per-endpoint rate limiter using a token bucket.
+type rateLimiter struct {
+	mu       sync.Mutex
+	tokens   float64
+	maxBurst float64
+	rate     float64 // tokens per second
+	last     time.Time
+}
+
+func newRateLimiter(ratePerSec float64, burst int) *rateLimiter {
+	return &rateLimiter{
+		tokens:   float64(burst),
+		maxBurst: float64(burst),
+		rate:     ratePerSec,
+		last:     time.Now(),
+	}
+}
+
+func (rl *rateLimiter) Allow() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(rl.last).Seconds()
+	rl.last = now
+	rl.tokens += elapsed * rl.rate
+	if rl.tokens > rl.maxBurst {
+		rl.tokens = rl.maxBurst
+	}
+	if rl.tokens < 1 {
+		return false
+	}
+	rl.tokens--
+	return true
+}
 
 // DeployRequest carries the information needed to trigger a deploy.
 type DeployRequest struct {
@@ -41,13 +79,24 @@ type Server struct {
 	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
 }
 
-// Handler returns the configured ServeMux.
+// Handler returns the configured ServeMux with rate limiting.
 func (s *Server) Handler() http.Handler {
+	// Rate limit: 30 requests/minute for webhooks, 10/minute for auth failures.
+	webhookRL := newRateLimiter(0.5, 10) // 0.5/sec = 30/min, burst of 10
+	authFailRL := newRateLimiter(0.1, 5) // 0.1/sec = 6/min, burst of 5
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /webhook", s.handleWebhook)
+	mux.HandleFunc("POST /webhook", func(w http.ResponseWriter, r *http.Request) {
+		if !webhookRL.Allow() {
+			slog.Warn("webhook rate limited", "remote", r.RemoteAddr)
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
+			return
+		}
+		s.handleWebhook(w, r)
+	})
 	mux.HandleFunc("GET /health", s.handleHealth)
 	if s.Web != nil {
-		s.Web.RegisterRoutes(mux)
+		s.Web.RegisterRoutesWithRateLimit(mux, authFailRL)
 	}
 	return mux
 }

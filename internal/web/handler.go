@@ -49,6 +49,7 @@ type WebHandler struct {
 	Password  string
 	Logger    *slog.Logger
 	cache     cachedStatus
+	authRL    AuthFailRateLimiter // rate limiter for auth failures; nil disables
 }
 
 var tmplFuncs = template.FuncMap{
@@ -89,11 +90,23 @@ func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, passwo
 		Password:  password,
 		Logger:    logger,
 		cache:     cachedStatus{ttl: 5 * time.Second},
+		authRL:    nil,
 	}
 }
 
-// RegisterRoutes adds the status page routes to mux.
+// AuthFailRateLimiter is called to rate-limit authentication attempts.
+type AuthFailRateLimiter interface {
+	Allow() bool
+}
+
+// RegisterRoutes adds the status page routes to mux (no rate limiting).
 func (h *WebHandler) RegisterRoutes(mux *http.ServeMux) {
+	h.RegisterRoutesWithRateLimit(mux, nil)
+}
+
+// RegisterRoutesWithRateLimit adds the status page routes with auth failure rate limiting.
+func (h *WebHandler) RegisterRoutesWithRateLimit(mux *http.ServeMux, rl AuthFailRateLimiter) {
+	h.authRL = rl
 	cop := &http.CrossOriginProtection{}
 	authed := func(fn http.HandlerFunc) http.Handler {
 		return cop.Handler(h.basicAuth(fn))
@@ -106,6 +119,13 @@ func (h *WebHandler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *WebHandler) basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check rate limit before processing auth (prevents brute force).
+		if h.authRL != nil && !h.authRL.Allow() {
+			slog.Warn("auth rate limited", "remote", r.RemoteAddr)
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+
 		user, pass, ok := r.BasicAuth()
 		// Constant-time comparison prevents timing attacks on credentials.
 		userOK := subtle.ConstantTimeCompare([]byte(user), []byte("herald")) == 1
@@ -142,7 +162,7 @@ func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s, err := h.getStatus(r)
 	if err != nil {
 		h.Logger.Error("collecting status", "error", err)
-		http.Error(w, "Cannot connect to Docker: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Service temporarily unavailable", http.StatusInternalServerError)
 		return
 	}
 	data := statusData{ServerStatus: s, CollectedAt: time.Now()}
@@ -162,7 +182,7 @@ func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
 	s, err := h.getStatus(r)
 	if err != nil {
 		h.Logger.Error("collecting status", "error", err)
-		http.Error(w, "Cannot connect to Docker: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Service temporarily unavailable", http.StatusInternalServerError)
 		return
 	}
 	var appSt *status.AppStatus
@@ -191,7 +211,7 @@ func (h *WebHandler) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Error("collecting status for API", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]string{"error": "service temporarily unavailable"}) //nolint:errcheck
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
