@@ -20,6 +20,7 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install herald as a systemd service",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		if os.Getuid() != 0 {
 			return fmt.Errorf("installing systemd service requires root. Run: sudo herald install")
 		}

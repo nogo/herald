@@ -18,6 +18,7 @@ import (
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
+	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/secrets"
 )
 
@@ -249,14 +250,19 @@ func (m *StackManager) List() []StackInfo {
 	return result
 }
 
-// gitPull runs git pull in the IaC repo.
+// gitPull runs git pull in the IaC repo with auth for private repos.
 func (m *StackManager) gitPull(ctx context.Context) error {
 	repoDir := m.repoDir()
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		return fmt.Errorf("IaC repo not found at %s (run: herald init)", repoDir)
 	}
 	m.Logger.Info("pulling IaC repo", "dir", repoDir)
-	return runStreamCmd(ctx, m.Logger, repoDir, "git", "pull")
+	output, err := githelper.PullFFOnly(ctx, m.Config.Server.GithubToken, repoDir)
+	if err != nil {
+		return fmt.Errorf("git pull: %s", output)
+	}
+	m.Logger.Info("git pull", "output", output)
+	return nil
 }
 
 // findComposeFile returns the first compose filename found in dir.

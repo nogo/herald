@@ -35,6 +35,7 @@ Pipe from stdin:
   herald secret set mykey < /path/to/secret-file`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		key := args[0]
 		var value string
 		if len(args) == 2 {
@@ -79,6 +80,7 @@ var secretGetCmd = &cobra.Command{
 	Short: "Get a secret",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		store := secrets.NewStore(dataDir)
 		val, err := store.Get(args[0])
 		if err != nil {
@@ -94,6 +96,7 @@ var secretListCmd = &cobra.Command{
 	Short: "List secrets",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		store := secrets.NewStore(dataDir)
 		keys, err := store.List()
 		if err != nil {
@@ -111,6 +114,7 @@ var secretImportCmd = &cobra.Command{
 	Short: "Import a file as a secret",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		key, filePath := args[0], args[1]
 		store := secrets.NewStore(dataDir)
 		if err := store.Init(); err != nil {
@@ -135,6 +139,7 @@ var secretDeleteCmd = &cobra.Command{
 	Short: "Delete a secret",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		key := args[0]
 		store := secrets.NewStore(dataDir)
 		if err := store.Delete(key); err != nil {

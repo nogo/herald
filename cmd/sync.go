@@ -136,11 +136,16 @@ var syncCmd = &cobra.Command{
 
 			// Check for pending commits (compare local HEAD vs remote).
 			repoDir := filepath.Join(appDir, "repo")
-			localCommit, localErr := syncCmdOutput(ctx, repoDir, "git", "rev-parse", "--short", "HEAD")
+			localCmd := githelper.CmdWithAuth(ctx, "", repoDir, "rev-parse", "--short", "HEAD")
+			localOut, localErr := localCmd.Output()
+			localCommit := strings.TrimSpace(string(localOut))
 			if localErr != nil {
 				continue
 			}
-			lsRemote, remoteErr := syncCmdOutput(ctx, repoDir, "git", "ls-remote", "origin", app.Branch)
+			token := resolveToken()
+			lsCmd := githelper.CmdWithAuth(ctx, token, repoDir, "ls-remote", "origin", app.Branch)
+			lsOut, remoteErr := lsCmd.Output()
+			lsRemote := strings.TrimSpace(string(lsOut))
 			if remoteErr != nil {
 				continue
 			}

@@ -28,7 +28,7 @@ type Options struct {
 	GitHubToken string
 	DataDir     string
 	StacksDir   string // Override stacks dir from config
-	HeraldPort  int    // Port herald listens on (default 8080)
+	HeraldPort  int    // Port herald listens on (default 9483)
 }
 
 // CheckPrerequisites verifies all system prerequisites are met.
