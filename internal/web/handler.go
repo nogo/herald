@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -106,7 +107,10 @@ func (h *WebHandler) RegisterRoutes(mux *http.ServeMux) {
 func (h *WebHandler) basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
-		if !ok || user != "herald" || pass != h.Password {
+		// Constant-time comparison prevents timing attacks on credentials.
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte("herald")) == 1
+		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(h.Password)) == 1
+		if !ok || !userOK || !passOK {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Herald"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

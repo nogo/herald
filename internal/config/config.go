@@ -14,9 +14,9 @@ import (
 )
 
 type Config struct {
-	Server Server            `yaml:"server"          json:"server"`
-	Apps   map[string]App    `yaml:"apps,omitempty"  json:"apps,omitempty"`
-	Stacks map[string]Stack  `yaml:"stacks,omitempty" json:"stacks,omitempty"`
+	Server Server           `yaml:"server"          json:"server"`
+	Apps   map[string]App   `yaml:"apps,omitempty"  json:"apps,omitempty"`
+	Stacks map[string]Stack `yaml:"stacks,omitempty" json:"stacks,omitempty"`
 }
 
 type Server struct {
@@ -82,7 +82,7 @@ func Load(path string) (*Config, error) {
 		return os.Getenv(varName)
 	})
 	if cfg.Server.GithubToken == "" && strings.Contains(original, "${") {
-		slog.Warn("github_token expanded to empty string", "original", original)
+		slog.Warn("github_token contains env var reference but expanded to empty string")
 	}
 
 	// Default acme_email to webmaster@<deploy_domain>.
@@ -122,10 +122,15 @@ func validate(cfg *Config) error {
 	// Collect all domains to detect duplicates across apps and stacks.
 	domains := make(map[string]string) // domain -> "app:name" or "stack:name"
 
+	repoRe := regexp.MustCompile(`^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$`)
+
 	for _, name := range slices.Sorted(maps.Keys(cfg.Apps)) {
 		app := cfg.Apps[name]
 		if app.Repo == "" {
 			return fmt.Errorf("app %q: repo is required", name)
+		}
+		if !repoRe.MatchString(app.Repo) {
+			return fmt.Errorf("app %q: repo %q must be in owner/name format with alphanumeric characters", name, app.Repo)
 		}
 		if app.Domain == "" {
 			return fmt.Errorf("app %q: domain is required", name)

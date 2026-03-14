@@ -33,10 +33,10 @@ type Server struct {
 	Config            *config.Config
 	Secret            string
 	Verbose           bool
-	Web               *web.WebHandler              // optional status page handler; nil disables status page
-	OnDeploy          func(DeployRequest)          // called for each matched app; must be non-nil
-	IaCRepo           string                       // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
-	OnIaCPush         func()                       // called when a push to IaCRepo is received; may be nil
+	Web               *web.WebHandler                      // optional status page handler; nil disables status page
+	OnDeploy          func(DeployRequest)                  // called for each matched app; must be non-nil
+	IaCRepo           string                               // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
+	OnIaCPush         func()                               // called when a push to IaCRepo is received; may be nil
 	OnPreviewDeploy   func(appName, branch, commit string) // called for preview-enabled apps on non-default branches
 	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
 }
@@ -121,7 +121,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.Verbose {
-		slog.Debug("webhook payload", "event", eventType, "repo", repo, "branch", branch, "body", string(body))
+		slog.Debug("webhook payload", "event", eventType, "repo", repo, "branch", branch, "bodyLen", len(body))
 	}
 
 	var matchedNames []string

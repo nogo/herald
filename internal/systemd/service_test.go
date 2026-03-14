@@ -48,7 +48,7 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 	}
 }
 
-func TestGenerateUnitFile_githubToken(t *testing.T) {
+func TestGenerateUnitFile_noTokenInUnitFile(t *testing.T) {
 	cfg := ServiceConfig{
 		BinaryPath:  "/usr/local/bin/herald",
 		ConfigPath:  "/etc/herald/config.yml",
@@ -60,8 +60,16 @@ func TestGenerateUnitFile_githubToken(t *testing.T) {
 	}
 	got := GenerateUnitFile(cfg)
 
-	if !strings.Contains(got, "Environment=GITHUB_TOKEN=ghp_secret123") {
-		t.Errorf("expected GITHUB_TOKEN in unit file, got:\n%s", got)
+	// Tokens must never appear in the unit file (world-readable).
+	// They belong in /etc/herald/environment (0600) or the secrets store.
+	if strings.Contains(got, "ghp_secret123") {
+		t.Errorf("token must not appear in unit file, got:\n%s", got)
+	}
+	if strings.Contains(got, "GITHUB_TOKEN=") {
+		t.Errorf("GITHUB_TOKEN must not be set in unit file, got:\n%s", got)
+	}
+	if !strings.Contains(got, "EnvironmentFile") {
+		t.Errorf("expected EnvironmentFile directive in unit file")
 	}
 }
 

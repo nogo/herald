@@ -328,8 +328,8 @@ func (m *PreviewManager) previewDir(id string) string {
 
 // branchExists checks whether the branch exists on the remote.
 func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branch string) (bool, error) {
-	cloneURL := buildCloneURL(m.Config.Server.GithubToken, app.Repo)
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", cloneURL, branch)
+	url := repoURL(app.Repo)
+	cmd := gitCmdWithAuth(ctx, m.Config.Server.GithubToken, "", "ls-remote", "--heads", url, branch)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
@@ -341,26 +341,30 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branc
 
 func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app config.App, branch string) error {
 	repoDir := filepath.Join(previewDir, "repo")
-	cloneURL := buildCloneURL(m.Config.Server.GithubToken, app.Repo)
+	url := repoURL(app.Repo)
+	token := m.Config.Server.GithubToken
 
 	_, err := os.Stat(repoDir)
 	if os.IsNotExist(err) {
 		m.Logger.Info("git clone", "repo", app.Repo, "branch", branch)
-		return runCmd(ctx, m.Logger, "", "git",
+		cmd := gitCmdWithAuth(ctx, token, "",
 			"clone", "--branch", branch,
 			"--single-branch", "--depth", "1",
-			cloneURL, repoDir,
+			url, repoDir,
 		)
+		return runExecCmd(ctx, m.Logger, cmd)
 	}
 	if err != nil {
 		return fmt.Errorf("stat repo dir: %w", err)
 	}
 
 	m.Logger.Info("git fetch+reset", "repo", app.Repo, "branch", branch)
-	if err := runCmd(ctx, m.Logger, repoDir, "git", "fetch", "origin", branch); err != nil {
+	fetchCmd := gitCmdWithAuth(ctx, token, repoDir, "fetch", "origin", branch)
+	if err := runExecCmd(ctx, m.Logger, fetchCmd); err != nil {
 		return err
 	}
-	return runCmd(ctx, m.Logger, repoDir, "git", "reset", "--hard", "origin/"+branch)
+	resetCmd := gitCmdWithAuth(ctx, token, repoDir, "reset", "--hard", "origin/"+branch)
+	return runExecCmd(ctx, m.Logger, resetCmd)
 }
 
 func (m *PreviewManager) runCompose(ctx context.Context, previewDir, composeProject, composeFile string) error {
@@ -489,11 +493,55 @@ func (m *PreviewManager) generateOverride(
 
 // --- Shared utilities ---
 
-func buildCloneURL(token, repo string) string {
-	if token != "" {
-		return fmt.Sprintf("https://%s@github.com/%s.git", token, repo)
-	}
+func repoURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
+}
+
+// gitCmdWithAuth creates an exec.Cmd for git with token-based auth via
+// environment variables. Keeps tokens out of process table and .git/config.
+func gitCmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		helper := fmt.Sprintf("!f() { echo username=x-access-token; echo password=%s; }; f", token)
+		cmd.Env = append(cmd.Env,
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0="+helper,
+		)
+	}
+	return cmd
+}
+
+func runExecCmd(ctx context.Context, logger *slog.Logger, cmd *exec.Cmd) error {
+	name := cmd.Path
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	start := time.Now()
+	runErr := cmd.Run()
+	dur := time.Since(start).Round(time.Millisecond)
+	logLines := func(output string, level slog.Level) {
+		for line := range strings.Lines(output) {
+			line = strings.TrimRight(line, "\n\r")
+			if line != "" {
+				logger.Log(ctx, level, line, "cmd", name)
+			}
+		}
+	}
+	logLines(stdout.String(), slog.LevelInfo)
+	if stderr.Len() > 0 {
+		logLines(stderr.String(), slog.LevelWarn)
+	}
+	if runErr != nil {
+		return fmt.Errorf("%s: %w (duration: %s)", name, runErr, dur)
+	}
+	logger.Info("command completed", "cmd", name, "duration", dur)
+	return nil
 }
 
 func writeEnvFile(root *os.Root, envVars map[string]string) error {

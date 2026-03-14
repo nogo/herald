@@ -27,7 +27,7 @@ type Deployer struct {
 	Secrets *secrets.Store
 	Logger  *slog.Logger
 
-	appLocks sync.Map      // string → *appLock
+	appLocks sync.Map // string → *appLock
 	wg       sync.WaitGroup
 }
 
@@ -164,34 +164,60 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 // gitSync clones the repo on first deploy or fetch+reset on subsequent ones.
 func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App) error {
 	repoDir := filepath.Join(appDir, "repo")
-	cloneURL := buildCloneURL(d.Config.Server.GithubToken, app.Repo)
+	url := repoURL(app.Repo)
+	token := d.Config.Server.GithubToken
 
 	_, err := os.Stat(repoDir)
 	if os.IsNotExist(err) {
 		d.Logger.Info("git clone", "repo", app.Repo, "branch", app.Branch)
-		return runCmd(ctx, d.Logger, "", "git",
+		cmd := gitCmdWithAuth(ctx, token, "",
 			"clone", "--branch", app.Branch,
 			"--single-branch", "--depth", "1",
-			cloneURL, repoDir,
+			url, repoDir,
 		)
+		return runExecCmd(ctx, d.Logger, cmd)
 	}
 	if err != nil {
 		return fmt.Errorf("stat repo dir: %w", err)
 	}
 
 	d.Logger.Info("git fetch+reset", "repo", app.Repo, "branch", app.Branch)
-	if err := runCmd(ctx, d.Logger, repoDir, "git", "fetch", "origin", app.Branch); err != nil {
+	fetchCmd := gitCmdWithAuth(ctx, token, repoDir, "fetch", "origin", app.Branch)
+	if err := runExecCmd(ctx, d.Logger, fetchCmd); err != nil {
 		return err
 	}
-	return runCmd(ctx, d.Logger, repoDir, "git", "reset", "--hard", "origin/"+app.Branch)
+	resetCmd := gitCmdWithAuth(ctx, token, repoDir, "reset", "--hard", "origin/"+app.Branch)
+	return runExecCmd(ctx, d.Logger, resetCmd)
 }
 
-// buildCloneURL returns the HTTPS clone URL, embedding the token if provided.
-func buildCloneURL(token, repo string) string {
-	if token != "" {
-		return fmt.Sprintf("https://%s@github.com/%s.git", token, repo)
-	}
+// repoURL returns the HTTPS clone URL without credentials.
+func repoURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
+}
+
+// gitCmdWithAuth creates an exec.Cmd for git with token-based auth via
+// environment variables. Avoids embedding tokens in URLs (visible in ps/proc
+// and .git/config). Uses git's credential helper protocol via GIT_CONFIG_*
+// environment variables.
+func gitCmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
+	// Disable git hooks for security (prevent code execution from cloned repos).
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		// Use a credential helper that returns the token.
+		// This keeps the token out of the command line and .git/config.
+		helper := fmt.Sprintf("!f() { echo username=x-access-token; echo password=%s; }; f", token)
+		cmd.Env = append(cmd.Env,
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0="+helper,
+		)
+	}
+	return cmd
 }
 
 // writeEnvFile writes KEY=value pairs to .env, sorted by key.
@@ -445,6 +471,13 @@ func runCmd(ctx context.Context, logger *slog.Logger, dir string, name string, a
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	return runExecCmd(ctx, logger, cmd)
+}
+
+// runExecCmd executes a pre-built command, logs stdout/stderr, returns error on
+// non-zero exit. Use this when the command needs custom Env or other settings.
+func runExecCmd(ctx context.Context, logger *slog.Logger, cmd *exec.Cmd) error {
+	name := cmd.Path
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

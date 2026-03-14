@@ -326,7 +326,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) error {
 	if _, err := os.Stat(filepath.Join(destDir, ".git")); err == nil {
 		fmt.Fprintln(w, "  → Repository already cloned, pulling latest...")
-		cmd := exec.CommandContext(ctx, "git", "-C", destDir, "pull")
+		cmd := gitCmdWithAuth(ctx, token, destDir, "pull")
 		var out strings.Builder
 		cmd.Stdout = &out
 		cmd.Stderr = &out
@@ -340,8 +340,8 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 	displayURL := fmt.Sprintf("https://github.com/%s.git", repo)
 	fmt.Fprintf(w, "  → git clone %s %s\n", displayURL, destDir)
 
-	cloneURL := buildCloneURL(token, repo)
-	cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, destDir)
+	url := repoURL(repo)
+	cmd := gitCmdWithAuth(ctx, token, "", "clone", url, destDir)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -361,10 +361,12 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 // cloneOrPullBranch clones a specific branch or updates it if already cloned.
 func cloneOrPullBranch(ctx context.Context, repo, branch, destDir, token string) error {
 	if _, err := os.Stat(filepath.Join(destDir, ".git")); err == nil {
-		if err := exec.CommandContext(ctx, "git", "-C", destDir, "fetch", "origin", branch).Run(); err != nil {
+		fetchCmd := gitCmdWithAuth(ctx, token, destDir, "fetch", "origin", branch)
+		if err := fetchCmd.Run(); err != nil {
 			return fmt.Errorf("git fetch: %w", err)
 		}
-		if err := exec.CommandContext(ctx, "git", "-C", destDir, "reset", "--hard", "origin/"+branch).Run(); err != nil {
+		resetCmd := gitCmdWithAuth(ctx, token, destDir, "reset", "--hard", "origin/"+branch)
+		if err := resetCmd.Run(); err != nil {
 			return fmt.Errorf("git reset: %w", err)
 		}
 		return nil
@@ -374,10 +376,10 @@ func cloneOrPullBranch(ctx context.Context, repo, branch, destDir, token string)
 		return err
 	}
 
-	cloneURL := buildCloneURL(token, repo)
-	cmd := exec.CommandContext(ctx, "git", "clone",
+	url := repoURL(repo)
+	cmd := gitCmdWithAuth(ctx, token, "", "clone",
 		"--branch", branch, "--single-branch", "--depth", "1",
-		cloneURL, destDir)
+		url, destDir)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -393,11 +395,28 @@ func cloneOrPullBranch(ctx context.Context, repo, branch, destDir, token string)
 	return nil
 }
 
-func buildCloneURL(token, repo string) string {
-	if token != "" {
-		return fmt.Sprintf("https://%s@github.com/%s.git", token, repo)
-	}
+func repoURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
+}
+
+// gitCmdWithAuth creates a git command with token-based auth via env vars.
+// Keeps tokens out of process table, .git/config, and disables git hooks.
+func gitCmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		helper := fmt.Sprintf("!f() { echo username=x-access-token; echo password=%s; }; f", token)
+		cmd.Env = append(cmd.Env,
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0="+helper,
+		)
+	}
+	return cmd
 }
 
 // syncServerRepoWebhook registers a webhook on the server IaC repo if not already covered.

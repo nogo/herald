@@ -47,10 +47,7 @@ RestartSec=10
 TimeoutStartSec=30
 TimeoutStopSec=30
 
-# Environment
-{{- if .GithubToken}}
-Environment=GITHUB_TOKEN={{.GithubToken}}
-{{- end}}
+# Environment — secrets go in the environment file, never in the unit file
 EnvironmentFile=-/etc/herald/environment
 
 # Security hardening
