@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/status"
 	"github.com/spf13/cobra"
 )
 
@@ -38,18 +40,29 @@ var webhooksSyncCmd = &cobra.Command{
 			return err
 		}
 
+		// Save webhook state for use by herald status.
+		ws := &status.WebhookState{
+			SyncedAt: time.Now().UTC(),
+			Repos:    make(map[string]status.WebhookEntry),
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), "Webhooks synced:")
 		for _, r := range results {
 			switch r.Action {
 			case "exists":
 				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ✓ exists (id: %d)\n", r.Repo, r.ID)
+				ws.Repos[r.Repo] = status.WebhookEntry{ID: r.ID, Registered: true}
 			case "created":
 				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s + created (id: %d)\n", r.Repo, r.ID)
+				ws.Repos[r.Repo] = status.WebhookEntry{ID: r.ID, Registered: true}
 			case "removed":
 				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s - removed (id: %d)\n", r.Repo, r.ID)
 			case "error":
 				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ! error: %v\n", r.Repo, r.Error)
 			}
+		}
+		wsPath := status.WebhookStatePath(dataDir)
+		if err := status.SaveWebhookState(wsPath, ws); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: saving webhook state: %v\n", err)
 		}
 
 		return nil
