@@ -275,9 +275,192 @@ What you get:
 - Secrets encrypted at rest without external infrastructure
 - Full server bootstrap with one command (`herald init`)
 
+## Installation
+
+### Build from source
+
+```sh
+git clone https://github.com/nogo/herald.git
+cd herald
+make
+# Binary at bin/herald
+```
+
+### From GitHub Releases
+
+Download the latest binary for your platform from [Releases](https://github.com/nogo/herald/releases):
+
+```sh
+# Linux amd64
+curl -fsSL https://github.com/nogo/herald/releases/latest/download/herald-linux-amd64 -o herald
+chmod +x herald
+
+# Linux arm64 (Raspberry Pi, ARM servers)
+curl -fsSL https://github.com/nogo/herald/releases/latest/download/herald-linux-arm64 -o herald
+chmod +x herald
+```
+
+Verify:
+
+```sh
+./herald version
+```
+
+### Server Setup
+
+#### 1. Prerequisites
+
+On the target server (Debian/Ubuntu):
+
+```sh
+# Docker + Docker Compose must be installed
+docker --version        # Docker 24+
+docker compose version  # Compose v2+
+git --version           # Git 2+
+```
+
+#### 2. Create a dedicated herald user
+
+Herald should not run as root. Create a system user with Docker access:
+
+```sh
+# As root:
+useradd -r -m -d /home/herald -s /bin/bash -G docker herald
+
+# Create directories
+mkdir -p /etc/herald
+chown herald:herald /etc/herald
+
+mkdir -p /opt/deploy
+chown herald:herald /opt/deploy
+
+# Install the binary
+cp herald /usr/local/bin/herald
+chmod 755 /usr/local/bin/herald
+
+# Verify Docker access
+su - herald -c "docker ps"
+su - herald -c "herald version"
+```
+
+#### 3. Bootstrap (as herald user)
+
+```sh
+su - herald
+
+# Authenticate with GitHub (pick one):
+herald auth login --client-id <your-oauth-client-id>   # interactive
+# or: export GITHUB_TOKEN=ghp_xxxx                     # token
+
+# Bootstrap from your server's IaC repo
+herald init myorg/my-server-repo
+```
+
+`herald init` will:
+- Clone the server repo to `/etc/herald/repo/`
+- Generate the age encryption key
+- Start Caddy reverse proxy
+- Register GitHub webhooks on all configured repos
+- Clone app repositories
+
+#### 4. Configure secrets
+
+```sh
+# Set secrets (stored age-encrypted)
+herald secret set myapp/db_password "secure-password"
+herald secret list
+
+# Secrets are persisted in /etc/herald/secrets.age
+# Back up /etc/herald/age.key — it cannot be recovered if lost
+```
+
+#### 5. Deploy
+
+```sh
+# Deploy an app
+herald deploy myapp
+
+# Deploy a managed stack
+herald update nextcloud
+
+# Deploy everything
+herald deploy --all
+```
+
+#### 6. Start the daemon
+
+```sh
+# Test in foreground
+herald serve
+
+# Install as systemd service (as root)
+sudo herald install --user herald
+```
+
+The systemd service:
+- Starts herald on boot (after Docker)
+- Restarts on crash (10s backoff)
+- Runs as the `herald` user
+- Security-hardened (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`)
+
+#### 7. Verify
+
+```sh
+systemctl status herald          # service running
+journalctl -u herald -f          # follow logs
+herald status                    # all services and domains
+curl https://deploy.example.com/health  # webhook endpoint
+```
+
+### Server Repo Structure
+
+Each server gets its own IaC repo defining what runs on it:
+
+```
+my-server-repo/
+  config.yml              # apps, stacks, domains
+  stacks/
+    nextcloud/
+      compose.yaml        # compose file for the stack
+      update.sh           # scripted update runbook
+    ghost/
+      compose.yaml
+      update.sh
+```
+
+See the [Config](#config) section for the config.yml format.
+
+### Data directories
+
+After setup, the server has:
+
+```
+/etc/herald/                  # herald data (owned by herald user)
+  age.key                     # master encryption key (BACK THIS UP)
+  secrets.age                 # encrypted secrets store
+  repo/                       # cloned server IaC repo
+
+/opt/deploy/                  # deployments (owned by herald user)
+  apps/<name>/repo/           # cloned app source repos
+  stacks/<name>/              # symlinks to IaC repo stacks
+  caddy/compose.yml           # caddy-docker-proxy (managed by herald)
+```
+
+### Updating herald
+
+```sh
+# Download new binary
+curl -fsSL https://github.com/nogo/herald/releases/latest/download/herald-linux-amd64 -o /tmp/herald
+chmod +x /tmp/herald
+
+# Replace and restart (as root)
+cp /tmp/herald /usr/local/bin/herald
+systemctl restart herald
+```
+
 ## Requirements
 
-- Go 1.26+ (build)
+- Go 1.26+ (build only)
 - Docker + Docker Compose (runtime)
 - Debian/Ubuntu server (tested)
 - GitHub account (token via device flow or PAT)
