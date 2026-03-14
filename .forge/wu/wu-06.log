@@ -1,0 +1,10 @@
+All green. Here's a summary of what was created/modified:
+
+**Created:**
+- `internal/caddy/caddy.go` — `CaddyManager` with `EnsureNetwork`, `Start`, `Stop`, `Status`, `IsRunning`. Generates the Caddy compose file (caddy-docker-proxy + herald sidecar proxy), shells out to `docker compose` and `docker network`. Detects port conflicts from compose error output.
+- `internal/caddy/caddy_test.go` — Unit tests for compose content generation and `parseCaddyUpstream`.
+- `cmd/caddy.go` — `herald caddy start/stop/status` subcommands. `start` has `--herald-port` flag (default 8080). `status` prints aligned domain table.
+
+**Modified:**
+- `internal/config/config.go` — Added `AcmeEmail` to `Server` struct; defaults to `webmaster@<deploy_domain>` if unset.
+- `internal/deployer/deployer.go` — Added `ensureCaddyNetwork` helper; called before `docker compose up` in `Deploy()`.

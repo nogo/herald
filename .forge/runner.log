@@ -238,3 +238,54 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:23:13  (6m 34s)
   Status:   ✓ OK
+  Commit:   ✓ 7a4200d  wu-05: Add Docker Compose deploy integration
+  Changes:   12 files changed, 843 insertions(+), 9 deletions(-)
+  Moved:    → .forge/done/wu-05.md
+  ─────────────────────────────────────────────────────
+
+
+wu-06: Add Caddy bootstrap and management
+model: sonnet
+
+  Prompt:  199 lines  (8047 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-06.log
+
+  Started: 2026-03-14 17:23:13
+
+  [17:23:20]  ⚙  Agent  {"description":"Explore project structure","subagent_type":"Explore","prompt":"R…
+  [17:23:23]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:23:23]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:23:23]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer.…
+  [17:23:24]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:23:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:23:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:23:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer.…
+  [17:23:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:23:40]  💬 Let me check the existing cmd files for patterns.
+  [17:23:40]  ⚙  Glob  {"pattern":"cmd/*.go","path":"/home/nogo/Development/projects/deploy"}
+  [17:23:43]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:26:59]  💬 Now I have a clear picture. Let me implement everything.
+  [17:27:26]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/caddy/caddy.go","c…
+  [17:27:42]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/caddy/caddy_test.g…
+  [17:27:53]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/caddy.go","content":"pa…
+  [17:27:55]  💬 Now update `internal/config/config.go` to add `AcmeEmail`:
+  [17:27:58]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:27:59]  💬 Now add the default for `AcmeEmail` in `Load`:
+  [17:28:02]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:28:04]  💬 Now update `internal/deployer/deployer.go` to ensure the caddy network before deploying:
+  [17:28:06]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:28:09]  💬 Now add the `ensureCaddyNetwork` helper function to deployer.go:
+  [17:28:12]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:28:14]  💬 Now verify it all builds and tests pass:
+  [17:28:14]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:28:18]  ⚙  Bash  {"command":"go test ./... 2>&1","description":"Run all tests"}
+  [17:28:25]  💬 All green. Here's a summary of what was created/modified:
+
+**Created:**
+- `internal/caddy/caddy.go` — `CaddyManager` wit
+
+  [17:28:25]  ✅ Done — tokens: 16 in / 22124 out | cost: $0.7291787499999999
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:28:25  (5m 12s)
+  Status:   ✓ OK

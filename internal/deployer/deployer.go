@@ -147,7 +147,12 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 		return fmt.Errorf("generating compose override: %w", err)
 	}
 
-	// 7. Run docker compose up.
+	// 7. Ensure the caddy network exists before compose up.
+	if err := ensureCaddyNetwork(ctx, d.Logger); err != nil {
+		return fmt.Errorf("ensuring caddy network: %w", err)
+	}
+
+	// 8. Run docker compose up.
 	if err := d.runCompose(ctx, appDir, appName, composeFile); err != nil {
 		return fmt.Errorf("compose: %w", err)
 	}
@@ -408,6 +413,15 @@ func deepMerge(base, overlay map[string]any) map[string]any {
 		result[k] = v
 	}
 	return result
+}
+
+// ensureCaddyNetwork creates the caddy Docker network if it doesn't exist.
+func ensureCaddyNetwork(ctx context.Context, logger *slog.Logger) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", "caddy")
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+	return runCmd(ctx, logger, "", "docker", "network", "create", "caddy")
 }
 
 // runCompose executes docker compose up -d --build --remove-orphans.

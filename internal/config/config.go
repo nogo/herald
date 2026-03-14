@@ -24,6 +24,7 @@ type Server struct {
 	DeployDomain string `yaml:"deploy_domain" json:"deploy_domain"`
 	StacksDir    string `yaml:"stacks_dir"    json:"stacks_dir"`
 	GithubToken  string `yaml:"github_token"  json:"github_token,omitempty"`
+	AcmeEmail    string `yaml:"acme_email"    json:"acme_email,omitempty"`
 }
 
 type App struct {
@@ -82,6 +83,11 @@ func Load(path string) (*Config, error) {
 	})
 	if cfg.Server.GithubToken == "" && strings.Contains(original, "${") {
 		slog.Warn("github_token expanded to empty string", "original", original)
+	}
+
+	// Default acme_email to webmaster@<deploy_domain>.
+	if cfg.Server.AcmeEmail == "" && cfg.Server.DeployDomain != "" {
+		cfg.Server.AcmeEmail = "webmaster@" + cfg.Server.DeployDomain
 	}
 
 	// Apply defaults for app fields.
