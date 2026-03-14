@@ -25,6 +25,7 @@ type Server struct {
 	StacksDir    string `yaml:"stacks_dir"    json:"stacks_dir"`
 	GithubToken  string `yaml:"github_token"  json:"github_token,omitempty"`
 	AcmeEmail    string `yaml:"acme_email"    json:"acme_email,omitempty"`
+	Port         int    `yaml:"port,omitempty" json:"port,omitzero"`
 }
 
 type App struct {
@@ -88,6 +89,11 @@ func Load(path string) (*Config, error) {
 	// Default acme_email to webmaster@<deploy_domain>.
 	if cfg.Server.AcmeEmail == "" && cfg.Server.DeployDomain != "" {
 		cfg.Server.AcmeEmail = "webmaster@" + cfg.Server.DeployDomain
+	}
+
+	// Default port.
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 9483
 	}
 
 	// Apply defaults for app fields.

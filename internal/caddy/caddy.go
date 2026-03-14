@@ -223,6 +223,9 @@ func formatUptime(startedAt string) string {
 }
 
 func generateComposeContent(acmeEmail, deployDomain string, heraldPort int) string {
+	// Get the Docker bridge gateway IP — this is how containers reach the host.
+	gatewayIP := getDockerGatewayIP()
+
 	return fmt.Sprintf(`services:
   caddy:
     image: lucaslorentz/caddy-docker-proxy:2.9
@@ -242,20 +245,8 @@ func generateComposeContent(acmeEmail, deployDomain string, heraldPort int) stri
       - caddy
     labels:
       caddy.email: "%s"
-
-  herald-proxy:
-    image: alpine:3
-    container_name: herald-proxy-label
-    restart: always
-    command: ["sleep", "infinity"]
-    networks:
-      - caddy
-    labels:
-      caddy: "%s"
-      caddy.reverse_proxy: "{{upstreams}}"
-      caddy.reverse_proxy.to: "host.docker.internal:%d"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      caddy_0: "%s"
+      caddy_0.reverse_proxy: "%s:%d"
 
 volumes:
   caddy_data:
@@ -264,7 +255,22 @@ volumes:
 networks:
   caddy:
     external: true
-`, acmeEmail, deployDomain, heraldPort)
+`, acmeEmail, deployDomain, gatewayIP, heraldPort)
+}
+
+// getDockerGatewayIP returns the gateway IP of the default Docker bridge network.
+// This is the IP containers use to reach services on the host.
+func getDockerGatewayIP() string {
+	out, err := exec.Command("docker", "network", "inspect", "bridge",
+		"--format", "{{range .IPAM.Config}}{{.Gateway}}{{end}}").Output()
+	if err == nil {
+		ip := strings.TrimSpace(string(out))
+		if ip != "" {
+			return ip
+		}
+	}
+	// Fallback: typical Docker bridge gateway
+	return "172.17.0.1"
 }
 
 func runCmd(ctx context.Context, logger *slog.Logger, name string, args ...string) error {

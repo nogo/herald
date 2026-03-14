@@ -12,13 +12,11 @@ func TestGenerateComposeContent(t *testing.T) {
 		"lucaslorentz/caddy-docker-proxy:2.9",
 		"herald-caddy",
 		`caddy.email: "admin@example.com"`,
-		`caddy: "deploy.example.com"`,
-		"host.docker.internal:8080",
+		`caddy_0: "deploy.example.com"`,
 		"external: true",
 		"caddy_data:",
 		"caddy_config:",
 		"CADDY_INGRESS_NETWORKS=caddy",
-		"herald-proxy-label",
 		"/var/run/docker.sock:/var/run/docker.sock:ro",
 	}
 	for _, want := range checks {
@@ -26,12 +24,30 @@ func TestGenerateComposeContent(t *testing.T) {
 			t.Errorf("compose content missing %q", want)
 		}
 	}
+
+	// Must contain the gateway IP + port for reverse proxy
+	if !strings.Contains(content, ":8080") {
+		t.Errorf("compose content missing port 8080")
+	}
+
+	// Must NOT contain herald-proxy sidecar (removed)
+	if strings.Contains(content, "herald-proxy-label") {
+		t.Errorf("compose should not contain the old herald-proxy sidecar")
+	}
 }
 
 func TestGenerateComposeContentPort(t *testing.T) {
-	content := generateComposeContent("x@x.com", "x.com", 9090)
-	if !strings.Contains(content, "host.docker.internal:9090") {
-		t.Errorf("expected port 9090 in compose content")
+	content := generateComposeContent("x@x.com", "x.com", 9483)
+	if !strings.Contains(content, ":9483") {
+		t.Errorf("expected port 9483 in compose content")
+	}
+}
+
+func TestGetDockerGatewayIPFallback(t *testing.T) {
+	// On CI/test environments without Docker, should return the fallback
+	ip := getDockerGatewayIP()
+	if ip == "" {
+		t.Error("getDockerGatewayIP returned empty string")
 	}
 }
 
@@ -43,14 +59,13 @@ func TestParseCaddyUpstream(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "herald proxy",
-			container: "herald-proxy-label",
+			name:      "direct reverse proxy",
+			container: "herald-caddy",
 			labels: map[string]string{
-				"caddy":                   "deploy.example.com",
-				"caddy.reverse_proxy":     "{{upstreams}}",
-				"caddy.reverse_proxy.to":  "host.docker.internal:8080",
+				"caddy_0":               "deploy.example.com",
+				"caddy_0.reverse_proxy": "172.17.0.1:9483",
 			},
-			want: "host:8080 (herald)",
+			want: "herald-caddy",
 		},
 		{
 			name:      "app container",

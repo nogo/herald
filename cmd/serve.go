@@ -34,6 +34,12 @@ var serveCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
+		// Resolve port: CLI flag overrides config.
+		listenPort := Cfg.Server.Port
+		if cmd.Flags().Changed("port") {
+			listenPort = port
+		}
+
 		store := secrets.NewStore(dataDir)
 		secret, err := store.Get("herald/webhook_secret")
 		if err != nil {
@@ -66,7 +72,7 @@ var serveCmd = &cobra.Command{
 			caddyMgr := &caddy.CaddyManager{
 				Config:     Cfg,
 				Logger:     slog.Default(),
-				HeraldPort: port,
+				HeraldPort: listenPort,
 			}
 			collector := &status.StatusCollector{
 				Config:  Cfg,
@@ -109,7 +115,7 @@ var serveCmd = &cobra.Command{
 			},
 		}
 
-		addr := fmt.Sprintf(":%d", port)
+		addr := fmt.Sprintf(":%d", listenPort)
 		httpSrv := &http.Server{
 			Addr:    addr,
 			Handler: srv.Handler(),
@@ -199,5 +205,5 @@ func makeIaCPushHandler(mgr *stacks.StackManager) func() {
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
-	serveCmd.Flags().IntVar(&port, "port", 8080, "Port to listen on")
+	serveCmd.Flags().IntVar(&port, "port", 9483, "Port to listen on")
 }
