@@ -1,0 +1,31 @@
+{{define "head"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="30">
+  <title>{{block "title" .}}Herald{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="container">
+    <a href="/" class="site-title">Herald</a>
+    <span class="server-name">{{.ServerName}}</span>
+    <span class="auto-refresh">Auto-refresh 30s</span>
+  </div>
+</header>
+<main class="container">
+{{end}}
+
+{{define "foot"}}
+</main>
+<footer>
+  <div class="container">
+    <span>Last updated: {{.CollectedAt.Format "2006-01-02 15:04:05"}}</span>
+  </div>
+</footer>
+</body>
+</html>
+{{end}}

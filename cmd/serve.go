@@ -15,10 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/stacks"
+	"github.com/nogo/herald/internal/status"
+	"github.com/nogo/herald/internal/web"
 	"github.com/nogo/herald/internal/webhook"
 	"github.com/spf13/cobra"
 )
@@ -55,10 +58,34 @@ var serveCmd = &cobra.Command{
 			Logger:  slog.Default(),
 		}
 
+		// Set up status page if password is configured.
+		var webHandler *web.WebHandler
+		if statusPass, err := store.Get("herald/status_password"); err == nil {
+			caddyMgr := &caddy.CaddyManager{
+				Config:     Cfg,
+				Logger:     slog.Default(),
+				HeraldPort: port,
+			}
+			collector := &status.StatusCollector{
+				Config:  Cfg,
+				DataDir: dataDir,
+				Logger:  slog.Default(),
+				Caddy:   caddyMgr,
+				Preview: previewMgr,
+			}
+			webHandler = web.NewWebHandler(collector, Cfg, statusPass, slog.Default())
+			if webHandler != nil {
+				slog.Info("status page enabled", "domain", Cfg.Server.DeployDomain)
+			}
+		} else {
+			slog.Info("status page disabled: run 'herald secret set herald/status_password <password>' to enable")
+		}
+
 		srv := &webhook.Server{
 			Config:  Cfg,
 			Secret:  secret,
 			Verbose: verbose,
+			Web:     webHandler,
 			OnDeploy: func(req webhook.DeployRequest) {
 				d.DeployAsync(req.AppName)
 			},

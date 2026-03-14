@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/web"
 )
 
 const maxBodySize = 10 << 20 // 10 MB
@@ -32,6 +33,7 @@ type Server struct {
 	Config            *config.Config
 	Secret            string
 	Verbose           bool
+	Web               *web.WebHandler              // optional status page handler; nil disables status page
 	OnDeploy          func(DeployRequest)          // called for each matched app; must be non-nil
 	IaCRepo           string                       // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
 	OnIaCPush         func()                       // called when a push to IaCRepo is received; may be nil
@@ -44,6 +46,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /webhook", s.handleWebhook)
 	mux.HandleFunc("GET /health", s.handleHealth)
+	if s.Web != nil {
+		s.Web.RegisterRoutes(mux)
+	}
 	return mux
 }
 

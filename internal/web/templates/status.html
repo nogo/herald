@@ -1,0 +1,128 @@
+{{define "status"}}
+{{template "head" .}}
+
+{{/* Caddy */}}
+<section>
+  <h2>Caddy</h2>
+  <div class="caddy-status">
+    {{if .Caddy.Running}}
+      <span class="dot running"></span>
+      running
+      {{if .Caddy.Uptime}}(up {{.Caddy.Uptime}}){{end}}
+    {{else}}
+      <span class="dot stopped"></span>
+      stopped
+    {{end}}
+    {{if .Caddy.Email}}
+      &nbsp;&middot;&nbsp;ACME: {{.Caddy.Email}}
+    {{end}}
+    {{if .Caddy.DomainCount}}
+      &nbsp;&middot;&nbsp;{{.Caddy.DomainCount}} domains
+    {{end}}
+  </div>
+</section>
+
+{{/* Apps */}}
+{{if .Apps}}
+<section>
+  <h2>Apps</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Domain</th>
+          <th>Status</th>
+          <th>Containers</th>
+          <th>Branch</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Apps}}
+        <tr>
+          <td><a href="/app/{{.Name}}">{{.Name}}</a></td>
+          <td><a href="{{domainURL .Domain}}" target="_blank" rel="noopener">{{.Domain}}</a></td>
+          <td>
+            <span class="dot {{stateClass .State}}"></span>
+            {{.State}}
+          </td>
+          <td>{{containers .ContainersUp .ContainersTotal}}</td>
+          <td>
+            {{.Branch}}
+            {{if .LastCommit}}<span class="commit">{{.LastCommit}}</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{/* Stacks */}}
+{{if .Stacks}}
+<section>
+  <h2>Stacks</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Domain</th>
+          <th>Status</th>
+          <th>Containers</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Stacks}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td><a href="{{domainURL .Domain}}" target="_blank" rel="noopener">{{.Domain}}</a></td>
+          <td>
+            <span class="dot {{stateClass .State}}"></span>
+            {{.State}}
+          </td>
+          <td>{{containers .ContainersUp .ContainersTotal}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{/* Previews */}}
+<section>
+  <h2>Previews</h2>
+  {{if .Previews}}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>App</th>
+          <th>Domain</th>
+          <th>Branch</th>
+          <th>Age</th>
+          <th>Commit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Previews}}
+        <tr>
+          <td><a href="/app/{{.AppName}}">{{.AppName}}</a></td>
+          <td><a href="{{domainURL .Domain}}" target="_blank" rel="noopener">{{.Domain}}</a></td>
+          <td>{{.Branch}}</td>
+          <td>{{.Age}}</td>
+          <td>{{if .Commit}}<span class="commit">{{.Commit}}</span>{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <p class="empty">(none active)</p>
+  {{end}}
+</section>
+
+{{template "foot" .}}
+{{end}}

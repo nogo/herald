@@ -1,0 +1,20 @@
+All 8 tests pass, full build clean. Here's what was implemented:
+
+**New files:**
+- `internal/web/handler.go` — `WebHandler` with 5s caching, basic auth middleware, `RegisterRoutes()`, handlers for `/`, `/app/{name}`, `/api/status`, `/static/`
+- `internal/web/handler_test.go` — 8 unit tests covering auth rejection, 200 responses, 404, JSON API
+- `internal/web/templates/layout.html` — `head`/`foot` partials (shared nav + footer)
+- `internal/web/templates/status.html` — dashboard with Caddy status, Apps/Stacks/Previews tables
+- `internal/web/templates/app.html` — app detail with status, config, secrets (keys only), preview config
+- `internal/web/static/style.css` — system font stack, dark/light mode via `prefers-color-scheme`, status dots, responsive tables
+
+**Modified:**
+- `internal/webhook/server.go` — added `Web *web.WebHandler` field; `Handler()` calls `s.Web.RegisterRoutes(mux)` when set
+- `cmd/serve.go` — reads `herald/status_password` from store; wires `StatusCollector` + `WebHandler`; logs when disabled
+
+**Key behaviors:**
+- No password set → status page disabled, webhook/health unaffected
+- Password set → `GET /` and `/api/status` require `herald:<password>` Basic Auth
+- `GET /static/` is unprotected (CSS only, not sensitive)
+- `http.CrossOriginProtection` wraps all auth-protected routes
+- Status data cached 5s to avoid Docker spam on auto-refresh

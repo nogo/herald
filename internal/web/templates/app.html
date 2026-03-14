@@ -1,0 +1,104 @@
+{{define "app"}}
+{{template "head" .}}
+
+<div class="breadcrumb">
+  <a href="/">← All apps</a>
+</div>
+
+<h2>{{.AppName}}</h2>
+
+{{/* Status summary */}}
+{{if .AppStatus}}
+<section>
+  <h3>Status</h3>
+  <dl class="info-grid">
+    <dt>State</dt>
+    <dd>
+      <span class="dot {{stateClass .AppStatus.State}}"></span>
+      {{.AppStatus.State}}
+    </dd>
+    <dt>Containers</dt>
+    <dd>{{containers .AppStatus.ContainersUp .AppStatus.ContainersTotal}}</dd>
+    {{if .AppStatus.LastCommit}}
+    <dt>Commit</dt>
+    <dd><span class="commit">{{.AppStatus.LastCommit}}</span></dd>
+    {{end}}
+  </dl>
+</section>
+{{else}}
+<section>
+  <p class="empty">No status available — app may not be deployed yet.</p>
+</section>
+{{end}}
+
+{{/* Config */}}
+<section>
+  <h3>Configuration</h3>
+  <dl class="info-grid">
+    <dt>Domain</dt>
+    <dd><a href="{{domainURL .AppConfig.Domain}}" target="_blank" rel="noopener">{{.AppConfig.Domain}}</a></dd>
+    <dt>Repository</dt>
+    <dd>
+      <a href="https://github.com/{{.AppConfig.Repo}}" target="_blank" rel="noopener">{{.AppConfig.Repo}}</a>
+    </dd>
+    <dt>Branch</dt>
+    <dd>{{.AppConfig.Branch}}</dd>
+    {{if .AppConfig.Compose}}
+    <dt>Compose file</dt>
+    <dd>{{.AppConfig.Compose}}</dd>
+    {{end}}
+    {{if .AppConfig.EnvFile}}
+    <dt>Env file</dt>
+    <dd>{{.AppConfig.EnvFile}}</dd>
+    {{end}}
+    {{if .AppConfig.Override}}
+    <dt>Override</dt>
+    <dd>{{.AppConfig.Override}}</dd>
+    {{end}}
+  </dl>
+</section>
+
+{{/* Secrets */}}
+{{if .AppConfig.Secrets}}
+<section>
+  <h3>Secrets</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Type</th>
+          <th>Target</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .AppConfig.Secrets}}
+        <tr>
+          <td><code>{{.Key}}</code></td>
+          <td>{{.Type}}</td>
+          <td>{{.Target}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{/* Preview config */}}
+{{if .AppConfig.Preview}}
+{{if .AppConfig.Preview.Enabled}}
+<section>
+  <h3>Preview Deployments</h3>
+  <dl class="info-grid">
+    <dt>Enabled</dt>
+    <dd>yes</dd>
+    <dt>Preview domain</dt>
+    <dd>{{.AppConfig.Preview.Domain}}</dd>
+  </dl>
+</section>
+{{end}}
+{{end}}
+
+{{template "foot" .}}
+{{end}}
