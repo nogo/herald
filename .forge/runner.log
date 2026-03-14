@@ -394,3 +394,81 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:40:27  (7m 9s)
   Status:   ✓ OK
+  Commit:   ✓ 0ae12ce  wu-08: Add init command
+  Changes:   12 files changed, 769 insertions(+), 10 deletions(-)
+  Moved:    → .forge/done/wu-08.md
+  ─────────────────────────────────────────────────────
+
+
+wu-09: Add stack update command
+model: sonnet
+
+  Prompt:  187 lines  (8582 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-09.log
+
+  Started: 2026-03-14 17:40:27
+
+  [17:40:36]  ⚙  Agent  {"description":"Explore codebase structure","subagent_type":"Explore","prompt":"…
+  [17:40:38]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" |…
+  [17:40:38]  ⚙  Glob  {"pattern":"**/","path":"/home/nogo/Development/projects/deploy"}
+  [17:40:40]  ⚙  Bash  {"command":"tree -L 3 /home/nogo/Development/projects/deploy 2>/dev/null || find…
+  [17:40:40]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:40:40]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:40:41]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/update.go"}
+  [17:40:41]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server.go"…
+  [17:40:42]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer.…
+  [17:40:42]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go"}
+  [17:40:43]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/cmd/ | grep -E \"\\.go…
+  [17:40:43]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:40:44]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/main.go"}
+  [17:40:45]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go"}
+  [17:40:45]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:40:45]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go"}
+  [17:40:46]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/webhooks.go"}
+  [17:40:46]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/init.go"}
+  [17:40:47]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/caddy.go"}
+  [17:40:48]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/payload.go…
+  [17:40:49]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/internal/","descriptio…
+  [17:42:19]  💬 Now let me read a few more files before implementing:
+  [17:42:19]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:42:19]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go"}
+  [17:43:12]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/init/bootstrap.go"…
+  [17:46:22]  💬 Now I have a complete picture. Let me implement everything.
+  [17:47:07]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/stacks/manager.go"…
+  [17:47:37]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/stacks/manager_tes…
+  [17:47:39]  💬 Now create the testdata scripts:
+  [17:47:40]  ⚙  Bash  {"command":"mkdir -p /home/nogo/Development/projects/deploy/internal/stacks/test…
+  [17:47:44]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/stacks/testdata/ec…
+  [17:47:48]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/stacks/testdata/fa…
+  [17:47:54]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/stacks/testdata/up…
+  [17:47:57]  💬 Now implement `cmd/update.go`:
+  [17:48:06]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/update.go","content":"p…
+  [17:48:10]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/update.go"}
+  [17:48:18]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/update.go","content":"p…
+  [17:48:22]  💬 Now modify `internal/webhook/server.go` to add IaC push handling:
+  [17:48:26]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:48:30]  💬 The webhook server file was read earlier in the conversation but I need to re-read to satisfy the tool:
+  [17:48:30]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server.go"…
+  [17:48:37]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:48:41]  💬 Now update `handleWebhook` to check for IaC repo push and change the "no matching apps" path to also handle it:
+  [17:48:47]  ⚙  Edit  {"replace_all":false,"file_path":"/home/nogo/Development/projects/deploy/interna…
+  [17:48:50]  💬 Now modify `cmd/serve.go` to wire up the stack manager and IaC push handling:
+  [17:49:05]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go","content":"pa…
+  [17:49:09]  💬 Now build and test:
+  [17:49:09]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:49:13]  ⚙  Bash  {"command":"go test ./internal/stacks/... -v 2>&1","description":"Run stacks pac…
+  [17:49:17]  💬 All tests pass. Let me also run the full test suite:
+  [17:49:17]  ⚙  Bash  {"command":"go test ./... 2>&1","description":"Run all tests"}
+  [17:49:31]  💬 All 9 test suites pass. Here's a summary of what was built:
+
+---
+
+### Files created/modified
+
+**`internal/stacks/manager
+
+  [17:49:31]  ✅ Done — tokens: 23 in / 33036 out | cost: $1.3499457499999996
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:49:32  (9m 5s)
+  Status:   ✓ OK

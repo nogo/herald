@@ -29,10 +29,12 @@ type DeployRequest struct {
 
 // Server is the webhook HTTP server.
 type Server struct {
-	Config   *config.Config
-	Secret   string
-	Verbose  bool
-	OnDeploy func(DeployRequest) // called for each matched app; must be non-nil
+	Config    *config.Config
+	Secret    string
+	Verbose   bool
+	OnDeploy  func(DeployRequest) // called for each matched app; must be non-nil
+	IaCRepo   string              // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
+	OnIaCPush func()              // called when a push to IaCRepo is received; may be nil
 }
 
 // Handler returns the configured ServeMux.
@@ -118,7 +120,22 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check for IaC repo push (stacks auto-deploy).
+	iacPush := s.IaCRepo != "" && repo == s.IaCRepo && s.OnIaCPush != nil
+	if eventType == "push" && iacPush {
+		slog.Info("webhook",
+			"event", eventType,
+			"repo", repo,
+			"result", "accepted: IaC repo push",
+		)
+		go s.OnIaCPush()
+	}
+
 	if len(matchedNames) == 0 {
+		if iacPush {
+			writeJSON(w, http.StatusOK, map[string]string{"message": "accepted: IaC repo push"})
+			return
+		}
 		slog.Info("webhook",
 			"event", eventType,
 			"repo", repo,

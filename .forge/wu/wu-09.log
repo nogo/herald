@@ -1,0 +1,24 @@
+All 9 test suites pass. Here's a summary of what was built:
+
+---
+
+### Files created/modified
+
+**`internal/stacks/manager.go`** — Core `StackManager` with:
+- `Setup`: Creates `<stacks_dir>/stacks/<name>/`, symlinks `repo/` → IaC repo stack path, ensures caddy network, generates compose override with Caddy labels
+- `Update`: git pull → validate script exists → setup if needed → `RunUpdateScript`
+- `ComposeUp`: setup if needed → `docker compose up -d --build --remove-orphans`
+- `RunUpdateScript`: `/bin/bash -euo pipefail <script>` with `STACK_NAME`, `STACK_DIR`, `STACK_DOMAIN`, `COMPOSE_FILE` env vars; real-time streaming via `lineWriter`; last 50 lines captured for error reporting
+- `List`: sorted `[]StackInfo`
+
+**`internal/stacks/manager_test.go`** — 8 tests covering: List(), RunUpdateScript success/fail/no-script/unknown-stack/env-vars, stackDeployDir path, findComposeFile
+
+**`internal/stacks/testdata/`** — `echo.sh` (used in tests), `fail.sh` (used in tests), `update.sh` (Nextcloud reference implementation)
+
+**`cmd/update.go`** — Replaces stub with full implementation:
+- `herald update <stack>` — validates, pulls IaC repo, runs update script with configurable `--timeout` (default 30m)
+- `herald update --list` — tabular output with auto-calculated column widths
+
+**`internal/webhook/server.go`** — Added `IaCRepo string` and `OnIaCPush func()` fields; when a push event matches `IaCRepo`, calls `OnIaCPush` in a goroutine (alongside or instead of app deploys)
+
+**`cmd/serve.go`** — Wires up `StackManager` and `OnIaCPush`; detects IaC repo via `git remote get-url origin`; `OnIaCPush` runs `ComposeUp` for `auto_deploy: true` stacks, logs the rest
