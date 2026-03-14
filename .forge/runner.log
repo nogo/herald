@@ -289,3 +289,48 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:28:25  (5m 12s)
   Status:   ✓ OK
+  Commit:   ✓ d028b5f  wu-06: Add Caddy bootstrap and management
+  Changes:   13 files changed, 623 insertions(+), 1 deletion(-)
+  Moved:    → .forge/done/wu-06.md
+  ─────────────────────────────────────────────────────
+
+
+wu-07: Add GitHub webhook auto-registration
+model: sonnet
+
+  Prompt:  189 lines  (8473 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-07.log
+
+  Started: 2026-03-14 17:28:25
+
+  [17:28:33]  ⚙  Agent  {"description":"Explore project structure","subagent_type":"Explore","prompt":"E…
+  [17:28:35]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" |…
+  [17:28:36]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/","description":"List …
+  [17:28:36]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:28:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:28:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:28:37]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go"}
+  [17:28:38]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server.go"…
+  [17:28:38]  ⚙  Bash  {"command":"ls -la /home/nogo/Development/projects/deploy/cmd/","description":"L…
+  [17:28:38]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/main.go"}
+  [17:28:40]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f \\( -name \"*.go…
+  [17:28:40]  ⚙  Bash  {"command":"tree -L 3 /home/nogo/Development/projects/deploy -I '.git|.forge'","…
+  [17:29:24]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/version.go"}
+  [17:31:38]  💬 Now I have everything I need. Let me implement the three files.
+  [17:32:05]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/github/webhooks.go…
+  [17:32:39]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/github/webhooks_te…
+  [17:32:42]  💬 Now let me check an existing command for the pattern before writing the CLI:
+  [17:32:43]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go"}
+  [17:33:00]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/webhooks.go","content":…
+  [17:33:03]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:33:06]  ⚙  Bash  {"command":"go test ./internal/github/... -v 2>&1","description":"Run GitHub pac…
+  [17:33:09]  ⚙  Bash  {"command":"go test ./... 2>&1","description":"Run full test suite"}
+  [17:33:18]  💬 All 13 tests pass, build is clean. Here's what was created:
+
+**`internal/github/webhooks.go`** — GitHub API client + syn
+
+  [17:33:18]  ✅ Done — tokens: 12 in / 20449 out | cost: $0.6791171000000001
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:33:18  (4m 53s)
+  Status:   ✓ OK
