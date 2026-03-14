@@ -20,14 +20,12 @@ const environmentFileContent = `# Herald environment variables
 
 // ServiceConfig holds the values needed to generate the systemd unit file.
 type ServiceConfig struct {
-	BinaryPath  string
-	ConfigPath  string
-	DataDir     string
-	User        string
-	Group       string
-	StacksDir   string
-	Port        int
-	GithubToken string
+	BinaryPath string
+	ConfigPath string
+	DataDir    string
+	User       string
+	Group      string
+	StacksDir  string
 }
 
 var unitTemplate = template.Must(template.New("unit").Parse(`[Unit]

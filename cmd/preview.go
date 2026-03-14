@@ -31,6 +31,7 @@ var previewListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active preview deployments",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		mgr := newPreviewManager()
 		previews, err := mgr.List()
 		if err != nil {
@@ -55,6 +56,7 @@ var previewRemoveCmd = &cobra.Command{
 	Short: "Remove a preview deployment",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		mgr := newPreviewManager()
 		if err := mgr.Remove(cmd.Context(), args[0]); err != nil {
 			return err
@@ -68,6 +70,7 @@ var previewCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
 	Short: "Remove previews for branches that no longer exist on the remote",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		return newPreviewManager().Cleanup(cmd.Context())
 	},
 }

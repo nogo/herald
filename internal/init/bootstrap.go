@@ -17,6 +17,7 @@ import (
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/secrets"
 )
@@ -313,8 +314,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 			fmt.Fprintf(w, "    ✗ %v\n", err)
 			continue
 		}
-		cloneToken := token
-		if err := cloneOrPullBranch(ctx, app.Repo, app.Branch, appRepoDir, cloneToken); err != nil {
+		if err := git.CloneOrFetch(ctx, token, appRepoDir, git.RepoURL(app.Repo), app.Branch); err != nil {
 			fmt.Fprintf(w, "    ✗ %v\n", err)
 		} else {
 			cloned++
@@ -330,7 +330,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) error {
 	if _, err := os.Stat(filepath.Join(destDir, ".git")); err == nil {
 		fmt.Fprintln(w, "  → Repository already cloned, pulling latest...")
-		cmd := gitCmdWithAuth(ctx, token, destDir, "pull")
+		cmd := git.CmdWithAuth(ctx, token, destDir, "pull")
 		var out strings.Builder
 		cmd.Stdout = &out
 		cmd.Stderr = &out
@@ -344,8 +344,8 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 	displayURL := fmt.Sprintf("https://github.com/%s.git", repo)
 	fmt.Fprintf(w, "  → git clone %s %s\n", displayURL, destDir)
 
-	url := repoURL(repo)
-	cmd := gitCmdWithAuth(ctx, token, "", "clone", url, destDir)
+	url := git.RepoURL(repo)
+	cmd := git.CmdWithAuth(ctx, token, "", "clone", url, destDir)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -360,67 +360,6 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 	}
 	fmt.Fprintln(w, "  ✓ Repository cloned")
 	return nil
-}
-
-// cloneOrPullBranch clones a specific branch or updates it if already cloned.
-func cloneOrPullBranch(ctx context.Context, repo, branch, destDir, token string) error {
-	if _, err := os.Stat(filepath.Join(destDir, ".git")); err == nil {
-		fetchCmd := gitCmdWithAuth(ctx, token, destDir, "fetch", "origin", branch)
-		if err := fetchCmd.Run(); err != nil {
-			return fmt.Errorf("git fetch: %w", err)
-		}
-		resetCmd := gitCmdWithAuth(ctx, token, destDir, "reset", "--hard", "origin/"+branch)
-		if err := resetCmd.Run(); err != nil {
-			return fmt.Errorf("git reset: %w", err)
-		}
-		return nil
-	}
-
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-
-	url := repoURL(repo)
-	cmd := gitCmdWithAuth(ctx, token, "", "clone",
-		"--branch", branch, "--single-branch", "--depth", "1",
-		url, destDir)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		stderrStr := strings.TrimSpace(stderr.String())
-		if strings.Contains(stderrStr, "not found") || strings.Contains(stderrStr, "Repository not found") {
-			return fmt.Errorf("cannot clone %s. If this is a private repo, provide --github-token", repo)
-		}
-		if stderrStr != "" {
-			return fmt.Errorf("git clone: %w: %s", err, stderrStr)
-		}
-		return fmt.Errorf("git clone: %w", err)
-	}
-	return nil
-}
-
-func repoURL(repo string) string {
-	return fmt.Sprintf("https://github.com/%s.git", repo)
-}
-
-// gitCmdWithAuth creates a git command with token-based auth via env vars.
-// Keeps tokens out of process table, .git/config, and disables git hooks.
-func gitCmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if token != "" {
-		helper := fmt.Sprintf("!f() { echo username=x-access-token; echo password=%s; }; f", token)
-		cmd.Env = append(cmd.Env,
-			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=credential.helper",
-			"GIT_CONFIG_VALUE_0="+helper,
-		)
-	}
-	return cmd
 }
 
 // syncServerRepoWebhook registers a webhook on the server IaC repo if not already covered.

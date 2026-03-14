@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -16,7 +15,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/git"
+	"github.com/nogo/herald/internal/runner"
 	"github.com/nogo/herald/internal/secrets"
 )
 
@@ -136,7 +139,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	}
 	defer previewRoot.Close()
 
-	if err := writeEnvFile(previewRoot, envVars); err != nil {
+	if err := compose.WriteEnvFile(previewRoot, envVars); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
 	}
 
@@ -151,7 +154,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		}
 		defer secretsRoot.Close()
 		for name, val := range dockerSecrets {
-			if err := writeSecret(secretsRoot, name, val); err != nil {
+			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
 				return fmt.Errorf("writing secret %q: %w", name, err)
 			}
 		}
@@ -162,7 +165,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		return fmt.Errorf("generating override: %w", err)
 	}
 
-	if err := ensureCaddyNetwork(ctx, m.Logger); err != nil {
+	if err := caddy.EnsureNetwork(ctx, m.Logger); err != nil {
 		return fmt.Errorf("ensuring caddy network: %w", err)
 	}
 
@@ -328,8 +331,7 @@ func (m *PreviewManager) previewDir(id string) string {
 
 // branchExists checks whether the branch exists on the remote.
 func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branch string) (bool, error) {
-	url := repoURL(app.Repo)
-	cmd := gitCmdWithAuth(ctx, m.Config.Server.GithubToken, "", "ls-remote", "--heads", url, branch)
+	cmd := git.CmdWithAuth(ctx, m.Config.Server.GithubToken, "", "ls-remote", "--heads", git.RepoURL(app.Repo), branch)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
@@ -341,37 +343,14 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branc
 
 func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app config.App, branch string) error {
 	repoDir := filepath.Join(previewDir, "repo")
-	url := repoURL(app.Repo)
-	token := m.Config.Server.GithubToken
-
-	_, err := os.Stat(repoDir)
-	if os.IsNotExist(err) {
-		m.Logger.Info("git clone", "repo", app.Repo, "branch", branch)
-		cmd := gitCmdWithAuth(ctx, token, "",
-			"clone", "--branch", branch,
-			"--single-branch", "--depth", "1",
-			url, repoDir,
-		)
-		return runExecCmd(ctx, m.Logger, cmd)
-	}
-	if err != nil {
-		return fmt.Errorf("stat repo dir: %w", err)
-	}
-
-	m.Logger.Info("git fetch+reset", "repo", app.Repo, "branch", branch)
-	fetchCmd := gitCmdWithAuth(ctx, token, repoDir, "fetch", "origin", branch)
-	if err := runExecCmd(ctx, m.Logger, fetchCmd); err != nil {
-		return err
-	}
-	resetCmd := gitCmdWithAuth(ctx, token, repoDir, "reset", "--hard", "origin/"+branch)
-	return runExecCmd(ctx, m.Logger, resetCmd)
+	return git.CloneOrFetch(ctx, m.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), branch)
 }
 
 func (m *PreviewManager) runCompose(ctx context.Context, previewDir, composeProject, composeFile string) error {
 	repoDir := filepath.Join(previewDir, "repo")
 	overrideFile := filepath.Join(previewDir, "compose.override.yml")
 	m.Logger.Info("compose up", "project", composeProject)
-	return runCmd(ctx, m.Logger, repoDir,
+	return runner.RunCmd(ctx, m.Logger, repoDir,
 		"docker", "compose",
 		"--project-name", composeProject,
 		"-f", composeFile,
@@ -384,36 +363,13 @@ func (m *PreviewManager) runComposeDown(ctx context.Context, previewDir, compose
 	repoDir := filepath.Join(previewDir, "repo")
 	overrideFile := filepath.Join(previewDir, "compose.override.yml")
 	m.Logger.Info("compose down", "project", composeProject)
-	return runCmd(ctx, m.Logger, repoDir,
+	return runner.RunCmd(ctx, m.Logger, repoDir,
 		"docker", "compose",
 		"--project-name", composeProject,
 		"-f", composeFile,
 		"-f", overrideFile,
 		"down", "--volumes", "--remove-orphans",
 	)
-}
-
-// --- Compose override generation ---
-
-type composeOverride struct {
-	Services map[string]serviceOverride `yaml:"services"`
-	Networks map[string]networkDef      `yaml:"networks,omitempty"`
-	Secrets  map[string]secretFileDef   `yaml:"secrets,omitempty"`
-}
-
-type serviceOverride struct {
-	Labels   map[string]string `yaml:"labels,omitempty"`
-	EnvFile  []string          `yaml:"env_file,omitempty"`
-	Secrets  []string          `yaml:"secrets,omitempty"`
-	Networks []string          `yaml:"networks,omitempty"`
-}
-
-type networkDef struct {
-	External bool `yaml:"external"`
-}
-
-type secretFileDef struct {
-	File string `yaml:"file"`
 }
 
 func (m *PreviewManager) generateOverride(
@@ -423,14 +379,14 @@ func (m *PreviewManager) generateOverride(
 	repoDir string,
 	dockerSecrets map[string]string,
 ) error {
-	serviceName, port, err := detectServiceInfo(filepath.Join(repoDir, app.Compose), appName)
+	serviceName, port, err := compose.DetectServiceInfo(filepath.Join(repoDir, app.Compose), appName, "3000")
 	if err != nil {
 		m.Logger.Warn("could not detect service info, using defaults", "app", appName, "error", err)
 		serviceName = "app"
 		port = "3000"
 	}
 
-	svc := serviceOverride{
+	svc := compose.ServiceOverride{
 		Labels: map[string]string{
 			"caddy":               domain,
 			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
@@ -448,15 +404,15 @@ func (m *PreviewManager) generateOverride(
 		svc.Secrets = secretNames
 	}
 
-	override := composeOverride{
-		Services: map[string]serviceOverride{serviceName: svc},
-		Networks: map[string]networkDef{"caddy": {External: true}},
+	override := compose.Override{
+		Services: map[string]compose.ServiceOverride{serviceName: svc},
+		Networks: map[string]compose.NetworkDef{"caddy": {External: true}},
 	}
 
 	if len(secretNames) > 0 {
-		override.Secrets = make(map[string]secretFileDef, len(secretNames))
+		override.Secrets = make(map[string]compose.SecretFileDef, len(secretNames))
 		for _, name := range secretNames {
-			override.Secrets[name] = secretFileDef{
+			override.Secrets[name] = compose.SecretFileDef{
 				File: filepath.Join(previewDir, "secrets", name),
 			}
 		}
@@ -475,7 +431,7 @@ func (m *PreviewManager) generateOverride(
 		if err := yaml.Unmarshal([]byte(app.Override), &overlayMap); err != nil {
 			return fmt.Errorf("parsing app override YAML: %w", err)
 		}
-		merged := deepMerge(baseMap, overlayMap)
+		merged := compose.DeepMerge(baseMap, overlayMap)
 		data, err = yaml.Marshal(merged)
 		if err != nil {
 			return fmt.Errorf("marshaling merged override: %w", err)
@@ -489,211 +445,4 @@ func (m *PreviewManager) generateOverride(
 	defer f.Close()
 	_, err = f.Write(data)
 	return err
-}
-
-// --- Shared utilities ---
-
-func repoURL(repo string) string {
-	return fmt.Sprintf("https://github.com/%s.git", repo)
-}
-
-// gitCmdWithAuth creates an exec.Cmd for git with token-based auth via
-// environment variables. Keeps tokens out of process table and .git/config.
-func gitCmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if token != "" {
-		helper := fmt.Sprintf("!f() { echo username=x-access-token; echo password=%s; }; f", token)
-		cmd.Env = append(cmd.Env,
-			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=credential.helper",
-			"GIT_CONFIG_VALUE_0="+helper,
-		)
-	}
-	return cmd
-}
-
-func runExecCmd(ctx context.Context, logger *slog.Logger, cmd *exec.Cmd) error {
-	name := cmd.Path
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	start := time.Now()
-	runErr := cmd.Run()
-	dur := time.Since(start).Round(time.Millisecond)
-	logLines := func(output string, level slog.Level) {
-		for line := range strings.Lines(output) {
-			line = strings.TrimRight(line, "\n\r")
-			if line != "" {
-				logger.Log(ctx, level, line, "cmd", name)
-			}
-		}
-	}
-	logLines(stdout.String(), slog.LevelInfo)
-	if stderr.Len() > 0 {
-		logLines(stderr.String(), slog.LevelWarn)
-	}
-	if runErr != nil {
-		return fmt.Errorf("%s: %w (duration: %s)", name, runErr, dur)
-	}
-	logger.Info("command completed", "cmd", name, "duration", dur)
-	return nil
-}
-
-func writeEnvFile(root *os.Root, envVars map[string]string) error {
-	f, err := root.OpenFile(".env", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for _, key := range slices.Sorted(maps.Keys(envVars)) {
-		if _, err := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeSecret(root *os.Root, name, value string) error {
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(value)
-	return err
-}
-
-func ensureCaddyNetwork(ctx context.Context, logger *slog.Logger) error {
-	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", "caddy")
-	if err := cmd.Run(); err == nil {
-		return nil
-	}
-	return runCmd(ctx, logger, "", "docker", "network", "create", "caddy")
-}
-
-func runCmd(ctx context.Context, logger *slog.Logger, dir string, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	start := time.Now()
-	runErr := cmd.Run()
-	dur := time.Since(start).Round(time.Millisecond)
-
-	logLines := func(output string, level slog.Level) {
-		for line := range strings.Lines(output) {
-			line = strings.TrimRight(line, "\n\r")
-			if line != "" {
-				logger.Log(ctx, level, line, "cmd", name)
-			}
-		}
-	}
-
-	logLines(stdout.String(), slog.LevelInfo)
-	if stderr.Len() > 0 {
-		logLines(stderr.String(), slog.LevelWarn)
-	}
-
-	if runErr != nil {
-		return fmt.Errorf("%s: %w (duration: %s)", name, runErr, dur)
-	}
-
-	logger.Info("command completed", "cmd", name, "duration", dur)
-	return nil
-}
-
-// detectServiceInfo parses a compose file to find the main service name and port.
-func detectServiceInfo(composeFilePath, appName string) (serviceName, port string, err error) {
-	data, err := os.ReadFile(composeFilePath)
-	if err != nil {
-		return "", "", err
-	}
-
-	var mc struct {
-		Services map[string]struct {
-			Expose []any `yaml:"expose"`
-			Ports  []any `yaml:"ports"`
-		} `yaml:"services"`
-	}
-	if err := yaml.Unmarshal(data, &mc); err != nil {
-		return "", "", err
-	}
-
-	if len(mc.Services) == 0 {
-		return "app", "3000", nil
-	}
-
-	names := slices.Sorted(maps.Keys(mc.Services))
-	serviceName = names[0]
-	for _, n := range names {
-		if n == "app" || n == appName {
-			serviceName = n
-			break
-		}
-	}
-
-	svc := mc.Services[serviceName]
-	port = extractFirstPort(svc.Expose, svc.Ports)
-	if port == "" {
-		port = "3000"
-	}
-	return serviceName, port, nil
-}
-
-func extractFirstPort(expose, ports []any) string {
-	for _, v := range expose {
-		if p := portFromAny(v); p != "" {
-			return p
-		}
-	}
-	for _, v := range ports {
-		if p := portFromAny(v); p != "" {
-			return p
-		}
-	}
-	return ""
-}
-
-func portFromAny(v any) string {
-	switch val := v.(type) {
-	case string:
-		parts := strings.Split(val, ":")
-		return strings.TrimSpace(parts[len(parts)-1])
-	case int:
-		return fmt.Sprintf("%d", val)
-	case map[string]any:
-		if t, ok := val["target"]; ok {
-			return portFromAny(t)
-		}
-	}
-	return ""
-}
-
-func deepMerge(base, overlay map[string]any) map[string]any {
-	result := make(map[string]any, len(base))
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range overlay {
-		if bv, ok := result[k]; ok {
-			if bMap, ok := bv.(map[string]any); ok {
-				if oMap, ok := v.(map[string]any); ok {
-					result[k] = deepMerge(bMap, oMap)
-					continue
-				}
-			}
-		}
-		result[k] = v
-	}
-	return result
 }

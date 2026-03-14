@@ -37,7 +37,7 @@ var syncCmd = &cobra.Command{
 		repoDir := filepath.Join(dataDir, "repo")
 		if _, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil {
 			token := resolveToken()
-			if output, pullErr := githelper.PullFFOnly(token, repoDir); pullErr != nil {
+			if output, pullErr := githelper.PullFFOnly(ctx, token, repoDir); pullErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: git pull failed: %s\n", output)
 			}
 		}
@@ -269,13 +269,6 @@ func detectOrphans(ctx context.Context, cfg *config.Config) []string {
 		}
 	}
 	return orphans
-}
-
-// syncRunCmd runs a command in dir, ignoring output. Used for git pull.
-func syncRunCmd(ctx context.Context, dir, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	return cmd.Run()
 }
 
 // syncCmdOutput runs a command in dir and returns trimmed stdout.

@@ -15,6 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/secrets"
 )
@@ -87,7 +89,7 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 		m.Logger.Info("created repo symlink", "stack", stackName, "target", stackRepoPath)
 	}
 
-	if err := ensureCaddyNetwork(ctx); err != nil {
+	if err := caddy.EnsureNetwork(ctx, m.Logger); err != nil {
 		return fmt.Errorf("ensuring caddy network: %w", err)
 	}
 
@@ -257,18 +259,6 @@ func (m *StackManager) gitPull(ctx context.Context) error {
 	return runStreamCmd(ctx, m.Logger, repoDir, "git", "pull")
 }
 
-// ensureCaddyNetwork creates the caddy Docker network if it doesn't exist.
-func ensureCaddyNetwork(ctx context.Context) error {
-	if err := exec.CommandContext(ctx, "docker", "network", "inspect", "caddy").Run(); err == nil {
-		return nil
-	}
-	out, err := exec.CommandContext(ctx, "docker", "network", "create", "caddy").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker network create caddy: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
 // findComposeFile returns the first compose filename found in dir.
 func findComposeFile(dir string) (string, error) {
 	for _, name := range []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"} {
@@ -279,41 +269,16 @@ func findComposeFile(dir string) (string, error) {
 	return "", fmt.Errorf("no compose file found in %s", dir)
 }
 
-// --- Compose override generation ---
-
-type composeOverride struct {
-	Services map[string]serviceOverride `yaml:"services"`
-	Networks map[string]networkDef      `yaml:"networks,omitempty"`
-}
-
-type serviceOverride struct {
-	Labels   map[string]string `yaml:"labels,omitempty"`
-	Networks []string          `yaml:"networks,omitempty"`
-}
-
-type networkDef struct {
-	External bool `yaml:"external"`
-}
-
-type minimalCompose struct {
-	Services map[string]minimalService `yaml:"services"`
-}
-
-type minimalService struct {
-	Expose []any `yaml:"expose"`
-	Ports  []any `yaml:"ports"`
-}
-
 func (m *StackManager) generateOverride(deployDir, stackName string, stack config.Stack, composeFile string) error {
-	serviceName, port, err := detectServiceInfo(composeFile, stackName)
+	serviceName, port, err := compose.DetectServiceInfo(composeFile, stackName, "80")
 	if err != nil {
 		m.Logger.Warn("could not detect service info, using defaults", "stack", stackName, "error", err)
 		serviceName = "app"
 		port = "80"
 	}
 
-	override := composeOverride{
-		Services: map[string]serviceOverride{
+	override := compose.Override{
+		Services: map[string]compose.ServiceOverride{
 			serviceName: {
 				Labels: map[string]string{
 					"caddy":               stack.Domain,
@@ -322,7 +287,7 @@ func (m *StackManager) generateOverride(deployDir, stackName string, stack confi
 				Networks: []string{"caddy"},
 			},
 		},
-		Networks: map[string]networkDef{
+		Networks: map[string]compose.NetworkDef{
 			"caddy": {External: true},
 		},
 	}
@@ -333,66 +298,6 @@ func (m *StackManager) generateOverride(deployDir, stackName string, stack confi
 	}
 
 	return os.WriteFile(filepath.Join(deployDir, "compose.override.yml"), data, 0644)
-}
-
-func detectServiceInfo(composeFilePath, stackName string) (serviceName, port string, err error) {
-	data, err := os.ReadFile(composeFilePath)
-	if err != nil {
-		return "", "", err
-	}
-
-	var mc minimalCompose
-	if err := yaml.Unmarshal(data, &mc); err != nil {
-		return "", "", err
-	}
-
-	if len(mc.Services) == 0 {
-		return "app", "80", nil
-	}
-
-	names := slices.Sorted(maps.Keys(mc.Services))
-	serviceName = names[0]
-	for _, n := range names {
-		if n == "app" || n == stackName {
-			serviceName = n
-			break
-		}
-	}
-
-	port = extractFirstPort(mc.Services[serviceName])
-	if port == "" {
-		port = "80"
-	}
-	return serviceName, port, nil
-}
-
-func extractFirstPort(svc minimalService) string {
-	for _, v := range svc.Expose {
-		if p := portFromAny(v); p != "" {
-			return p
-		}
-	}
-	for _, v := range svc.Ports {
-		if p := portFromAny(v); p != "" {
-			return p
-		}
-	}
-	return ""
-}
-
-func portFromAny(v any) string {
-	switch val := v.(type) {
-	case string:
-		parts := strings.Split(val, ":")
-		return strings.TrimSpace(parts[len(parts)-1])
-	case int:
-		return fmt.Sprintf("%d", val)
-	case map[string]any:
-		if t, ok := val["target"]; ok {
-			return portFromAny(t)
-		}
-	}
-	return ""
 }
 
 // --- Streaming command runner ---

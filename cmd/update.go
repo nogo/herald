@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/nogo/herald/internal/secrets"
@@ -49,8 +48,7 @@ var updateCmd = &cobra.Command{
 
 		start := time.Now()
 		if err := mgr.Update(ctx, stackName); err != nil {
-			fmt.Fprintf(os.Stderr, "update %s: failed: %v\n", stackName, err)
-			os.Exit(1)
+			return fmt.Errorf("update %s: %w", stackName, err)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "update %s: success (%s)\n", stackName, time.Since(start).Round(time.Millisecond))

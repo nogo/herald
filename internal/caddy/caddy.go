@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/runner"
 )
 
 //go:embed compose.yml.tmpl
@@ -54,12 +55,17 @@ func (m *CaddyManager) composeFilePath() string {
 }
 
 // EnsureNetwork creates the caddy Docker network if it doesn't exist.
-func (m *CaddyManager) EnsureNetwork(ctx context.Context) error {
+func EnsureNetwork(ctx context.Context, logger *slog.Logger) error {
 	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", caddyNetwork)
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
-	return runCmd(ctx, m.Logger, "docker", "network", "create", caddyNetwork)
+	return runner.RunCmd(ctx, logger, "", "docker", "network", "create", caddyNetwork)
+}
+
+// EnsureNetwork is a method that delegates to the package-level EnsureNetwork function.
+func (m *CaddyManager) EnsureNetwork(ctx context.Context) error {
+	return EnsureNetwork(ctx, m.Logger)
 }
 
 // Start ensures the network exists, writes the compose file, and starts Caddy.
@@ -78,7 +84,7 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
 
-	err := runCmd(ctx, m.Logger, "docker", "compose", "-f", composePath, "-p", "herald-caddy", "up", "-d")
+	err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", "herald-caddy", "up", "-d")
 	if err != nil {
 		if strings.Contains(err.Error(), "address already in use") {
 			return fmt.Errorf("ports 80/443 are in use. Stop the existing proxy (nginx-proxy?) before starting Caddy")
@@ -94,17 +100,17 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		time.Sleep(2 * time.Second)
 	}
 
-	fmt.Printf("caddy started on :80/:443, ACME email: %s\n", m.Config.Server.AcmeEmail)
+	m.Logger.Info("caddy started", "ports", ":80/:443", "acme_email", m.Config.Server.AcmeEmail)
 	return nil
 }
 
 // Stop tears down the Caddy compose stack without removing the network or volumes.
 func (m *CaddyManager) Stop(ctx context.Context) error {
 	composePath := m.composeFilePath()
-	if err := runCmd(ctx, m.Logger, "docker", "compose", "-f", composePath, "-p", "herald-caddy", "down"); err != nil {
+	if err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", "herald-caddy", "down"); err != nil {
 		return err
 	}
-	fmt.Println("caddy stopped")
+	m.Logger.Info("caddy stopped")
 	return nil
 }
 
@@ -264,38 +270,6 @@ func getDockerGatewayIP() string {
 	}
 	// Fallback: typical Docker bridge gateway
 	return "172.17.0.1"
-}
-
-func runCmd(ctx context.Context, logger *slog.Logger, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-
-	for line := range strings.Lines(stdout.String()) {
-		line = strings.TrimRight(line, "\n\r")
-		if line != "" {
-			logger.Info(line, "cmd", name)
-		}
-	}
-	if stderr.Len() > 0 {
-		for line := range strings.Lines(stderr.String()) {
-			line = strings.TrimRight(line, "\n\r")
-			if line != "" {
-				logger.Warn(line, "cmd", name)
-			}
-		}
-	}
-	if runErr != nil {
-		stderrStr := strings.TrimSpace(stderr.String())
-		if stderrStr != "" {
-			return fmt.Errorf("%s: %w: %s", name, runErr, stderrStr)
-		}
-		return fmt.Errorf("%s: %w", name, runErr)
-	}
-	return nil
 }
 
 func runCmdOutput(ctx context.Context, name string, args ...string) (string, error) {

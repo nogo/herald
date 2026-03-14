@@ -2,6 +2,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,9 +12,9 @@ import (
 // CmdWithAuth creates a git command with token-based credential helper.
 // Keeps tokens out of URLs, process args, and .git/config.
 // Disables git hooks for security.
-func CmdWithAuth(token, dir string, args ...string) *exec.Cmd {
+func CmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
 	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
-	cmd := exec.Command("git", gitArgs...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -30,8 +31,8 @@ func CmdWithAuth(token, dir string, args ...string) *exec.Cmd {
 }
 
 // PullFFOnly runs git pull --ff-only in a directory with auth.
-func PullFFOnly(token, dir string) (string, error) {
-	cmd := CmdWithAuth(token, dir, "pull", "--ff-only")
+func PullFFOnly(ctx context.Context, token, dir string) (string, error) {
+	cmd := CmdWithAuth(ctx, token, dir, "pull", "--ff-only")
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -39,4 +40,34 @@ func PullFFOnly(token, dir string) (string, error) {
 // RepoURL returns the HTTPS clone URL for a GitHub repo.
 func RepoURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
+}
+
+// CloneOrFetch clones the repo if dir does not exist, or fetches and hard-resets to
+// origin/<branch> if it does. Uses token-based auth.
+func CloneOrFetch(ctx context.Context, token, dir, url, branch string) error {
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		cmd := CmdWithAuth(ctx, token, "", "clone",
+			"--branch", branch, "--single-branch", "--depth", "1",
+			url, dir,
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git clone: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat repo dir: %w", err)
+	}
+
+	fetchCmd := CmdWithAuth(ctx, token, dir, "fetch", "origin", branch)
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	resetCmd := CmdWithAuth(ctx, token, dir, "reset", "--hard", "origin/"+branch)
+	if out, err := resetCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

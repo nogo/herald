@@ -13,8 +13,7 @@ var uninstallCmd = &cobra.Command{
 	Short: "Remove the herald systemd service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getuid() != 0 {
-			fmt.Fprintln(os.Stderr, "Uninstalling systemd service requires root. Run: sudo herald uninstall")
-			os.Exit(1)
+			return fmt.Errorf("uninstalling systemd service requires root. Run: sudo herald uninstall")
 		}
 
 		if err := systemd.Uninstall(); err != nil {

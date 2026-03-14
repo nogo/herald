@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -162,7 +161,8 @@ var serveCmd = &cobra.Command{
 // GitHub full name (e.g. "nogo/srv2"), or "" if unavailable.
 func getIaCRepo(dataDir string) string {
 	repoDir := filepath.Join(dataDir, "repo")
-	out, err := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin").Output()
+	cmd := githelper.CmdWithAuth(context.Background(), "", repoDir, "remote", "get-url", "origin")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -193,7 +193,7 @@ func makeIaCPushHandler(mgr *stacks.StackManager) func() {
 		repoDir := filepath.Join(dataDir, "repo")
 		slog.Info("IaC push: pulling latest config")
 		token := resolveToken()
-		if output, err := githelper.PullFFOnly(token, repoDir); err != nil {
+		if output, err := githelper.PullFFOnly(ctx, token, repoDir); err != nil {
 			slog.Error("IaC push: git pull failed", "error", err, "output", output)
 			return
 		}

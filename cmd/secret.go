@@ -82,8 +82,7 @@ var secretGetCmd = &cobra.Command{
 		store := secrets.NewStore(dataDir)
 		val, err := store.Get(args[0])
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 		fmt.Fprint(cmd.OutOrStdout(), val)
 		return nil
@@ -139,8 +138,7 @@ var secretDeleteCmd = &cobra.Command{
 		key := args[0]
 		store := secrets.NewStore(dataDir)
 		if err := store.Delete(key); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "secret '%s' deleted\n", key)
 		return nil

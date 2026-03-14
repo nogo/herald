@@ -13,7 +13,6 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 		User:       "herald",
 		Group:      "herald",
 		StacksDir:  "/opt/deploy",
-		Port:       8080,
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -50,13 +49,12 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 
 func TestGenerateUnitFile_noTokenInUnitFile(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath:  "/usr/local/bin/herald",
-		ConfigPath:  "/etc/herald/config.yml",
-		DataDir:     "/etc/herald/",
-		User:        "deploy",
-		Group:       "deploy",
-		StacksDir:   "/opt/deploy",
-		GithubToken: "ghp_secret123",
+		BinaryPath: "/usr/local/bin/herald",
+		ConfigPath: "/etc/herald/config.yml",
+		DataDir:    "/etc/herald/",
+		User:       "deploy",
+		Group:      "deploy",
+		StacksDir:  "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 

@@ -27,6 +27,7 @@ var webhooksSyncCmd = &cobra.Command{
 	Short: "Register missing webhooks and remove stale ones",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		if Cfg.Server.GithubToken == "" {
 			return fmt.Errorf("GitHub token not configured. Run 'herald auth login' or set GITHUB_TOKEN environment variable")
 		}
@@ -73,6 +74,7 @@ var webhooksListCmd = &cobra.Command{
 	Short: "List webhook status for all repos in config",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		if Cfg.Server.GithubToken == "" {
 			return fmt.Errorf("GitHub token not configured. Run 'herald auth login' or set GITHUB_TOKEN environment variable")
 		}

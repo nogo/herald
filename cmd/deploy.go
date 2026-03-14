@@ -71,8 +71,7 @@ var deployCmd = &cobra.Command{
 		}
 
 		if err := d.Deploy(context.Background(), appName); err != nil {
-			fmt.Fprintf(os.Stderr, "deploy %s: failed: %v\n", appName, err)
-			os.Exit(1)
+			return fmt.Errorf("deploy %s: %w", appName, err)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "deploy %s: success\n", appName)

@@ -21,8 +21,7 @@ var installCmd = &cobra.Command{
 	Short: "Install herald as a systemd service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getuid() != 0 {
-			fmt.Fprintln(os.Stderr, "Installing systemd service requires root. Run: sudo herald install")
-			os.Exit(1)
+			return fmt.Errorf("installing systemd service requires root. Run: sudo herald install")
 		}
 
 		binaryPath, err := os.Executable()
@@ -40,8 +39,7 @@ var installCmd = &cobra.Command{
 
 		u, err := user.Lookup(installUser)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "User '%s' does not exist. Create it first: sudo useradd -r -s /bin/false -G docker herald\n", installUser)
-			os.Exit(1)
+			return fmt.Errorf("user %q does not exist. Create it first: sudo useradd -r -s /bin/false -G docker herald", installUser)
 		}
 
 		g, err := user.LookupGroupId(u.Gid)

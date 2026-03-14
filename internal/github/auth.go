@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-// Default OAuth App Client ID for Herald.
-// Users can override this by registering their own GitHub OAuth App
-// and setting the HERALD_GITHUB_CLIENT_ID env var.
-const DefaultClientID = ""
-
 // DeviceCodeResponse is returned by the device authorization endpoint.
 type DeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`

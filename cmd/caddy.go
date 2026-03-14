@@ -19,6 +19,7 @@ var caddyStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Caddy reverse proxy",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		heraldPort, _ := cmd.Flags().GetInt("herald-port")
 		m := &caddy.CaddyManager{
 			Config:     Cfg,
@@ -33,6 +34,7 @@ var caddyStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the Caddy reverse proxy",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		m := &caddy.CaddyManager{
 			Config: Cfg,
 			Logger: slog.Default(),
@@ -45,6 +47,7 @@ var caddyStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Caddy status and proxied domains",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		m := &caddy.CaddyManager{
 			Config: Cfg,
 			Logger: slog.Default(),
@@ -77,7 +80,7 @@ var caddyStatusCmd = &cobra.Command{
 }
 
 func init() {
-	caddyStartCmd.Flags().Int("herald-port", 8080, "Port where herald's webhook server is running")
+	caddyStartCmd.Flags().Int("herald-port", 9483, "Port where herald's webhook server is running")
 	caddyCmd.AddCommand(caddyStartCmd, caddyStopCmd, caddyStatusCmd)
 	rootCmd.AddCommand(caddyCmd)
 }
