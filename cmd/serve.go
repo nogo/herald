@@ -32,10 +32,12 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start webhook listener and deploy daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
 		store := secrets.NewStore(dataDir)
 		secret, err := store.Get("herald/webhook_secret")
 		if err != nil {
-			return fmt.Errorf("webhook secret not configured. Run: herald secret set herald/webhook_secret <your-secret>")
+			return fmt.Errorf("webhook secret not configured. Run: herald secret set herald/webhook_secret")
 		}
 
 		d := &deployer.Deployer{
