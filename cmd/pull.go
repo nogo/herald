@@ -3,11 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
+	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
+
+	githelper "github.com/nogo/herald/internal/git"
 )
 
 var pullCmd = &cobra.Command{
@@ -26,10 +27,10 @@ run herald sync.`,
 			return fmt.Errorf("no IaC repo at %s — run 'herald init' first", repoDir)
 		}
 
+		token := resolveToken()
+
 		fmt.Fprintln(os.Stdout, "Pulling IaC repo...")
-		pullCmd := exec.Command("git", "-C", repoDir, "pull", "--ff-only")
-		out, err := pullCmd.CombinedOutput()
-		output := strings.TrimSpace(string(out))
+		output, err := githelper.PullFFOnly(token, repoDir)
 
 		if err != nil {
 			return fmt.Errorf("git pull failed: %s", output)
@@ -44,6 +45,18 @@ run herald sync.`,
 
 		return nil
 	},
+}
+
+// resolveToken gets the GitHub token from config or secrets store.
+func resolveToken() string {
+	if Cfg != nil && Cfg.Server.GithubToken != "" {
+		return Cfg.Server.GithubToken
+	}
+	store := secrets.NewStore(dataDir)
+	if token, err := store.Get("herald/github_token"); err == nil && token != "" {
+		return token
+	}
+	return ""
 }
 
 func init() {

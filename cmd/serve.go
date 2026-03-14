@@ -17,6 +17,7 @@ import (
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/deployer"
+	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/stacks"
@@ -191,9 +192,9 @@ func makeIaCPushHandler(mgr *stacks.StackManager) func() {
 		// 1. Pull the latest IaC repo.
 		repoDir := filepath.Join(dataDir, "repo")
 		slog.Info("IaC push: pulling latest config")
-		pullCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "pull", "--ff-only")
-		if out, err := pullCmd.CombinedOutput(); err != nil {
-			slog.Error("IaC push: git pull failed", "error", err, "output", strings.TrimSpace(string(out)))
+		token := resolveToken()
+		if output, err := githelper.PullFFOnly(token, repoDir); err != nil {
+			slog.Error("IaC push: git pull failed", "error", err, "output", output)
 			return
 		}
 

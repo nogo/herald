@@ -15,6 +15,7 @@ import (
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
+	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/stacks"
@@ -35,8 +36,9 @@ var syncCmd = &cobra.Command{
 		// 1. Pull IaC repo.
 		repoDir := filepath.Join(dataDir, "repo")
 		if _, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil {
-			if pullErr := syncRunCmd(ctx, repoDir, "git", "pull"); pullErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: git pull failed: %v\n", pullErr)
+			token := resolveToken()
+			if output, pullErr := githelper.PullFFOnly(token, repoDir); pullErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: git pull failed: %s\n", output)
 			}
 		}
 
