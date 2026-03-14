@@ -1,0 +1,11 @@
+All tests pass. Here's what was implemented:
+
+**New files:**
+- `internal/systemd/service.go` — `GenerateUnitFile` (pure function, easy to test), `Install` (writes unit + env file, daemon-reload), `Enable`, `Start`, `Uninstall`, `IsInstalled`
+- `internal/systemd/service_test.go` — 6 tests covering unit file structure, GITHUB_TOKEN inclusion/exclusion, DataDir cleaning, custom StacksDir
+- `cmd/install.go` — `herald install [--user] [--start] [--enable]`: checks root, validates user exists, warns if not in docker group, writes service, enables/starts per flags, prints status summary
+- `cmd/uninstall.go` — `herald uninstall`: checks root, stops/disables/removes service, prints data-preservation notice
+
+**Modified files:**
+- `cmd/root.go` — added `install` and `uninstall` to `skipConfigCommands` (no config needed to install/uninstall)
+- `cmd/serve.go` — replaced `ListenAndServe` with `net.Listen` + `Serve` so `"herald ready, listening on :<port>"` logs only after the port is actually bound

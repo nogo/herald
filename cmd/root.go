@@ -19,8 +19,10 @@ var (
 
 // skipConfigCommands are commands that run without a config file.
 var skipConfigCommands = map[string]bool{
-	"version": true,
-	"init":    true,
+	"version":   true,
+	"init":      true,
+	"install":   true,
+	"uninstall": true,
 }
 
 var rootCmd = &cobra.Command{
