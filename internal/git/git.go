@@ -13,7 +13,10 @@ import (
 // Keeps tokens out of URLs, process args, and .git/config.
 // Disables git hooks for security.
 func CmdWithAuth(ctx context.Context, token, dir string, args ...string) *exec.Cmd {
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	gitArgs := append([]string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "safe.directory=*",
+	}, args...)
 	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	if dir != "" {
 		cmd.Dir = dir
