@@ -458,6 +458,18 @@ cp /tmp/herald /usr/local/bin/herald
 systemctl restart herald
 ```
 
+## Why port 9483?
+
+Port numbers are derived from letter shapes in the project name:
+
+```
+Herald:      H≈9  E≈4  R≈8  A≈3  →  9483
+Knotenpunkt: K≈9  P≈4  U≈7  N≈0  →  9470
+Forge:       F≈9  O≈4  R≈6  G≈3  →  9463
+```
+
+Unregistered, above 1024, consistent across the toolchain.
+
 ## Requirements
 
 - Go 1.26+ (build only)
