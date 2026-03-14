@@ -8,6 +8,7 @@ import (
 
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var secretCmd = &cobra.Command{
@@ -20,13 +21,16 @@ var secretCmd = &cobra.Command{
 
 var secretSetCmd = &cobra.Command{
 	Use:   "set <key> [value]",
-	Short: "Set a secret (reads from stdin if value omitted)",
+	Short: "Set a secret (prompts interactively if value omitted)",
 	Long: `Set a secret in the encrypted store.
 
 If value is provided as an argument, it will be used directly.
 WARNING: CLI arguments are visible in process listings.
 
-For sensitive values, pipe from stdin instead:
+Preferred usage (interactive prompt, input hidden):
+  herald secret set mykey
+
+Pipe from stdin:
   echo "my-secret" | herald secret set mykey
   herald secret set mykey < /path/to/secret-file`,
 	Args: cobra.RangeArgs(1, 2),
@@ -35,8 +39,20 @@ For sensitive values, pipe from stdin instead:
 		var value string
 		if len(args) == 2 {
 			value = args[1]
+		} else if term.IsTerminal(int(os.Stdin.Fd())) {
+			// Interactive: prompt with hidden input
+			fmt.Fprintf(cmd.OutOrStdout(), "Enter value for '%s': ", key)
+			pass, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(cmd.OutOrStdout()) // newline after hidden input
+			if err != nil {
+				return fmt.Errorf("reading input: %w", err)
+			}
+			value = string(pass)
+			if value == "" {
+				return fmt.Errorf("no value provided")
+			}
 		} else {
-			// Read from stdin
+			// Piped stdin
 			data, err := io.ReadAll(cmd.InOrStdin())
 			if err != nil {
 				return fmt.Errorf("reading from stdin: %w", err)
