@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/nogo/herald/internal/github"
 	bootstrap "github.com/nogo/herald/internal/init"
+	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
 var (
 	initGitHubToken string
+	initClientID    string
 	initDataDir     string
 	initStacksDir   string
 )
@@ -23,11 +26,13 @@ var initCmd = &cobra.Command{
 		cmd.SilenceUsage = true
 
 		serverRepo := args[0]
-		if initGitHubToken == "" {
-			initGitHubToken = os.Getenv("GITHUB_TOKEN")
-		}
-
 		ctx := context.Background()
+
+		// Resolve GitHub token: flag > env > secrets store > device flow
+		token, err := resolveGitHubToken(ctx, initGitHubToken, initClientID, initDataDir)
+		if err != nil {
+			return err
+		}
 
 		if err := bootstrap.CheckPrerequisites(ctx, os.Stdout, initDataDir); err != nil {
 			return fmt.Errorf("prerequisite check failed: %w", err)
@@ -35,7 +40,7 @@ var initCmd = &cobra.Command{
 
 		opts := bootstrap.Options{
 			ServerRepo:  serverRepo,
-			GitHubToken: initGitHubToken,
+			GitHubToken: token,
 			DataDir:     initDataDir,
 			StacksDir:   initStacksDir,
 			HeraldPort:  8080,
@@ -49,9 +54,59 @@ var initCmd = &cobra.Command{
 	},
 }
 
+// resolveGitHubToken tries multiple sources for a GitHub token:
+//  1. --github-token flag
+//  2. GITHUB_TOKEN env var
+//  3. Secrets store (from a previous herald auth login)
+//  4. OAuth Device Flow (interactive)
+func resolveGitHubToken(ctx context.Context, flagToken, clientID, dDir string) (string, error) {
+	// 1. Explicit flag
+	if flagToken != "" {
+		return flagToken, nil
+	}
+
+	// 2. Environment variable
+	if env := os.Getenv("GITHUB_TOKEN"); env != "" {
+		return env, nil
+	}
+
+	// 3. Secrets store (from previous auth login)
+	store := secrets.NewStore(dDir)
+	if stored, err := store.Get("herald/github_token"); err == nil && stored != "" {
+		user, err := github.GetUser(ctx, stored)
+		if err == nil {
+			fmt.Fprintf(os.Stdout, "Using stored GitHub token (authenticated as %s)\n", user)
+			return stored, nil
+		}
+		fmt.Fprintln(os.Stdout, "Stored GitHub token is invalid or expired.")
+	}
+
+	// 4. Device flow
+	if clientID == "" {
+		clientID = os.Getenv("HERALD_GITHUB_CLIENT_ID")
+	}
+	if clientID != "" {
+		fmt.Fprintln(os.Stdout, "No GitHub token found. Starting device flow authentication...")
+		token, err := github.DeviceFlowAuth(ctx, os.Stdout, clientID)
+		if err != nil {
+			return "", fmt.Errorf("device flow auth: %w", err)
+		}
+		if err := store.Init(); err == nil {
+			_ = store.Set("herald/github_token", token)
+		}
+		return token, nil
+	}
+
+	return "", fmt.Errorf("GitHub token required. Provide one of:\n" +
+		"  --github-token <token>\n" +
+		"  GITHUB_TOKEN environment variable\n" +
+		"  herald auth login (interactive device flow)")
+}
+
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initGitHubToken, "github-token", "", "GitHub personal access token (or set GITHUB_TOKEN)")
+	initCmd.Flags().StringVar(&initClientID, "client-id", "", "GitHub OAuth App Client ID for device flow (or set HERALD_GITHUB_CLIENT_ID)")
 	initCmd.Flags().StringVar(&initDataDir, "data-dir", "/etc/herald", "Herald data directory")
 	initCmd.Flags().StringVar(&initStacksDir, "stacks-dir", "", "Override stacks directory (default from config)")
 }
