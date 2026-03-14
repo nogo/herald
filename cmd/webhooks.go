@@ -28,8 +28,7 @@ var webhooksSyncCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if Cfg.Server.GithubToken == "" {
-			fmt.Fprintln(os.Stderr, "GitHub token not configured. Set GITHUB_TOKEN environment variable.")
-			os.Exit(1)
+			return fmt.Errorf("GitHub token not configured. Run 'herald auth login' or set GITHUB_TOKEN environment variable")
 		}
 
 		store := secrets.NewStore(dataDir)
@@ -75,8 +74,7 @@ var webhooksListCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if Cfg.Server.GithubToken == "" {
-			fmt.Fprintln(os.Stderr, "GitHub token not configured. Set GITHUB_TOKEN environment variable.")
-			os.Exit(1)
+			return fmt.Errorf("GitHub token not configured. Run 'herald auth login' or set GITHUB_TOKEN environment variable")
 		}
 
 		client := github.NewGitHubClient(Cfg.Server.GithubToken, slog.Default())

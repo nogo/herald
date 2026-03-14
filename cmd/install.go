@@ -51,8 +51,9 @@ var installCmd = &cobra.Command{
 		warnDockerGroup(u, installUser)
 
 		stacksDir := "/opt/deploy"
-		if Cfg != nil && Cfg.Server.StacksDir != "" {
-			stacksDir = Cfg.Server.StacksDir
+		// Try loading config for stacks_dir (optional — install works without config)
+		if cfg, err := LoadConfigWithToken(cfgFile, dataDir); err == nil && cfg.Server.StacksDir != "" {
+			stacksDir = cfg.Server.StacksDir
 		}
 
 		cfg := systemd.ServiceConfig{

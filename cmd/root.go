@@ -56,23 +56,30 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		cfg, err := config.Load(cfgFile)
+		cfg, err := LoadConfigWithToken(cfgFile, dataDir)
 		if err != nil {
 			return err
 		}
-
-		// If GitHub token is empty after config load (env var not set),
-		// try reading from the secrets store (set by herald auth login).
-		if cfg.Server.GithubToken == "" {
-			store := secrets.NewStore(dataDir)
-			if token, err := store.Get("herald/github_token"); err == nil && token != "" {
-				cfg.Server.GithubToken = token
-			}
-		}
-
 		Cfg = cfg
 		return nil
 	},
+}
+
+// LoadConfigWithToken loads the config file and applies the secrets store
+// token fallback. Use this instead of config.Load directly to ensure the
+// GitHub token from herald auth login is always available.
+func LoadConfigWithToken(cfgPath, dDir string) (*config.Config, error) {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Server.GithubToken == "" {
+		store := secrets.NewStore(dDir)
+		if token, err := store.Get("herald/github_token"); err == nil && token != "" {
+			cfg.Server.GithubToken = token
+		}
+	}
+	return cfg, nil
 }
 
 func Execute() {
@@ -84,5 +91,5 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "/etc/herald/config.yml", "Path to config file")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "/etc/herald/", "Directory for age key and secrets file")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "/etc/herald", "Directory for age key and secrets file")
 }

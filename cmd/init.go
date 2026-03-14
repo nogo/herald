@@ -14,7 +14,6 @@ import (
 var (
 	initGitHubToken string
 	initClientID    string
-	initDataDir     string
 	initStacksDir   string
 )
 
@@ -29,19 +28,19 @@ var initCmd = &cobra.Command{
 		ctx := context.Background()
 
 		// Resolve GitHub token: flag > env > secrets store > device flow
-		token, err := resolveGitHubToken(ctx, initGitHubToken, initClientID, initDataDir)
+		token, err := resolveGitHubToken(ctx, initGitHubToken, initClientID, dataDir)
 		if err != nil {
 			return err
 		}
 
-		if err := bootstrap.CheckPrerequisites(ctx, os.Stdout, initDataDir); err != nil {
+		if err := bootstrap.CheckPrerequisites(ctx, os.Stdout, dataDir); err != nil {
 			return fmt.Errorf("prerequisite check failed: %w", err)
 		}
 
 		opts := bootstrap.Options{
 			ServerRepo:  serverRepo,
 			GitHubToken: token,
-			DataDir:     initDataDir,
+			DataDir:     dataDir,
 			StacksDir:   initStacksDir,
 			HeraldPort:  8080,
 		}
@@ -107,6 +106,5 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initGitHubToken, "github-token", "", "GitHub personal access token (or set GITHUB_TOKEN)")
 	initCmd.Flags().StringVar(&initClientID, "client-id", "", "GitHub OAuth App Client ID for device flow (or set HERALD_GITHUB_CLIENT_ID)")
-	initCmd.Flags().StringVar(&initDataDir, "data-dir", "/etc/herald", "Herald data directory")
 	initCmd.Flags().StringVar(&initStacksDir, "stacks-dir", "", "Override stacks directory (default from config)")
 }

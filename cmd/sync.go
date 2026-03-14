@@ -40,8 +40,8 @@ var syncCmd = &cobra.Command{
 			}
 		}
 
-		// 2. Reload config.
-		cfg, err := config.Load(cfgFile)
+		// 2. Reload config (with secrets store token fallback).
+		cfg, err := LoadConfigWithToken(cfgFile, dataDir)
 		if err != nil {
 			return fmt.Errorf("reloading config: %w", err)
 		}

@@ -11,11 +11,6 @@ import (
 var secretCmd = &cobra.Command{
 	Use:   "secret",
 	Short: "Manage encrypted secrets",
-	// Override root's PersistentPreRunE so secret subcommands don't require a
-	// config file.
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
