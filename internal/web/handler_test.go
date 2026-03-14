@@ -188,7 +188,7 @@ func TestCachedStatus_TTL(t *testing.T) {
 	// Simulate populated cache.
 	s := &status.ServerStatus{ServerName: "cached"}
 	c.data = s
-	c.fetched = c.fetched // zero time — TTL of 5ns means it's expired immediately
+	// fetched is zero time — TTL of 5ns means it's expired immediately
 	// With ttl=5ns and zero fetched time, it's expired: re-collect would happen.
 	// Just verify the struct is accessible.
 	if c.ttl != 5 {

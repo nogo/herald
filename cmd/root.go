@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +26,24 @@ var skipConfigCommands = map[string]bool{
 	"uninstall": true,
 }
 
+// shouldSkipConfig returns true if the command doesn't need a config file.
+func shouldSkipConfig(cmd *cobra.Command) bool {
+	if skipConfigCommands[cmd.Name()] {
+		return true
+	}
+	for p := cmd; p != nil; p = p.Parent() {
+		if p.Name() == "auth" || p.Name() == "secret" {
+			return true
+		}
+	}
+	return false
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "herald",
 	Short: "herald — deploy daemon for self-hosted infrastructure",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if skipConfigCommands[cmd.Name()] {
+		if shouldSkipConfig(cmd) {
 			return nil
 		}
 
@@ -46,6 +60,16 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		// If GitHub token is empty after config load (env var not set),
+		// try reading from the secrets store (set by herald auth login).
+		if cfg.Server.GithubToken == "" {
+			store := secrets.NewStore(dataDir)
+			if token, err := store.Get("herald/github_token"); err == nil && token != "" {
+				cfg.Server.GithubToken = token
+			}
+		}
+
 		Cfg = cfg
 		return nil
 	},
