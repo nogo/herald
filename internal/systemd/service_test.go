@@ -32,7 +32,7 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 		"EnvironmentFile=-/etc/herald/environment",
 		"NoNewPrivileges=true",
 		"ProtectSystem=strict",
-		"ProtectHome=true",
+		"ProtectHome=tmpfs",
 		"ReadWritePaths=/etc/herald /opt/deploy /var/run/docker.sock",
 		"PrivateTmp=true",
 		"StandardOutput=journal",

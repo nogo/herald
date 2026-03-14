@@ -51,7 +51,7 @@ EnvironmentFile=-/etc/herald/environment
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=tmpfs
 ReadWritePaths={{.DataDir}} {{.StacksDir}} /var/run/docker.sock
 PrivateTmp=true
 
