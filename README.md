@@ -93,12 +93,12 @@ herald serve                Start webhook listener
 herald status               Show services, domains, health
 herald deploy <app>         Deploy an app
 herald update <stack>       Run update script for a stack
+herald sync                 Pull IaC repo + reconcile config + sync webhooks
 herald secret set <key>     Set a secret (interactive prompt)
 herald secret list          List secret keys
 herald webhooks sync        Register GitHub webhooks
 herald caddy start|stop     Manage reverse proxy
 herald preview list         Show preview deployments
-herald sync                 Reconcile config with running state
 herald auth login           Authenticate with GitHub
 herald version              Print version
 ```

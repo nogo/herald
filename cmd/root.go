@@ -82,6 +82,18 @@ func LoadConfigWithToken(cfgPath, dDir string) (*config.Config, error) {
 	return cfg, nil
 }
 
+// resolveToken gets the GitHub token from config or secrets store.
+func resolveToken() string {
+	if Cfg != nil && Cfg.Server.GithubToken != "" {
+		return Cfg.Server.GithubToken
+	}
+	store := secrets.NewStore(dataDir)
+	if token, err := store.Get("herald/github_token"); err == nil && token != "" {
+		return token
+	}
+	return ""
+}
+
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
