@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 
 	"github.com/nogo/herald/internal/systemd"
 	"github.com/spf13/cobra"
@@ -50,15 +51,24 @@ var installCmd = &cobra.Command{
 
 		warnDockerGroup(u, installUser)
 
+		// Resolve config path: use auto-detected repo config if --config wasn't explicit
+		configPath := cfgFile
+		if !cmd.Flags().Changed("config") {
+			autoPath := filepath.Join(filepath.Clean(dataDir), "repo", "config.yml")
+			if _, err := os.Stat(autoPath); err == nil {
+				configPath = autoPath
+			}
+		}
+
 		stacksDir := "/opt/deploy"
 		// Try loading config for stacks_dir (optional — install works without config)
-		if cfg, err := LoadConfigWithToken(cfgFile, dataDir); err == nil && cfg.Server.StacksDir != "" {
-			stacksDir = cfg.Server.StacksDir
+		if loadedCfg, err := LoadConfigWithToken(configPath, dataDir); err == nil && loadedCfg.Server.StacksDir != "" {
+			stacksDir = loadedCfg.Server.StacksDir
 		}
 
 		cfg := systemd.ServiceConfig{
 			BinaryPath: binaryPath,
-			ConfigPath: cfgFile,
+			ConfigPath: configPath,
 			DataDir:    dataDir,
 			User:       installUser,
 			Group:      g.Name,
