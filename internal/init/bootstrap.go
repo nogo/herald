@@ -152,7 +152,7 @@ func checkDataDir(dataDir string) error {
 // Bootstrap runs the full server initialisation sequence.
 func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if opts.HeraldPort == 0 {
-		opts.HeraldPort = 8080
+		opts.HeraldPort = 9483
 	}
 
 	// Step 1: Clone server IaC repo
@@ -173,6 +173,10 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	}
 	if opts.StacksDir != "" {
 		cfg.Server.StacksDir = opts.StacksDir
+	}
+	// Use port from config if not explicitly set via CLI.
+	if cfg.Server.Port > 0 {
+		opts.HeraldPort = cfg.Server.Port
 	}
 	fmt.Fprintf(w, "  ✓ Config loaded: %d app%s, %d stack%s\n",
 		len(cfg.Apps), plural(len(cfg.Apps)),

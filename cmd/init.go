@@ -42,7 +42,7 @@ var initCmd = &cobra.Command{
 			GitHubToken: token,
 			DataDir:     dataDir,
 			StacksDir:   initStacksDir,
-			HeraldPort:  8080,
+			HeraldPort:  0, // resolved from config in Bootstrap
 		}
 
 		if err := bootstrap.Bootstrap(ctx, os.Stdout, opts); err != nil {
