@@ -16,7 +16,8 @@ type Pusher struct {
 type PushPayload struct {
 	Ref        string     `json:"ref"`        // "refs/heads/main"
 	Before     string     `json:"before"`
-	After      string     `json:"after"` // commit SHA
+	After      string     `json:"after"`   // commit SHA; all zeros on branch deletion
+	Deleted    bool       `json:"deleted"` // true when a branch is deleted
 	Repository Repository `json:"repository"`
 	Pusher     Pusher     `json:"pusher"`
 }

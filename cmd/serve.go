@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nogo/herald/internal/deployer"
+	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/stacks"
 	"github.com/nogo/herald/internal/webhook"
@@ -46,6 +47,13 @@ var serveCmd = &cobra.Command{
 			Logger:  slog.Default(),
 		}
 
+		previewMgr := &preview.PreviewManager{
+			Config:  Cfg,
+			Secrets: store,
+			DataDir: dataDir,
+			Logger:  slog.Default(),
+		}
+
 		srv := &webhook.Server{
 			Config:  Cfg,
 			Secret:  secret,
@@ -55,6 +63,20 @@ var serveCmd = &cobra.Command{
 			},
 			IaCRepo:   getIaCRepo(dataDir),
 			OnIaCPush: makeIaCPushHandler(stackMgr),
+			OnPreviewDeploy: func(appName, branch, commit string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				if err := previewMgr.Deploy(ctx, appName, branch, commit); err != nil {
+					slog.Error("preview deploy failed", "app", appName, "branch", branch, "error", err)
+				}
+			},
+			OnPreviewTeardown: func(appName, branch string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				if err := previewMgr.Teardown(ctx, appName, branch); err != nil {
+					slog.Error("preview teardown failed", "app", appName, "branch", branch, "error", err)
+				}
+			},
 		}
 
 		addr := fmt.Sprintf(":%d", port)

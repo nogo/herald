@@ -29,12 +29,14 @@ type DeployRequest struct {
 
 // Server is the webhook HTTP server.
 type Server struct {
-	Config    *config.Config
-	Secret    string
-	Verbose   bool
-	OnDeploy  func(DeployRequest) // called for each matched app; must be non-nil
-	IaCRepo   string              // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
-	OnIaCPush func()              // called when a push to IaCRepo is received; may be nil
+	Config            *config.Config
+	Secret            string
+	Verbose           bool
+	OnDeploy          func(DeployRequest)          // called for each matched app; must be non-nil
+	IaCRepo           string                       // GitHub full name of the server IaC repo, e.g. "nogo/srv2"
+	OnIaCPush         func()                       // called when a push to IaCRepo is received; may be nil
+	OnPreviewDeploy   func(appName, branch, commit string) // called for preview-enabled apps on non-default branches
+	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
 }
 
 // Handler returns the configured ServeMux.
@@ -77,6 +79,8 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var repo, branch, commit, cloneURL string
+	var isDelete bool   // true when a push event deletes a branch
+	var prAction string // pull_request action: "opened", "closed", "synchronize"
 
 	switch eventType {
 	case "push":
@@ -90,6 +94,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		branch = strings.TrimPrefix(p.Ref, "refs/heads/")
 		commit = p.After
 		cloneURL = p.Repository.CloneURL
+		isDelete = p.Deleted || strings.HasPrefix(p.After, "000000")
 
 	case "pull_request":
 		var p PullRequestPayload
@@ -102,6 +107,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		branch = p.PullRequest.Head.Ref
 		commit = p.PullRequest.Head.SHA
 		cloneURL = p.Repository.CloneURL
+		prAction = p.Action
 
 	default:
 		slog.Info("webhook", "event", eventType, "result", "event ignored")
@@ -131,9 +137,16 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		go s.OnIaCPush()
 	}
 
+	// Trigger preview deploy/teardown for preview-enabled apps.
+	previewTriggered := s.handlePreviewEvent(repo, branch, commit, eventType, isDelete, prAction)
+
 	if len(matchedNames) == 0 {
 		if iacPush {
 			writeJSON(w, http.StatusOK, map[string]string{"message": "accepted: IaC repo push"})
+			return
+		}
+		if previewTriggered {
+			writeJSON(w, http.StatusOK, map[string]string{"message": "accepted: preview"})
 			return
 		}
 		slog.Info("webhook",
@@ -172,6 +185,52 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"message": "accepted",
 		"apps":    matchedNames,
 	})
+}
+
+// handlePreviewEvent dispatches preview deploy or teardown for preview-enabled apps.
+// Returns true if any preview action was triggered.
+func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDelete bool, prAction string) bool {
+	if s.OnPreviewDeploy == nil && s.OnPreviewTeardown == nil {
+		return false
+	}
+	triggered := false
+	for name, app := range s.Config.Apps {
+		if app.Preview == nil || !app.Preview.Enabled || app.Repo != repo {
+			continue
+		}
+		switch eventType {
+		case "push":
+			if branch == app.Branch {
+				// Default branch push → production deploy, not a preview.
+				continue
+			}
+			if isDelete {
+				if s.OnPreviewTeardown != nil {
+					triggered = true
+					go s.OnPreviewTeardown(name, branch)
+				}
+			} else {
+				if s.OnPreviewDeploy != nil {
+					triggered = true
+					go s.OnPreviewDeploy(name, branch, commit)
+				}
+			}
+		case "pull_request":
+			switch prAction {
+			case "opened", "synchronize":
+				if s.OnPreviewDeploy != nil {
+					triggered = true
+					go s.OnPreviewDeploy(name, branch, commit)
+				}
+			case "closed":
+				if s.OnPreviewTeardown != nil {
+					triggered = true
+					go s.OnPreviewTeardown(name, branch)
+				}
+			}
+		}
+	}
+	return triggered
 }
 
 func (s *Server) verifySignature(body []byte, sigHeader string) bool {
