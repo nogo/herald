@@ -197,3 +197,44 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:16:39  (3m 1s)
   Status:   ✓ OK
+  Commit:   ✓ a79a421  wu-04: Add webhook HTTP server
+  Changes:   12 files changed, 610 insertions(+), 2 deletions(-)
+  Moved:    → .forge/done/wu-04.md
+  ─────────────────────────────────────────────────────
+
+
+wu-05: Add Docker Compose deploy integration
+model: sonnet
+
+  Prompt:  194 lines  (9190 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-05.log
+
+  Started: 2026-03-14 17:16:39
+
+  [17:16:45]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" |…
+  [17:16:48]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:16:49]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go"}
+  [17:16:49]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server.go"…
+  [17:16:50]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go"}
+  [17:16:50]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:16:53]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:16:53]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:21:21]  💬 Let me read the remaining cmd files to understand patterns before implementing.
+  [17:21:21]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/secret.go"}
+  [17:21:25]  💬 Good, I have everything I need. Let me implement all four files now.
+  [17:22:12]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer.…
+  [17:22:34]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/deployer/deployer_…
+  [17:22:41]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/deploy.go","content":"p…
+  [17:22:50]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go","content":"pa…
+  [17:22:54]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:22:58]  ⚙  Bash  {"command":"go test ./internal/deployer/... -v 2>&1","description":"Run deployer…
+  [17:23:12]  💬 All 10 tests pass. Here's a summary of what was implemented:
+
+**`internal/deployer/deployer.go`** — core deploy logic:
+-
+
+  [17:23:12]  ✅ Done — tokens: 13 in / 29357 out | cost: $0.8054163000000001
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:23:13  (6m 34s)
+  Status:   ✓ OK

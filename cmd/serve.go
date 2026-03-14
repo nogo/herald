@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/webhook"
 	"github.com/spf13/cobra"
@@ -28,17 +29,18 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("webhook secret not configured. Run: herald secret set herald/webhook_secret <your-secret>")
 		}
 
+		d := &deployer.Deployer{
+			Config:  Cfg,
+			Secrets: store,
+			Logger:  slog.Default(),
+		}
+
 		srv := &webhook.Server{
 			Config:  Cfg,
 			Secret:  secret,
 			Verbose: verbose,
 			OnDeploy: func(req webhook.DeployRequest) {
-				slog.Info("deploy queued",
-					"app", req.AppName,
-					"repo", req.Repo,
-					"branch", req.Branch,
-					"commit", req.Commit,
-				)
+				d.DeployAsync(req.AppName)
 			},
 		}
 
@@ -73,6 +75,7 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("server shutdown: %w", err)
 		}
 
+		d.Wait()
 		slog.Info("herald server stopped")
 		return nil
 	},
