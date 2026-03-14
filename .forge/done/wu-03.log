@@ -1,9 +1,0 @@
-Everything works. Here's a summary of what was created/modified:
-
-**Created:**
-- `internal/secrets/store.go` — `Store` with `Init`, `Set`, `Get`, `List`, `Delete`, `Import`, `Resolve`. JSON map encrypted with age, atomic writes via temp-file rename, exclusive `flock` for concurrent-write safety, 0600 permissions on both key and secrets files.
-- `internal/secrets/store_test.go` — 19 tests covering key generation, permission fixing, CRUD, special characters, wrong-key error messages, concurrent writes, and file permissions.
-
-**Modified:**
-- `cmd/root.go` — added `dataDir` variable and `--data-dir` persistent flag (default `/etc/herald/`).
-- `cmd/secret.go` — replaced all stubs with real implementations; added `secret delete`; set `PersistentPreRunE: noop` on `secretCmd` so secret subcommands don't require a config file.

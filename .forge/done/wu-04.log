@@ -1,9 +1,0 @@
-All 10 tests pass. Here's what was created/modified:
-
-**`internal/webhook/payload.go`** — GitHub payload types: `PushPayload`, `PullRequestPayload`, `PullRequest`, `PRRef`, `Repository`, `Pusher`.
-
-**`internal/webhook/server.go`** — `Server` struct with `Config`, `Secret`, `Verbose`, `OnDeploy`. Routes via Go 1.22 method-pattern mux (`POST /webhook`, `GET /health`). HMAC-SHA256 verification using constant-time `hmac.Equal`. Repo+branch matching across all apps. Async deploy dispatch via goroutines. 10 MB body limit. Structured slog logging.
-
-**`internal/webhook/server_test.go`** — 10 tests covering: health check, missing signature, wrong signature, valid push with 2 matching apps, push with no match, ping, unknown event, malformed JSON → 400, wrong-secret HMAC rejection, deploy callback fired for each matched app.
-
-**`cmd/serve.go`** — Loads webhook secret at startup (exits with helpful message if missing), builds `Server`, starts `http.Server` on `--port` (default 8080), graceful shutdown on SIGINT/SIGTERM via `signal.NotifyContext` + `context.Cause`.

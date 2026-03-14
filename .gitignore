@@ -1,0 +1,36 @@
+# Binary
+herald
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.exe
+*.test
+*.out
+*.prof
+coverage.txt
+
+# Secrets (never commit)
+*.age
+age.key
+.env
+.env.*
+
+# Forge runner logs (large)
+.forge/runner.log
+.forge/wu/*.jsonl
+.forge/wu/*.log
+.forge/wu/*.stderr.log
+.forge/done/*.jsonl
+.forge/done/*.log
+.forge/done/*.stderr.log
