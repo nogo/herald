@@ -181,13 +181,33 @@ func parseGitHubRepo(rawURL string) string {
 	return ""
 }
 
-// makeIaCPushHandler returns a function that triggers auto-deploy for stacks
-// with auto_deploy: true, and logs the rest.
+// makeIaCPushHandler returns a function that pulls the IaC repo, reloads config,
+// and triggers auto-deploy for stacks with auto_deploy: true.
 func makeIaCPushHandler(mgr *stacks.StackManager) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
+		// 1. Pull the latest IaC repo.
+		repoDir := filepath.Join(dataDir, "repo")
+		slog.Info("IaC push: pulling latest config")
+		pullCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "pull", "--ff-only")
+		if out, err := pullCmd.CombinedOutput(); err != nil {
+			slog.Error("IaC push: git pull failed", "error", err, "output", strings.TrimSpace(string(out)))
+			return
+		}
+
+		// 2. Reload config.
+		newCfg, err := LoadConfigWithToken(cfgFile, dataDir)
+		if err != nil {
+			slog.Error("IaC push: config reload failed", "error", err)
+			return
+		}
+		Cfg = newCfg
+		mgr.Config = newCfg
+		slog.Info("IaC push: config reloaded")
+
+		// 3. Auto-deploy stacks.
 		for _, info := range mgr.List() {
 			if info.AutoDeploy {
 				slog.Info("IaC push: auto-deploying stack", "stack", info.Name)
