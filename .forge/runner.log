@@ -158,3 +158,42 @@ model: sonnet
   ─────────────────────────────────────────────────────
   Finished: 2026-03-14 17:13:38  (3m 42s)
   Status:   ✓ OK
+  Commit:   ✓ 90385e8  wu-03: Add age-encrypted secrets store
+  Changes:   14 files changed, 828 insertions(+), 13 deletions(-)
+  Moved:    → .forge/done/wu-03.md
+  ─────────────────────────────────────────────────────
+
+
+wu-04: Add webhook HTTP server
+model: sonnet
+
+  Prompt:  219 lines  (9538 bytes)
+  Log:     /home/nogo/Development/projects/deploy/.forge/wu/wu-04.log
+
+  Started: 2026-03-14 17:13:38
+
+  [17:13:44]  ⚙  Bash  {"command":"find /home/nogo/Development/projects/deploy -type f -name \"*.go\" |…
+  [17:13:48]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go"}
+  [17:13:49]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/cmd/root.go"}
+  [17:13:49]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/config.go"}
+  [17:13:49]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/secrets/store.go"}
+  [17:13:55]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/go.mod"}
+  [17:13:56]  ⚙  Glob  {"pattern":"/home/nogo/Development/projects/deploy/internal/**/*"}
+  [17:13:59]  ⚙  Read  {"file_path":"/home/nogo/Development/projects/deploy/internal/config/testdata/va…
+  [17:15:25]  💬 Now I have full context. Let me implement the four files.
+  [17:15:26]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/payload.go…
+  [17:15:42]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server.go"…
+  [17:16:13]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/internal/webhook/server_tes…
+  [17:16:15]  💬 Now replace `cmd/serve.go`:
+  [17:16:23]  ⚙  Write  {"file_path":"/home/nogo/Development/projects/deploy/cmd/serve.go","content":"pa…
+  [17:16:25]  ⚙  Bash  {"command":"go build ./... 2>&1","description":"Build all packages"}
+  [17:16:29]  ⚙  Bash  {"command":"go test ./internal/webhook/... -v 2>&1","description":"Run webhook t…
+  [17:16:38]  💬 All 10 tests pass. Here's what was created/modified:
+
+**`internal/webhook/payload.go`** — GitHub payload types: `PushPay
+
+  [17:16:38]  ✅ Done — tokens: 13 in / 13196 out | cost: $0.41918595
+
+  ─────────────────────────────────────────────────────
+  Finished: 2026-03-14 17:16:39  (3m 1s)
+  Status:   ✓ OK
