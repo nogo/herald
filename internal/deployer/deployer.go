@@ -143,8 +143,8 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 
 	// 6. Generate compose override.
 	repoDir := filepath.Join(appDir, "repo")
-	composeFile := app.Compose
-	if err := d.generateOverride(appRoot, appDir, appName, app, repoDir, composeFile, dockerSecrets); err != nil {
+	composeFile := resolveComposePath(app.Compose, repoDir)
+	if err := d.generateOverride(appRoot, appDir, appName, app, composeFile, dockerSecrets); err != nil {
 		return fmt.Errorf("generating compose override: %w", err)
 	}
 
@@ -169,15 +169,25 @@ func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App) e
 	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), app.Branch)
 }
 
+// resolveComposePath returns an absolute path to the compose file.
+// If the compose field is already absolute, use it directly.
+// Otherwise, resolve relative to the repo directory.
+func resolveComposePath(composeField, repoDir string) string {
+	if filepath.IsAbs(composeField) {
+		return composeField
+	}
+	return filepath.Join(repoDir, composeField)
+}
+
 func (d *Deployer) generateOverride(
 	root *os.Root,
 	appDir, appName string,
 	app config.App,
-	repoDir, composeFile string,
+	composeFile string,
 	dockerSecrets map[string]string,
 ) error {
 	// Detect service name and port from the app's compose file.
-	serviceName, port, err := compose.DetectServiceInfo(filepath.Join(repoDir, composeFile), appName, "3000")
+	serviceName, port, err := compose.DetectServiceInfo(composeFile, appName, "3000")
 	if err != nil {
 		d.Logger.Warn("could not detect service info, using defaults",
 			"app", appName, "error", err)
