@@ -16,6 +16,7 @@ import (
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
+	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/preview"
 )
 
@@ -360,7 +361,7 @@ func readGitHead(ctx context.Context, repoDir string) (string, error) {
 	if _, err := os.Stat(repoDir); err != nil {
 		return "", err
 	}
-	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--short", "HEAD").Output()
+	out, err := githelper.CmdWithAuth(ctx, "", repoDir, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "", err
 	}
