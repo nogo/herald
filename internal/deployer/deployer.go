@@ -46,7 +46,7 @@ func (d *Deployer) getAppLock(appName string) *appLock {
 
 // DeployAsync dispatches a deploy in a goroutine with per-app serialization.
 // At most one deploy may be queued per app; additional calls are dropped.
-func (d *Deployer) DeployAsync(appName string) {
+func (d *Deployer) DeployAsync(appName, ref string) {
 	lock := d.getAppLock(appName)
 	if lock.count.Add(1) > 2 {
 		lock.count.Add(-1)
@@ -62,7 +62,7 @@ func (d *Deployer) DeployAsync(appName string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		if err := d.Deploy(ctx, appName); err != nil {
+		if err := d.Deploy(ctx, appName, ref); err != nil {
 			d.Logger.Error("deploy failed", "app", appName, "error", err)
 		}
 	})
@@ -73,8 +73,20 @@ func (d *Deployer) Wait() {
 	d.wg.Wait()
 }
 
+// effectiveRef returns the git ref to use for a deploy.
+// override takes precedence; otherwise app.Tag (as refs/tags/<tag>) or app.Branch.
+func effectiveRef(app config.App, override string) string {
+	if override != "" {
+		return override
+	}
+	if app.Tag != "" {
+		return "refs/tags/" + app.Tag
+	}
+	return app.Branch
+}
+
 // Deploy executes a full deploy for the named app.
-func (d *Deployer) Deploy(ctx context.Context, appName string) error {
+func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 	app, ok := d.Config.Apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found in config", appName)
@@ -99,7 +111,7 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 	}
 
 	// 1. Git clone or pull.
-	if err := d.gitSync(ctx, appDir, app); err != nil {
+	if err := d.gitSync(ctx, appDir, app, effectiveRef(app, ref)); err != nil {
 		return fmt.Errorf("git: %w", err)
 	}
 
@@ -179,10 +191,10 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 }
 
 // gitSync clones the repo on first deploy or fetch+reset on subsequent ones.
-func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App) error {
+func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App, ref string) error {
 	repoDir := filepath.Join(appDir, "repo")
-	d.Logger.Info("git sync", "repo", app.Repo, "branch", app.Branch)
-	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), app.Branch)
+	d.Logger.Info("git sync", "repo", app.Repo, "ref", ref)
+	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), ref)
 }
 
 // buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.

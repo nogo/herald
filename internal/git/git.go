@@ -46,12 +46,18 @@ func RepoURL(repo string) string {
 }
 
 // CloneOrFetch clones the repo if dir does not exist, or fetches and hard-resets to
-// origin/<branch> if it does. Uses token-based auth.
-func CloneOrFetch(ctx context.Context, token, dir, url, branch string) error {
+// FETCH_HEAD if it does. ref may be a branch name ("main") or full tag refspec
+// ("refs/tags/v1.2.3"). Uses token-based auth.
+func CloneOrFetch(ctx context.Context, token, dir, url, ref string) error {
 	_, err := os.Stat(dir)
 	if os.IsNotExist(err) {
+		// git clone --branch accepts branch names and tag names, not full refspecs.
+		cloneRef := ref
+		if strings.HasPrefix(ref, "refs/tags/") {
+			cloneRef = strings.TrimPrefix(ref, "refs/tags/")
+		}
 		cmd := CmdWithAuth(ctx, token, "", "clone",
-			"--branch", branch, "--single-branch", "--depth", "1",
+			"--branch", cloneRef, "--single-branch", "--depth", "1",
 			url, dir,
 		)
 		out, err := cmd.CombinedOutput()
@@ -64,13 +70,11 @@ func CloneOrFetch(ctx context.Context, token, dir, url, branch string) error {
 		return fmt.Errorf("stat repo dir: %w", err)
 	}
 
-	fetchCmd := CmdWithAuth(ctx, token, dir, "fetch", "origin", branch)
+	// git fetch origin <ref> works for both branch names and refs/tags/v1.2.3.
+	fetchCmd := CmdWithAuth(ctx, token, dir, "fetch", "origin", ref)
 	if out, err := fetchCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	// Use FETCH_HEAD rather than origin/<branch> so this works regardless of
-	// whether the local clone was created with --single-branch or the branch
-	// was renamed/changed after the initial clone.
 	resetCmd := CmdWithAuth(ctx, token, dir, "reset", "--hard", "FETCH_HEAD")
 	if out, err := resetCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))

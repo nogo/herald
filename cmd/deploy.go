@@ -39,7 +39,7 @@ var deployCmd = &cobra.Command{
 			var failed []string
 			for _, name := range names {
 				fmt.Fprintf(cmd.OutOrStdout(), "deploying %s...\n", name)
-				if err := d.Deploy(context.Background(), name); err != nil {
+				if err := d.Deploy(context.Background(), name, ""); err != nil {
 					fmt.Fprintf(os.Stderr, "deploy %s: failed: %v\n", name, err)
 					failed = append(failed, name)
 				} else {
@@ -71,7 +71,7 @@ var deployCmd = &cobra.Command{
 			return fmt.Errorf("app %q not found. Available: %s", appName, strings.Join(names, ", "))
 		}
 
-		if err := d.Deploy(context.Background(), appName); err != nil {
+		if err := d.Deploy(context.Background(), appName, ""); err != nil {
 			return fmt.Errorf("deploy %s: %w", appName, err)
 		}
 
