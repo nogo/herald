@@ -109,18 +109,21 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Apps:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tBranch")
+		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tRef")
 		for _, a := range s.Apps {
-			branch := a.Branch
-			if a.LastCommit != "" {
-				branch += " (" + a.LastCommit + ")"
+			ref := a.DeployedRef
+			if strings.HasPrefix(ref, "refs/tags/") {
+				ref = "tag:" + strings.TrimPrefix(ref, "refs/tags/")
+			}
+			if ref == "" {
+				ref = "-"
 			}
 			containers := ""
 			if a.State != "not deployed" {
 				containers = fmt.Sprintf("%d/%d", a.ContainersUp, a.ContainersTotal)
 			}
 			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-				a.Name, a.Domain, stateIcon(a.State), containers, branch)
+				a.Name, a.Domain, stateIcon(a.State), containers, ref)
 		}
 		tw.Flush()
 	}

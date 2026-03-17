@@ -186,8 +186,25 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 		return fmt.Errorf("compose: %w", err)
 	}
 
+	// Write deployed ref for status reporting.
+	deployRef := effectiveRef(app, ref)
+	if commit, err := readDeployedCommit(filepath.Join(appDir, "repo")); err == nil {
+		_ = os.WriteFile(filepath.Join(appDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
+	}
+
 	d.Logger.Info("deploy complete", "app", appName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
+}
+
+// readDeployedCommit returns the short HEAD commit hash of the given repo dir.
+func readDeployedCommit(repoDir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := git.CmdWithAuth(ctx, "", repoDir, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // gitSync clones the repo on first deploy or fetch+reset on subsequent ones.

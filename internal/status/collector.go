@@ -52,7 +52,7 @@ type CaddyStatus struct {
 type AppStatus struct {
 	Name            string `json:"name"`
 	Domain          string `json:"domain"`
-	Branch          string `json:"branch"`
+	DeployedRef     string `json:"deployed_ref,omitzero"`
 	State           string `json:"state"` // "running", "degraded", "stopped", "not deployed", "error"
 	ContainersUp    int    `json:"containers_up,omitzero"`
 	ContainersTotal int    `json:"containers_total,omitzero"`
@@ -196,13 +196,16 @@ func (c *StatusCollector) collectAppStatus(ctx context.Context, name string, app
 	s := AppStatus{
 		Name:   name,
 		Domain: app.Domain,
-		Branch: app.Branch,
 	}
 
 	appDir := filepath.Join(c.Config.Server.ServicesDir, "apps", name)
 	if _, err := os.Stat(appDir); os.IsNotExist(err) {
 		s.State = "not deployed"
 		return s
+	}
+
+	if data, err := os.ReadFile(filepath.Join(appDir, "deployed_ref")); err == nil {
+		s.DeployedRef = strings.TrimSpace(string(data))
 	}
 
 	repoDir := filepath.Join(appDir, "repo")
