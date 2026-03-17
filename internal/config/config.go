@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -29,14 +30,15 @@ type Server struct {
 }
 
 type App struct {
-	Repo     string         `yaml:"repo"              json:"repo"`
-	Branch   string         `yaml:"branch"            json:"branch"`
-	Domain   string         `yaml:"domain"            json:"domain"`
-	EnvFile  string         `yaml:"env_file,omitempty"  json:"env_file,omitzero"`
-	Compose  string         `yaml:"compose,omitempty"   json:"compose,omitzero"`
-	Override string         `yaml:"override,omitempty"  json:"override,omitzero"`
-	Secrets  []SecretRef    `yaml:"secrets,omitempty"   json:"secrets,omitzero"`
-	Preview  *PreviewConfig `yaml:"preview,omitempty"   json:"preview,omitzero"`
+	Repo       string         `yaml:"repo"                json:"repo"`
+	Branch     string         `yaml:"branch"              json:"branch"`
+	Domain     string         `yaml:"domain"              json:"domain"`
+	EnvFile    string         `yaml:"env_file,omitempty"  json:"env_file,omitzero"`
+	ConfigFile string         `yaml:"config,omitempty"    json:"config,omitzero"`
+	Compose    string         `yaml:"compose,omitempty"   json:"compose,omitzero"`
+	Override   string         `yaml:"override,omitempty"  json:"override,omitzero"`
+	Secrets    []SecretRef    `yaml:"secrets,omitempty"   json:"secrets,omitzero"`
+	Preview    *PreviewConfig `yaml:"preview,omitempty"   json:"preview,omitzero"`
 }
 
 type Stack struct {
@@ -169,6 +171,17 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("app %q: domain %q already used by %s", name, app.Domain, prev)
 		}
 		domains[app.Domain] = "app:" + name
+
+		if app.ConfigFile != "" {
+			if filepath.IsAbs(app.ConfigFile) {
+				return fmt.Errorf("app %q: config must be a relative path within the IaC repo, got %q", name, app.ConfigFile)
+			}
+			for _, part := range strings.Split(filepath.ToSlash(app.ConfigFile), "/") {
+				if part == ".." {
+					return fmt.Errorf("app %q: config must be a relative path within the IaC repo, got %q", name, app.ConfigFile)
+				}
+			}
+		}
 
 		for i, sec := range app.Secrets {
 			if sec.Type != "env" && sec.Type != "docker-secret" {

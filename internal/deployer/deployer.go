@@ -28,6 +28,7 @@ type Deployer struct {
 	Config  *config.Config
 	Secrets *secrets.Store
 	Logger  *slog.Logger
+	DataDir string // path to herald data dir (e.g. /etc/herald); IaC repo lives at DataDir/repo
 
 	appLocks sync.Map // string → *appLock
 	wg       sync.WaitGroup
@@ -129,8 +130,12 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 	}
 	defer appRoot.Close()
 
-	// 4. Write .env file.
-	if err := compose.WriteEnvFile(appRoot, envVars); err != nil {
+	// 4. Write .env file (config file base merged with resolved secrets).
+	merged, err := d.buildEnvMap(app, envVars)
+	if err != nil {
+		return fmt.Errorf("building env map: %w", err)
+	}
+	if err := compose.WriteEnvFile(appRoot, merged); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
 	}
 
@@ -180,6 +185,46 @@ func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App) e
 	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), app.Branch)
 }
 
+// buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.
+func (d *Deployer) buildEnvMap(app config.App, envVars map[string]string) (map[string]string, error) {
+	if app.ConfigFile == "" {
+		return envVars, nil
+	}
+	iacRepoDir := filepath.Join(d.DataDir, "repo")
+	configPath := filepath.Join(iacRepoDir, app.ConfigFile)
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("config file %q not found in IaC repo", app.ConfigFile)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading config file %q: %w", app.ConfigFile, err)
+	}
+	base := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		idx := strings.IndexByte(trimmed, '=')
+		if idx < 0 {
+			d.Logger.Debug("config file: ignoring line without '='", "line", trimmed)
+			continue
+		}
+		base[strings.TrimSpace(trimmed[:idx])] = strings.TrimSpace(trimmed[idx+1:])
+	}
+	result := make(map[string]string, len(base)+len(envVars))
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range envVars {
+		if _, exists := result[k]; exists {
+			d.Logger.Debug("config key overridden by secret", "key", k)
+		}
+		result[k] = v
+	}
+	return result, nil
+}
+
 // resolveComposePath returns an absolute path to the compose file.
 // If the compose field is already absolute, use it directly.
 // Otherwise, resolve relative to the repo directory.
@@ -214,8 +259,9 @@ func (d *Deployer) generateOverride(
 		Networks: []string{"caddy"},
 	}
 
+	svc.EnvFile = []string{filepath.Join(appDir, ".env")}
 	if app.EnvFile != "" {
-		svc.EnvFile = []string{app.EnvFile}
+		svc.EnvFile = append(svc.EnvFile, app.EnvFile)
 	}
 
 	secretNames := slices.Sorted(maps.Keys(dockerSecrets))

@@ -50,6 +50,7 @@ var serveCmd = &cobra.Command{
 			Config:  Cfg,
 			Secrets: store,
 			Logger:  slog.Default(),
+			DataDir: dataDir,
 		}
 
 		stackMgr := &stacks.StackManager{
