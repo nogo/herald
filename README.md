@@ -87,19 +87,48 @@ Herald registers webhooks on your repos via the GitHub API. When you push, GitHu
 
 ## Commands
 
+**Daemon**
 ```
 herald install              Install as systemd service
 herald serve                Start webhook listener
-herald status               Show services, domains, health
-herald deploy <app>         Deploy an app
-herald update <service>     Run update script for a service
 herald sync                 Pull IaC repo + reconcile config + sync webhooks
+herald status               Show apps, services, domains, health
+```
+
+**Apps**
+```
+herald deploy <app>         Deploy an app
+herald down <app>           Stop and remove an app's containers
+```
+
+**Services**
+```
+herald update <service>     Run update script for a service
+```
+
+**Previews**
+```
+herald preview list         List active preview deployments
+herald preview remove <id>  Remove a preview deployment
+herald preview cleanup      Remove previews for deleted branches
+```
+
+**Secrets**
+```
 herald secret set <key>     Set a secret (interactive prompt)
 herald secret list          List secret keys
-herald webhooks sync        Register GitHub webhooks
+```
+
+**Infrastructure**
+```
 herald caddy start|stop     Manage reverse proxy
-herald preview list         Show preview deployments
+herald webhooks sync        Register GitHub webhooks
+```
+
+**Auth**
+```
 herald auth login           Authenticate with GitHub
+herald auth status          Show authentication status
 herald version              Print version
 ```
 
