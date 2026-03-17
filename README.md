@@ -66,7 +66,7 @@ apps:
     domain: tracker.example.com
     env_file: .env.tracker
 
-stacks:
+services:
   nextcloud:
     path: stacks/nextcloud
     domain: cloud.example.com
@@ -75,7 +75,7 @@ stacks:
 ```
 
 **Apps** = your code. Push to GitHub, herald deploys automatically.
-**Stacks** = managed infrastructure (Nextcloud, Ghost). Compose files + update scripts in the server repo.
+**Services** = managed infrastructure (Nextcloud, Ghost). Compose files + update scripts in the server repo.
 
 ## How it works
 
@@ -92,7 +92,7 @@ herald install              Install as systemd service
 herald serve                Start webhook listener
 herald status               Show services, domains, health
 herald deploy <app>         Deploy an app
-herald update <stack>       Run update script for a stack
+herald update <service>     Run update script for a service
 herald sync                 Pull IaC repo + reconcile config + sync webhooks
 herald secret set <key>     Set a secret (interactive prompt)
 herald secret list          List secret keys
@@ -158,7 +158,7 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 
 /opt/deploy/           deployments
   apps/<name>/repo/    cloned app repos
-  stacks/<name>/       stack compose files
+  stacks/<name>/       service compose files
   caddy/               caddy-docker-proxy
 ```
 

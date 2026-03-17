@@ -179,9 +179,9 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if cfg.Server.Port > 0 {
 		opts.HeraldPort = cfg.Server.Port
 	}
-	fmt.Fprintf(w, "  ✓ Config loaded: %d app%s, %d stack%s\n",
+	fmt.Fprintf(w, "  ✓ Config loaded: %d app%s, %d service%s\n",
 		len(cfg.Apps), plural(len(cfg.Apps)),
-		len(cfg.Stacks), plural(len(cfg.Stacks)))
+		len(cfg.Services), plural(len(cfg.Services)))
 
 	// Step 3: Initialize secrets store
 	fmt.Fprintln(w, "\nInitializing secrets store...")

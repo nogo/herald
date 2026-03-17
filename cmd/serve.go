@@ -19,7 +19,7 @@ import (
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
-	"github.com/nogo/herald/internal/stacks"
+	"github.com/nogo/herald/internal/services"
 	"github.com/nogo/herald/internal/status"
 	"github.com/nogo/herald/internal/web"
 	"github.com/nogo/herald/internal/webhook"
@@ -53,7 +53,7 @@ var serveCmd = &cobra.Command{
 			DataDir: dataDir,
 		}
 
-		stackMgr := &stacks.StackManager{
+		stackMgr := &services.ServiceManager{
 			Config:  Cfg,
 			Secrets: store,
 			DataDir: dataDir,
@@ -184,8 +184,8 @@ func parseGitHubRepo(rawURL string) string {
 }
 
 // makeIaCPushHandler returns a function that pulls the IaC repo, reloads config,
-// and triggers auto-deploy for stacks with auto_deploy: true.
-func makeIaCPushHandler(mgr *stacks.StackManager) func() {
+// and triggers auto-deploy for services with auto_deploy: true.
+func makeIaCPushHandler(mgr *services.ServiceManager) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
@@ -209,17 +209,17 @@ func makeIaCPushHandler(mgr *stacks.StackManager) func() {
 		mgr.Config = newCfg
 		slog.Info("IaC push: config reloaded")
 
-		// 3. Auto-deploy stacks.
+		// 3. Auto-deploy services.
 		for _, info := range mgr.List() {
 			if info.AutoDeploy {
-				slog.Info("IaC push: auto-deploying stack", "stack", info.Name)
+				slog.Info("IaC push: auto-deploying service", "service", info.Name)
 				if err := mgr.ComposeUp(ctx, info.Name); err != nil {
-					slog.Error("IaC push: auto-deploy failed", "stack", info.Name, "error", err)
+					slog.Error("IaC push: auto-deploy failed", "service", info.Name, "error", err)
 				} else {
-					slog.Info("IaC push: auto-deploy complete", "stack", info.Name)
+					slog.Info("IaC push: auto-deploy complete", "service", info.Name)
 				}
 			} else {
-				slog.Info("IaC push: stack updated in repo (no auto-deploy)", "stack", info.Name)
+				slog.Info("IaC push: service updated in repo (no auto-deploy)", "service", info.Name)
 			}
 		}
 	}

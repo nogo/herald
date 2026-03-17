@@ -9,7 +9,7 @@ apps:
     branch: main
     domain: shared.example.com
 
-stacks:
+services:
   nextcloud:
     path: stacks/nextcloud
     domain: shared.example.com  # duplicate of budget

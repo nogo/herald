@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/nogo/herald/internal/secrets"
-	"github.com/nogo/herald/internal/stacks"
+	"github.com/nogo/herald/internal/services"
 	"github.com/spf13/cobra"
 )
 
@@ -17,13 +17,13 @@ var (
 )
 
 var updateCmd = &cobra.Command{
-	Use:   "update [stack]",
-	Short: "Run update script for a managed stack",
+	Use:   "update [service]",
+	Short: "Run update script for a managed service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
 		store := secrets.NewStore(dataDir)
-		mgr := &stacks.StackManager{
+		mgr := &services.ServiceManager{
 			Config:  Cfg,
 			Secrets: store,
 			DataDir: dataDir,
@@ -35,12 +35,12 @@ var updateCmd = &cobra.Command{
 		}
 
 		if len(args) == 0 {
-			return fmt.Errorf("usage: herald update <stack> or herald update --list")
+			return fmt.Errorf("usage: herald update <service> or herald update --list")
 		}
 
 		stackName := args[0]
-		if _, ok := Cfg.Stacks[stackName]; !ok {
-			return fmt.Errorf("stack %q not found in config", stackName)
+		if _, ok := Cfg.Services[stackName]; !ok {
+			return fmt.Errorf("service %q not found in config", stackName)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(updateTimeout)*time.Minute)
@@ -56,10 +56,10 @@ var updateCmd = &cobra.Command{
 	},
 }
 
-func runUpdateList(cmd *cobra.Command, mgr *stacks.StackManager) error {
+func runUpdateList(cmd *cobra.Command, mgr *services.ServiceManager) error {
 	infos := mgr.List()
 	if len(infos) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No stacks configured.")
+		fmt.Fprintln(cmd.OutOrStdout(), "No services configured.")
 		return nil
 	}
 
@@ -74,7 +74,7 @@ func runUpdateList(cmd *cobra.Command, mgr *stacks.StackManager) error {
 		}
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Available stacks:")
+	fmt.Fprintln(cmd.OutOrStdout(), "Available services:")
 	for _, info := range infos {
 		auto := "auto:no"
 		if info.AutoDeploy {
@@ -95,6 +95,6 @@ func runUpdateList(cmd *cobra.Command, mgr *stacks.StackManager) error {
 
 func init() {
 	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVar(&updateList, "list", false, "List available stacks and their update scripts")
+	updateCmd.Flags().BoolVar(&updateList, "list", false, "List available services and their update scripts")
 	updateCmd.Flags().IntVar(&updateTimeout, "timeout", 30, "Update script timeout in minutes")
 }

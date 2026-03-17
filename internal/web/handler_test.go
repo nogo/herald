@@ -17,7 +17,7 @@ func testCollector(t *testing.T) *status.StatusCollector {
 		Config: &config.Config{
 			Server: config.Server{Name: "test-server"},
 			Apps:   map[string]config.App{},
-			Stacks: map[string]config.Stack{},
+			Services: map[string]config.Service{},
 		},
 		DataDir: t.TempDir(),
 		Logger:  slog.Default(),
@@ -29,7 +29,7 @@ func testHandler(t *testing.T, password string) *WebHandler {
 	h := NewWebHandler(testCollector(t), &config.Config{
 		Server: config.Server{Name: "test-server"},
 		Apps:   map[string]config.App{},
-		Stacks: map[string]config.Stack{},
+		Services: map[string]config.Service{},
 	}, password, slog.Default())
 	if h == nil {
 		t.Fatal("NewWebHandler returned nil")
@@ -119,7 +119,7 @@ func TestHandleApp_OK(t *testing.T) {
 		Apps: map[string]config.App{
 			"myapp": {Repo: "owner/repo", Branch: "main", Domain: "myapp.example.com", Compose: "compose.yml"},
 		},
-		Stacks: map[string]config.Stack{},
+		Services: map[string]config.Service{},
 	}
 	collector := &status.StatusCollector{
 		Config:  cfg,

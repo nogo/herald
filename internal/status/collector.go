@@ -155,11 +155,11 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 	s.Apps = appStatuses
 
 	// Stack statuses (concurrent).
-	stackNames := slices.Sorted(maps.Keys(c.Config.Stacks))
+	stackNames := slices.Sorted(maps.Keys(c.Config.Services))
 	stackStatuses := make([]StackStatus, len(stackNames))
 	for i, name := range stackNames {
 		wg.Go(func() {
-			stackStatuses[i] = c.collectStackStatus(ctx, name, c.Config.Stacks[name])
+			stackStatuses[i] = c.collectStackStatus(ctx, name, c.Config.Services[name])
 		})
 	}
 	wg.Wait()
@@ -222,7 +222,7 @@ func (c *StatusCollector) collectAppStatus(ctx context.Context, name string, app
 	return s
 }
 
-func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, stack config.Stack) StackStatus {
+func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, stack config.Service) StackStatus {
 	s := StackStatus{
 		Name:   name,
 		Domain: stack.Domain,

@@ -125,10 +125,10 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 		tw.Flush()
 	}
 
-	// Stacks.
+	// Services.
 	if len(s.Stacks) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Stacks:")
+		fmt.Fprintln(w, "Services:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers")
 		for _, st := range s.Stacks {

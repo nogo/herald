@@ -1,4 +1,4 @@
-package stacks
+package services
 
 import (
 	"bytes"
@@ -22,16 +22,16 @@ import (
 	"github.com/nogo/herald/internal/secrets"
 )
 
-// StackManager manages stack setup and updates.
-type StackManager struct {
+// ServiceManager manages service setup and updates.
+type ServiceManager struct {
 	Config  *config.Config
 	Secrets *secrets.Store
 	DataDir string // where the IaC repo lives (e.g. /etc/herald)
 	Logger  *slog.Logger
 }
 
-// StackInfo holds display info about a configured stack.
-type StackInfo struct {
+// ServiceInfo holds display info about a configured service.
+type ServiceInfo struct {
 	Name         string
 	Domain       string
 	AutoDeploy   bool
@@ -39,36 +39,36 @@ type StackInfo struct {
 }
 
 // repoDir returns the path to the IaC repo clone.
-func (m *StackManager) repoDir() string {
+func (m *ServiceManager) repoDir() string {
 	return filepath.Join(m.DataDir, "repo")
 }
 
-// stackRepoPath returns the absolute path to the stack in the IaC repo.
-func (m *StackManager) stackRepoPath(stack config.Stack) string {
+// stackRepoPath returns the absolute path to the service in the IaC repo.
+func (m *ServiceManager) stackRepoPath(stack config.Service) string {
 	return filepath.Join(m.repoDir(), stack.Path)
 }
 
-// stackDeployDir returns the deploy directory for a named stack.
+// stackDeployDir returns the deploy directory for a named service.
 // e.g. /opt/deploy/stacks/nextcloud
-func (m *StackManager) stackDeployDir(stackName string) string {
+func (m *ServiceManager) stackDeployDir(stackName string) string {
 	return filepath.Join(m.Config.Server.StacksDir, "stacks", stackName)
 }
 
-// isSetUp returns true if the stack's deploy directory is already configured
+// isSetUp returns true if the service's deploy directory is already configured
 // (repo symlink and compose override both exist).
-func (m *StackManager) isSetUp(stackName string) bool {
+func (m *ServiceManager) isSetUp(stackName string) bool {
 	deployDir := m.stackDeployDir(stackName)
 	_, repoErr := os.Lstat(filepath.Join(deployDir, "repo"))
 	_, overrideErr := os.Lstat(filepath.Join(deployDir, "compose.override.yml"))
 	return repoErr == nil && overrideErr == nil
 }
 
-// Setup creates the stack's deploy directory, symlinks the IaC repo stack
+// Setup creates the service's deploy directory, symlinks the IaC repo service
 // directory, ensures the caddy network exists, and generates a compose override.
-func (m *StackManager) Setup(ctx context.Context, stackName string) error {
-	stack, ok := m.Config.Stacks[stackName]
+func (m *ServiceManager) Setup(ctx context.Context, stackName string) error {
+	stack, ok := m.Config.Services[stackName]
 	if !ok {
-		return fmt.Errorf("stack %q not found in config", stackName)
+		return fmt.Errorf("service %q not found in config", stackName)
 	}
 
 	// Pre-flight: check for missing required secrets.
@@ -77,13 +77,13 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 		return fmt.Errorf("checking secrets: %w", err)
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("stack %q: missing required secrets (use `herald secret set <key>`): %s",
+		return fmt.Errorf("service %q: missing required secrets (use `herald secret set <key>`): %s",
 			stackName, strings.Join(missing, ", "))
 	}
 
 	stackRepoPath := m.stackRepoPath(stack)
 	if _, err := os.Stat(stackRepoPath); err != nil {
-		return fmt.Errorf("stack path %q not found in IaC repo: %w", stack.Path, err)
+		return fmt.Errorf("service path %q not found in IaC repo: %w", stack.Path, err)
 	}
 
 	deployDir := m.stackDeployDir(stackName)
@@ -97,7 +97,7 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 		if err := os.Symlink(stackRepoPath, repoLink); err != nil {
 			return fmt.Errorf("creating repo symlink: %w", err)
 		}
-		m.Logger.Info("created repo symlink", "stack", stackName, "target", stackRepoPath)
+		m.Logger.Info("created repo symlink", "service", stackName, "target", stackRepoPath)
 	}
 
 	if err := caddy.EnsureNetwork(ctx, m.Logger); err != nil {
@@ -116,7 +116,7 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 	}
 	if len(envVars)+len(dockerSecrets) > 0 {
 		m.Logger.Info("secrets resolved",
-			"stack", stackName,
+			"service", stackName,
 			"env_keys", slices.Sorted(maps.Keys(envVars)),
 			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
 		)
@@ -153,15 +153,15 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 		return fmt.Errorf("generating compose override: %w", err)
 	}
 
-	m.Logger.Info("stack setup complete", "stack", stackName, "deploy_dir", deployDir)
+	m.Logger.Info("service setup complete", "service", stackName, "deploy_dir", deployDir)
 	return nil
 }
 
-// Update pulls the IaC repo, sets up the stack if needed, and runs the update script.
-func (m *StackManager) Update(ctx context.Context, stackName string) error {
-	stack, ok := m.Config.Stacks[stackName]
+// Update pulls the IaC repo, sets up the service if needed, and runs the update script.
+func (m *ServiceManager) Update(ctx context.Context, stackName string) error {
+	stack, ok := m.Config.Services[stackName]
 	if !ok {
-		return fmt.Errorf("stack %q not found in config", stackName)
+		return fmt.Errorf("service %q not found in config", stackName)
 	}
 
 	// Pre-flight: check for missing required secrets.
@@ -170,19 +170,19 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 		return fmt.Errorf("checking secrets: %w", err)
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("stack %q: missing required secrets (use `herald secret set <key>`): %s",
+		return fmt.Errorf("service %q: missing required secrets (use `herald secret set <key>`): %s",
 			stackName, strings.Join(missing, ", "))
 	}
 
 	start := time.Now()
-	m.Logger.Info("stack update started", "stack", stackName)
+	m.Logger.Info("service update started", "service", stackName)
 
 	if err := m.gitPull(ctx); err != nil {
 		return fmt.Errorf("pulling IaC repo: %w", err)
 	}
 
 	if stack.UpdateScript == "" {
-		return fmt.Errorf("stack %q has no update_script configured", stackName)
+		return fmt.Errorf("service %q has no update_script configured", stackName)
 	}
 	scriptPath := filepath.Join(m.repoDir(), stack.UpdateScript)
 	if _, err := os.Stat(scriptPath); err != nil {
@@ -191,7 +191,7 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 
 	if !m.isSetUp(stackName) {
 		if err := m.Setup(ctx, stackName); err != nil {
-			return fmt.Errorf("setting up stack: %w", err)
+			return fmt.Errorf("setting up service: %w", err)
 		}
 	}
 
@@ -204,7 +204,7 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 	}
 	if len(envVars)+len(dockerSecrets) > 0 {
 		m.Logger.Info("secrets resolved",
-			"stack", stackName,
+			"service", stackName,
 			"env_keys", slices.Sorted(maps.Keys(envVars)),
 			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
 		)
@@ -250,19 +250,19 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 		return err
 	}
 
-	m.Logger.Info("stack update complete", "stack", stackName, "duration", time.Since(start).Round(time.Millisecond))
+	m.Logger.Info("service update complete", "service", stackName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
-// ComposeUp runs docker compose up -d --build for the stack without running the update script.
-func (m *StackManager) ComposeUp(ctx context.Context, stackName string) error {
-	if _, ok := m.Config.Stacks[stackName]; !ok {
-		return fmt.Errorf("stack %q not found in config", stackName)
+// ComposeUp runs docker compose up -d --build for the service without running the update script.
+func (m *ServiceManager) ComposeUp(ctx context.Context, stackName string) error {
+	if _, ok := m.Config.Services[stackName]; !ok {
+		return fmt.Errorf("service %q not found in config", stackName)
 	}
 
 	if !m.isSetUp(stackName) {
 		if err := m.Setup(ctx, stackName); err != nil {
-			return fmt.Errorf("setting up stack: %w", err)
+			return fmt.Errorf("setting up service: %w", err)
 		}
 	}
 
@@ -276,7 +276,7 @@ func (m *StackManager) ComposeUp(ctx context.Context, stackName string) error {
 	composeFile := filepath.Join(repoLink, composeName)
 	overrideFile := filepath.Join(deployDir, "compose.override.yml")
 
-	m.Logger.Info("compose up", "stack", stackName, "project", "herald-stack-"+stackName)
+	m.Logger.Info("compose up", "service", stackName, "project", "herald-stack-"+stackName)
 	return runStreamCmd(ctx, m.Logger, deployDir,
 		"docker", "compose",
 		"--project-name", "herald-stack-"+stackName,
@@ -286,14 +286,14 @@ func (m *StackManager) ComposeUp(ctx context.Context, stackName string) error {
 	)
 }
 
-// RunUpdateScript executes the stack's update script with the required environment.
-func (m *StackManager) RunUpdateScript(ctx context.Context, stackName string) error {
-	stack, ok := m.Config.Stacks[stackName]
+// RunUpdateScript executes the service's update script with the required environment.
+func (m *ServiceManager) RunUpdateScript(ctx context.Context, stackName string) error {
+	stack, ok := m.Config.Services[stackName]
 	if !ok {
-		return fmt.Errorf("stack %q not found in config", stackName)
+		return fmt.Errorf("service %q not found in config", stackName)
 	}
 	if stack.UpdateScript == "" {
-		return fmt.Errorf("stack %q has no update_script configured", stackName)
+		return fmt.Errorf("service %q has no update_script configured", stackName)
 	}
 
 	scriptPath := filepath.Join(m.repoDir(), stack.UpdateScript)
@@ -314,7 +314,7 @@ func (m *StackManager) RunUpdateScript(ctx context.Context, stackName string) er
 		"COMPOSE_OVERRIDE_FILE="+filepath.Join(deployDir, "compose.override.yml"),
 	)
 
-	m.Logger.Info("running update script", "stack", stackName, "script", scriptPath, "dir", deployDir)
+	m.Logger.Info("running update script", "service", stackName, "script", scriptPath, "dir", deployDir)
 
 	cmd := exec.CommandContext(ctx, "/bin/bash", "-euo", "pipefail", scriptPath)
 	cmd.Dir = deployDir
@@ -341,17 +341,17 @@ func (m *StackManager) RunUpdateScript(ctx context.Context, stackName string) er
 		return fmt.Errorf("update script exited with code %d (duration: %s):\n%s", exitCode, dur, lastLines)
 	}
 
-	m.Logger.Info("update script completed", "stack", stackName, "duration", dur)
+	m.Logger.Info("update script completed", "service", stackName, "duration", dur)
 	return nil
 }
 
-// List returns info about all configured stacks, sorted by name.
-func (m *StackManager) List() []StackInfo {
-	names := slices.Sorted(maps.Keys(m.Config.Stacks))
-	result := make([]StackInfo, 0, len(names))
+// List returns info about all configured services, sorted by name.
+func (m *ServiceManager) List() []ServiceInfo {
+	names := slices.Sorted(maps.Keys(m.Config.Services))
+	result := make([]ServiceInfo, 0, len(names))
 	for _, name := range names {
-		s := m.Config.Stacks[name]
-		result = append(result, StackInfo{
+		s := m.Config.Services[name]
+		result = append(result, ServiceInfo{
 			Name:         name,
 			Domain:       s.Domain,
 			AutoDeploy:   s.AutoDeploy,
@@ -362,7 +362,7 @@ func (m *StackManager) List() []StackInfo {
 }
 
 // gitPull runs git pull in the IaC repo with auth for private repos.
-func (m *StackManager) gitPull(ctx context.Context) error {
+func (m *ServiceManager) gitPull(ctx context.Context) error {
 	repoDir := m.repoDir()
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		return fmt.Errorf("IaC repo not found at %s (run: herald init)", repoDir)
@@ -400,7 +400,7 @@ func validateConfigFilePath(p string) error {
 }
 
 // loadConfigFile parses a KEY=VALUE env file, skipping comments and blank lines.
-func (m *StackManager) loadConfigFile(path string) (map[string]string, error) {
+func (m *ServiceManager) loadConfigFile(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("config file %q not found in IaC repo", path)
@@ -425,7 +425,7 @@ func (m *StackManager) loadConfigFile(path string) (map[string]string, error) {
 }
 
 // buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.
-func (m *StackManager) buildEnvMap(stack config.Stack, envVars map[string]string) (map[string]string, error) {
+func (m *ServiceManager) buildEnvMap(stack config.Service, envVars map[string]string) (map[string]string, error) {
 	if stack.ConfigFile == "" {
 		return envVars, nil
 	}
@@ -464,10 +464,10 @@ func writeEnvFile(path string, envMap map[string]string) error {
 	return f.Close()
 }
 
-func (m *StackManager) generateOverride(deployDir, stackName string, stack config.Stack, composeFile string, envFile string, dockerSecrets map[string]string) error {
+func (m *ServiceManager) generateOverride(deployDir, stackName string, stack config.Service, composeFile string, envFile string, dockerSecrets map[string]string) error {
 	serviceName, port, err := compose.DetectServiceInfo(composeFile, stackName, "80")
 	if err != nil {
-		m.Logger.Warn("could not detect service info, using defaults", "stack", stackName, "error", err)
+		m.Logger.Warn("could not detect service info, using defaults", "service", stackName, "error", err)
 		serviceName = "app"
 		port = "80"
 	}

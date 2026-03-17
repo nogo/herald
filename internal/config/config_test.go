@@ -44,8 +44,8 @@ func TestLoad_Valid(t *testing.T) {
 		t.Error("budget.preview is nil")
 	}
 
-	if len(cfg.Stacks) != 2 {
-		t.Fatalf("want 2 stacks, got %d", len(cfg.Stacks))
+	if len(cfg.Services) != 2 {
+		t.Fatalf("want 2 services, got %d", len(cfg.Services))
 	}
 }
 

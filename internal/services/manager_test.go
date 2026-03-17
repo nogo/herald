@@ -1,4 +1,4 @@
-package stacks
+package services
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	"github.com/nogo/herald/internal/config"
 )
 
-func newTestManager(t *testing.T, cfg *config.Config, dataDir string) *StackManager {
+func newTestManager(t *testing.T, cfg *config.Config, dataDir string) *ServiceManager {
 	t.Helper()
-	return &StackManager{
+	return &ServiceManager{
 		Config:  cfg,
 		DataDir: dataDir,
 		Logger:  slog.Default(),
@@ -22,8 +22,8 @@ func newTestManager(t *testing.T, cfg *config.Config, dataDir string) *StackMana
 
 func TestList_empty(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: t.TempDir()},
-		Stacks: map[string]config.Stack{},
+		Server:   config.Server{StacksDir: t.TempDir()},
+		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, t.TempDir())
 	if got := m.List(); len(got) != 0 {
@@ -34,7 +34,7 @@ func TestList_empty(t *testing.T) {
 func TestList_sorted(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.Server{StacksDir: t.TempDir()},
-		Stacks: map[string]config.Stack{
+		Services: map[string]config.Service{
 			"zeppelin": {Path: "stacks/zeppelin", Domain: "z.example.com", UpdateScript: "stacks/zeppelin/update.sh"},
 			"alpha":    {Path: "stacks/alpha", Domain: "a.example.com"},
 			"beta":     {Path: "stacks/beta", Domain: "b.example.com", AutoDeploy: true},
@@ -44,7 +44,7 @@ func TestList_sorted(t *testing.T) {
 	infos := m.List()
 
 	if len(infos) != 3 {
-		t.Fatalf("expected 3 stacks, got %d", len(infos))
+		t.Fatalf("expected 3 services, got %d", len(infos))
 	}
 	if infos[0].Name != "alpha" || infos[1].Name != "beta" || infos[2].Name != "zeppelin" {
 		t.Fatalf("unexpected order: %v", infos)
@@ -95,7 +95,7 @@ func TestRunUpdateScript_success(t *testing.T) {
 
 	cfg := &config.Config{
 		Server: config.Server{StacksDir: stacksDir},
-		Stacks: map[string]config.Stack{
+		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",
 				Domain:       "mystack.example.com",
@@ -143,7 +143,7 @@ func TestRunUpdateScript_fail(t *testing.T) {
 
 	cfg := &config.Config{
 		Server: config.Server{StacksDir: stacksDir},
-		Stacks: map[string]config.Stack{
+		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",
 				Domain:       "mystack.example.com",
@@ -165,7 +165,7 @@ func TestRunUpdateScript_fail(t *testing.T) {
 func TestRunUpdateScript_noScript(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.Server{StacksDir: t.TempDir()},
-		Stacks: map[string]config.Stack{
+		Services: map[string]config.Service{
 			"mystack": {Path: "stacks/mystack", Domain: "x.example.com"},
 		},
 	}
@@ -178,8 +178,8 @@ func TestRunUpdateScript_noScript(t *testing.T) {
 
 func TestRunUpdateScript_unknownStack(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: t.TempDir()},
-		Stacks: map[string]config.Stack{},
+		Server:   config.Server{StacksDir: t.TempDir()},
+		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, t.TempDir())
 	err := m.RunUpdateScript(context.Background(), "ghost")
@@ -190,8 +190,8 @@ func TestRunUpdateScript_unknownStack(t *testing.T) {
 
 func TestStackDeployDir(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: "/opt/deploy"},
-		Stacks: map[string]config.Stack{},
+		Server:   config.Server{StacksDir: "/opt/deploy"},
+		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, "/etc/herald")
 
@@ -259,7 +259,7 @@ echo "env ok"
 
 	cfg := &config.Config{
 		Server: config.Server{StacksDir: stacksDir},
-		Stacks: map[string]config.Stack{
+		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",
 				Domain:       "mystack.example.com",

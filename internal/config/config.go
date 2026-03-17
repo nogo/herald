@@ -15,9 +15,9 @@ import (
 )
 
 type Config struct {
-	Server Server           `yaml:"server"          json:"server"`
-	Apps   map[string]App   `yaml:"apps,omitempty"  json:"apps,omitempty"`
-	Stacks map[string]Stack `yaml:"stacks,omitempty" json:"stacks,omitempty"`
+	Server   Server              `yaml:"server"             json:"server"`
+	Apps     map[string]App      `yaml:"apps,omitempty"     json:"apps,omitempty"`
+	Services map[string]Service  `yaml:"services,omitempty" json:"services,omitempty"`
 }
 
 type Server struct {
@@ -41,7 +41,7 @@ type App struct {
 	Preview    *PreviewConfig `yaml:"preview,omitempty"   json:"preview,omitzero"`
 }
 
-type Stack struct {
+type Service struct {
 	Path         string      `yaml:"path"                    json:"path"`
 	Domain       string      `yaml:"domain"                  json:"domain"`
 	AutoDeploy   bool        `yaml:"auto_deploy"             json:"auto_deploy,omitzero"`
@@ -151,8 +151,8 @@ func validate(cfg *Config) error {
 		return errors.New("server.stacks_dir is required")
 	}
 
-	// Collect all domains to detect duplicates across apps and stacks.
-	domains := make(map[string]string) // domain -> "app:name" or "stack:name"
+	// Collect all domains to detect duplicates across apps and services.
+	domains := make(map[string]string) // domain -> "app:name" or "service:name"
 
 	repoRe := regexp.MustCompile(`^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$`)
 
@@ -202,24 +202,24 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(cfg.Stacks)) {
-		stack := cfg.Stacks[name]
-		if stack.Path == "" {
-			return fmt.Errorf("stack %q: path is required", name)
+	for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
+		svc := cfg.Services[name]
+		if svc.Path == "" {
+			return fmt.Errorf("service %q: path is required", name)
 		}
-		if stack.Domain == "" {
-			return fmt.Errorf("stack %q: domain is required", name)
+		if svc.Domain == "" {
+			return fmt.Errorf("service %q: domain is required", name)
 		}
-		if prev, exists := domains[stack.Domain]; exists {
-			return fmt.Errorf("stack %q: domain %q already used by %s", name, stack.Domain, prev)
+		if prev, exists := domains[svc.Domain]; exists {
+			return fmt.Errorf("service %q: domain %q already used by %s", name, svc.Domain, prev)
 		}
-		domains[stack.Domain] = "stack:" + name
+		domains[svc.Domain] = "service:" + name
 
-		for i, sec := range stack.Secrets {
+		for i, sec := range svc.Secrets {
 			if sec.Type != "env" && sec.Type != "docker-secret" {
-				return fmt.Errorf("stack %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
+				return fmt.Errorf("service %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
 			}
-			if err := validateSecretRefGenerate("stack", name, i, sec); err != nil {
+			if err := validateSecretRefGenerate("service", name, i, sec); err != nil {
 				return err
 			}
 		}

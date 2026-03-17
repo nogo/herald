@@ -35,7 +35,7 @@ apps:
           volumes:
             - /srv/tracker/data:/data
 
-stacks:
+services:
   nextcloud:
     path: stacks/nextcloud
     domain: cloud.example.com

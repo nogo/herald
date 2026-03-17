@@ -18,7 +18,7 @@ import (
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/secrets"
-	"github.com/nogo/herald/internal/stacks"
+	"github.com/nogo/herald/internal/services"
 	"github.com/nogo/herald/internal/status"
 	"github.com/spf13/cobra"
 )
@@ -55,7 +55,7 @@ var syncCmd = &cobra.Command{
 			HeraldPort: port,
 		}
 
-		stackMgr := &stacks.StackManager{
+		stackMgr := &services.ServiceManager{
 			Config:  cfg,
 			Secrets: store,
 			DataDir: dataDir,
@@ -165,8 +165,8 @@ var syncCmd = &cobra.Command{
 			}
 		}
 
-		// 6. Check each stack.
-		stackNames := slices.Sorted(maps.Keys(cfg.Stacks))
+		// 6. Check each service.
+		stackNames := slices.Sorted(maps.Keys(cfg.Services))
 		stacksRunning := 0
 
 		for _, name := range stackNames {
@@ -182,9 +182,9 @@ var syncCmd = &cobra.Command{
 			}
 
 			if !isSetUp {
-				slog.Info("stack not set up, configuring", "stack", name)
+				slog.Info("service not set up, configuring", "service", name)
 				if setupErr := stackMgr.Setup(ctx, name); setupErr != nil {
-					slog.Error("stack setup failed", "stack", name, "error", setupErr)
+					slog.Error("service setup failed", "service", name, "error", setupErr)
 					continue
 				}
 			}
@@ -193,7 +193,7 @@ var syncCmd = &cobra.Command{
 				"-p", "herald-stack-"+name, "ps", "--format", "json").Output()
 			trimmed := strings.TrimSpace(string(psOut))
 			if psErr != nil || trimmed == "" || trimmed == "[]" {
-				slog.Warn("stack is stopped", "stack", name)
+				slog.Warn("service is stopped", "service", name)
 			} else {
 				stacksRunning++
 			}
@@ -217,7 +217,7 @@ var syncCmd = &cobra.Command{
 		}
 		fmt.Fprintf(out, "  Apps: %d configured, %d deployed, %d not deployed\n",
 			len(appNames), appsDeployed, appsNotDeployed)
-		fmt.Fprintf(out, "  Stacks: %d configured, %d running\n",
+		fmt.Fprintf(out, "  Services: %d configured, %d running\n",
 			len(stackNames), stacksRunning)
 		fmt.Fprintf(out, "  Orphans: %d\n", len(orphans))
 
@@ -243,14 +243,14 @@ var syncCmd = &cobra.Command{
 			}
 		}
 		for _, name := range stackNames {
-			stack := cfg.Stacks[name]
-			missing, merr := store.MissingRequired(stack.Secrets)
+			svc := cfg.Services[name]
+			missing, merr := store.MissingRequired(svc.Secrets)
 			if merr != nil {
-				fmt.Fprintf(os.Stderr, "warning: checking secrets for stack %q: %v\n", name, merr)
+				fmt.Fprintf(os.Stderr, "warning: checking secrets for service %q: %v\n", name, merr)
 				continue
 			}
 			if len(missing) > 0 {
-				warnLines = append(warnLines, fmt.Sprintf("  stack %q: %s", name, strings.Join(missing, ", ")))
+				warnLines = append(warnLines, fmt.Sprintf("  service %q: %s", name, strings.Join(missing, ", ")))
 			}
 		}
 		if len(warnLines) > 0 {
@@ -289,7 +289,7 @@ func detectOrphans(ctx context.Context, cfg *config.Config) []string {
 	for name := range cfg.Apps {
 		known["herald-"+name] = true
 	}
-	for name := range cfg.Stacks {
+	for name := range cfg.Services {
 		known["herald-stack-"+name] = true
 	}
 
