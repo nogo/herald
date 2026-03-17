@@ -54,6 +54,8 @@ Each key under `apps:` is the app name used in CLI commands (`herald deploy <nam
 | `domain` | yes | — | Primary domain. Herald configures Caddy to route traffic here. |
 | `compose` | no | `compose.yml` | Path to the compose file. Relative paths resolve from the IaC repo root; absolute paths are used as-is. |
 | `config` | no | — | Path to a non-secret env file, relative to the IaC repo root. Values are loaded as a base layer; secrets overlay on top. |
+| `tag` | no | — | Deploy a specific tag instead of tracking a branch. Mutually exclusive with `branch`. |
+| `tag_pattern` | no | — | Glob pattern (e.g. `v[0-9]*`). When a matching tag is pushed to GitHub, herald deploys it automatically. Requires `branch`. |
 | `env_file` | no | — | Additional env file to include in the compose override, relative to the app deploy directory. |
 | `override` | no | — | Inline YAML merged into the compose override. Use to add labels, extra env_file entries, or any compose key for services that herald doesn't manage directly. |
 | `secrets` | no | — | List of secrets to inject. See [Secrets](#secrets). |
@@ -231,21 +233,100 @@ Required secrets (no `generate`) that are missing cause `herald deploy` to fail 
 
 ---
 
-## Preview deployments
+## Tag deployments
 
-Preview deployments create ephemeral environments per branch or pull request.
+### Pinned tag
+
+Deploy a specific release tag. No auto-deploy — `herald deploy` only. `branch` must not be set.
 
 ```yaml
 apps:
   myapp:
     repo: myorg/myapp
+    tag: v1.2.3
+    domain: myapp.example.com
+```
+
+To upgrade, change `tag:` in config, run `herald sync` then `herald deploy myapp`.
+
+### Auto-deploy on tag pattern
+
+Continue tracking a branch for normal auto-deploy, and also deploy automatically when a matching tag is pushed.
+
+```yaml
+apps:
+  myapp:
+    repo: myorg/myapp
+    branch: main
+    tag_pattern: "v[0-9]*"   # deploy when a tag like v1.2.3 is pushed
+    domain: myapp.example.com
+```
+
+Pattern syntax is stdlib glob (`path.Match`): `v*`, `v[0-9]*`, `release-*`. A matching tag push triggers an immediate deploy of that exact tag. The next branch push deploys the branch tip again — no lasting pin.
+
+**Rules:**
+- `tag` and `branch` are mutually exclusive
+- `tag_pattern` requires `branch` (not compatible with `tag`)
+
+---
+
+## Preview deployments
+
+Preview deployments create an ephemeral environment for every feature branch or pull request, each at its own subdomain. No config change required per branch.
+
+### Setup
+
+```yaml
+apps:
+  myapp:
+    repo: myorg/myapp
+    branch: main
     domain: myapp.example.com
     preview:
       enabled: true
-      domain: "*.preview.example.com"   # wildcard — must contain *
+      domain: "*.preview.myapp.example.com"  # wildcard — must contain *
 ```
 
-When enabled, pushing to a non-default branch creates a deployment at `<branch>.preview.example.com`. Use `herald preview list` to see active previews.
+**DNS requirement:** add a wildcard record pointing to the server IP:
+```
+*.preview.myapp.example.com → <server-ip>
+```
+Caddy provisions TLS per subdomain automatically.
+
+### Triggers
+
+| Event | Action |
+|---|---|
+| Push to any branch other than `branch` | Deploy preview for that branch |
+| Pull request `opened` or `synchronize` | Deploy preview for PR head branch |
+| Push with branch deletion | Tear down preview |
+| Pull request `closed` | Tear down preview |
+
+Branch names are slugified into DNS labels: `feature/auth-v2` → `feature-auth-v2.preview.myapp.example.com`.
+
+### Managing previews
+
+```sh
+herald preview list           # show active previews (ID, domain, branch, age)
+herald preview remove <id>    # tear down a specific preview
+herald preview cleanup        # remove previews whose branches no longer exist on remote
+```
+
+`herald preview cleanup` checks each branch via `git ls-remote`. Run it periodically or after `herald sync`.
+
+### Limits and caveats
+
+- **Max 10 previews per app.** Pushing to an existing preview branch updates it (no new slot used).
+- **Secrets are shared with production.** Previews resolve secrets from the same store using the same `secrets:` list. There is no per-preview secret isolation.
+- **No per-preview database.** Unless your compose file or `override:` provisions a separate database per environment, previews share state with whatever the compose file points to. Previews work best for stateless frontends or apps that tolerate shared data.
+- **Volumes are wiped on teardown.** Preview `compose down` always passes `--volumes`.
+
+### `preview` fields
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `enabled` | yes | — | Must be `true` to activate previews. |
+| `domain` | yes | — | Wildcard domain pattern. Must contain `*`. The `*` is replaced with the branch slug. |
 
 ---
 
@@ -290,15 +371,21 @@ After deployment the directory structure under `services_dir` looks like:
 /opt/deploy/
   apps/
     myapp/
-      repo/          # git clone of the app repo (managed by herald)
-      .env           # generated: merged config + type:env secrets
+      repo/                  # git clone of the app repo (managed by herald)
+      .env                   # generated: merged config + type:env secrets
+      deployed_ref           # last deployed ref, e.g. "main@abc1234" or "refs/tags/v1.2.3@abc1234"
       secrets/
-        db_password  # written by herald for type:docker-secret entries
+        db_password          # written by herald for type:docker-secret entries
       compose.override.yml   # generated by herald (Caddy labels, env_file, secret defs)
   services/
     nextcloud/
-      .env           # generated (if secrets defined)
+      .env                   # generated (if secrets defined)
       secrets/
         admin_password
+      compose.override.yml
+  previews/
+    myapp-feature-auth/      # one directory per active preview (id = appname-branchslug)
+      repo/
+      .env
       compose.override.yml
 ```
