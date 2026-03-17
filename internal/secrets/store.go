@@ -2,6 +2,9 @@ package secrets
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -180,6 +183,25 @@ func (s *Store) Set(key, value string) error {
 	})
 }
 
+// SetIfAbsent writes key=value only if the key is not already present.
+// Returns true if the value was written, false if the key already existed.
+func (s *Store) SetIfAbsent(key, value string) (bool, error) {
+	var written bool
+	err := s.withLock(func() error {
+		secrets, err := s.readSecrets()
+		if err != nil {
+			return err
+		}
+		if _, ok := secrets[key]; ok {
+			return nil
+		}
+		secrets[key] = value
+		written = true
+		return s.writeSecrets(secrets)
+	})
+	return written, err
+}
+
 // Get retrieves a secret value by key.
 func (s *Store) Get(key string) (string, error) {
 	secrets, err := s.readSecrets()
@@ -231,8 +253,55 @@ func (s *Store) Import(key, filePath string) error {
 	return s.Set(key, string(data))
 }
 
+// generateSecret produces a cryptographically random value using the given
+// encoding. n is the number of source random bytes (minimum 1).
+func generateSecret(encoding string, n int) (string, error) {
+	if n <= 0 {
+		n = 32
+	}
+	switch encoding {
+	case "base64":
+		buf := make([]byte, n)
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("generating random bytes: %w", err)
+		}
+		return base64.StdEncoding.EncodeToString(buf), nil
+	case "hex":
+		buf := make([]byte, n)
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("generating random bytes: %w", err)
+		}
+		return hex.EncodeToString(buf), nil
+	case "alphanumeric":
+		const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		result := make([]byte, n)
+		buf := make([]byte, n*2) // extra bytes for rejection sampling
+		written := 0
+		for written < n {
+			if _, err := rand.Read(buf); err != nil {
+				return "", fmt.Errorf("generating random bytes: %w", err)
+			}
+			for _, b := range buf {
+				if written >= n {
+					break
+				}
+				// Reject bytes >= 248 to avoid modulo bias (248 = floor(256/62)*62).
+				if b >= 248 {
+					continue
+				}
+				result[written] = alphabet[int(b)%62]
+				written++
+			}
+		}
+		return string(result), nil
+	default:
+		return "", fmt.Errorf("unknown generate encoding %q", encoding)
+	}
+}
+
 // Resolve maps a list of SecretRefs to environment variables and Docker secret
-// values. Returns an error if any referenced key is missing.
+// values. Returns an error if any referenced key is missing. If a key is
+// absent and the ref has Generate set, a value is generated and stored.
 func (s *Store) Resolve(refs []config.SecretRef) (envVars map[string]string, dockerSecrets map[string]string, err error) {
 	secrets, err := s.readSecrets()
 	if err != nil {
@@ -245,7 +314,29 @@ func (s *Store) Resolve(refs []config.SecretRef) (envVars map[string]string, doc
 	for _, ref := range refs {
 		val, ok := secrets[ref.Key]
 		if !ok {
-			return nil, nil, fmt.Errorf("secret '%s' not found in store", ref.Key)
+			if ref.Generate == "" {
+				return nil, nil, fmt.Errorf("secret '%s' not found in store", ref.Key)
+			}
+			generated, err := generateSecret(ref.Generate, ref.Length)
+			if err != nil {
+				return nil, nil, fmt.Errorf("generating secret '%s': %w", ref.Key, err)
+			}
+			written, err := s.SetIfAbsent(ref.Key, generated)
+			if err != nil {
+				return nil, nil, fmt.Errorf("storing generated secret '%s': %w", ref.Key, err)
+			}
+			if written {
+				slog.Info("generated secret", "key", ref.Key)
+				val = generated
+			} else {
+				// Another process stored the key between our read and SetIfAbsent.
+				// Re-read to get the stored value.
+				reread, rerr := s.readSecrets()
+				if rerr != nil {
+					return nil, nil, rerr
+				}
+				val = reread[ref.Key]
+			}
 		}
 		switch ref.Type {
 		case "env":

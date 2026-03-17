@@ -50,9 +50,11 @@ type Stack struct {
 }
 
 type SecretRef struct {
-	Key    string `yaml:"key"    json:"key"`
-	Type   string `yaml:"type"   json:"type"`
-	Target string `yaml:"target" json:"target"`
+	Key      string `yaml:"key"               json:"key"`
+	Type     string `yaml:"type"              json:"type"`
+	Target   string `yaml:"target"            json:"target"`
+	Generate string `yaml:"generate,omitempty" json:"generate,omitzero"`
+	Length   int    `yaml:"length,omitempty"   json:"length,omitzero"`
 }
 
 type PreviewConfig struct {
@@ -117,6 +119,25 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+func validateSecretRefGenerate(kind, name string, i int, sec SecretRef) error {
+	if sec.Generate != "" {
+		switch sec.Generate {
+		case "base64", "alphanumeric", "hex":
+		default:
+			return fmt.Errorf("%s %q: secrets[%d]: generate must be \"base64\", \"alphanumeric\", or \"hex\", got %q", kind, name, i, sec.Generate)
+		}
+	}
+	if sec.Length != 0 {
+		if sec.Generate == "" {
+			return fmt.Errorf("%s %q: secrets[%d]: length requires generate to be set", kind, name, i)
+		}
+		if sec.Length < 16 || sec.Length > 512 {
+			return fmt.Errorf("%s %q: secrets[%d]: length must be between 16 and 512, got %d", kind, name, i, sec.Length)
+		}
+	}
+	return nil
+}
+
 func validate(cfg *Config) error {
 	if cfg.Server.Name == "" {
 		return errors.New("server.name is required")
@@ -153,6 +174,9 @@ func validate(cfg *Config) error {
 			if sec.Type != "env" && sec.Type != "docker-secret" {
 				return fmt.Errorf("app %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
 			}
+			if err := validateSecretRefGenerate("app", name, i, sec); err != nil {
+				return err
+			}
 		}
 
 		if app.Preview != nil && app.Preview.Enabled {
@@ -181,6 +205,9 @@ func validate(cfg *Config) error {
 		for i, sec := range stack.Secrets {
 			if sec.Type != "env" && sec.Type != "docker-secret" {
 				return fmt.Errorf("stack %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
+			}
+			if err := validateSecretRefGenerate("stack", name, i, sec); err != nil {
+				return err
 			}
 		}
 	}
