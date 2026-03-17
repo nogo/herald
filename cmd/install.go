@@ -66,11 +66,12 @@ var installCmd = &cobra.Command{
 		}
 
 		cfg := systemd.ServiceConfig{
-			BinaryPath: binaryPath,
-			ConfigPath: configPath,
-			DataDir:    dataDir,
-			User:       installUser,
-			Group:      g.Name,
+			BinaryPath:  binaryPath,
+			ConfigPath:  configPath,
+			DataDir:     dataDir,
+			User:        installUser,
+			Group:       g.Name,
+			HomeDir:     u.HomeDir,
 			ServicesDir: stacksDir,
 		}
 

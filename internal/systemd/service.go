@@ -20,11 +20,12 @@ const environmentFileContent = `# Herald environment variables
 
 // ServiceConfig holds the values needed to generate the systemd unit file.
 type ServiceConfig struct {
-	BinaryPath string
-	ConfigPath string
-	DataDir    string
-	User       string
-	Group      string
+	BinaryPath  string
+	ConfigPath  string
+	DataDir     string
+	User        string
+	Group       string
+	HomeDir     string
 	ServicesDir string
 }
 
@@ -51,7 +52,7 @@ EnvironmentFile=-/etc/herald/environment
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths={{.DataDir}} {{.ServicesDir}} /var/run/docker.sock /home/{{.User}}
+ReadWritePaths={{.DataDir}} {{.ServicesDir}} /var/run/docker.sock {{.HomeDir}}
 PrivateTmp=true
 
 # Logging

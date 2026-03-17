@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -30,15 +31,17 @@ type Server struct {
 }
 
 type App struct {
-	Repo       string         `yaml:"repo"                json:"repo"`
-	Branch     string         `yaml:"branch"              json:"branch"`
-	Domain     string         `yaml:"domain"              json:"domain"`
-	EnvFile    string         `yaml:"env_file,omitempty"  json:"env_file,omitzero"`
-	ConfigFile string         `yaml:"config,omitempty"    json:"config,omitzero"`
-	Compose    string         `yaml:"compose,omitempty"   json:"compose,omitzero"`
-	Override   string         `yaml:"override,omitempty"  json:"override,omitzero"`
-	Secrets    []SecretRef    `yaml:"secrets,omitempty"   json:"secrets,omitzero"`
-	Preview    *PreviewConfig `yaml:"preview,omitempty"   json:"preview,omitzero"`
+	Repo       string         `yaml:"repo"                  json:"repo"`
+	Branch     string         `yaml:"branch,omitempty"      json:"branch,omitzero"`
+	Tag        string         `yaml:"tag,omitempty"         json:"tag,omitzero"`
+	TagPattern string         `yaml:"tag_pattern,omitempty" json:"tag_pattern,omitzero"`
+	Domain     string         `yaml:"domain"                json:"domain"`
+	EnvFile    string         `yaml:"env_file,omitempty"    json:"env_file,omitzero"`
+	ConfigFile string         `yaml:"config,omitempty"      json:"config,omitzero"`
+	Compose    string         `yaml:"compose,omitempty"     json:"compose,omitzero"`
+	Override   string         `yaml:"override,omitempty"    json:"override,omitzero"`
+	Secrets    []SecretRef    `yaml:"secrets,omitempty"     json:"secrets,omitzero"`
+	Preview    *PreviewConfig `yaml:"preview,omitempty"     json:"preview,omitzero"`
 }
 
 type Service struct {
@@ -105,7 +108,7 @@ func Load(path string) (*Config, error) {
 
 	// Apply defaults for app fields.
 	for name, app := range cfg.Apps {
-		if app.Branch == "" {
+		if app.Branch == "" && app.Tag == "" {
 			app.Branch = "main"
 		}
 		if app.Compose == "" {
@@ -171,6 +174,25 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("app %q: domain %q already used by %s", name, app.Domain, prev)
 		}
 		domains[app.Domain] = "app:" + name
+
+		// tag and branch are mutually exclusive
+		if app.Tag != "" && app.Branch != "" {
+			return fmt.Errorf("app %q: tag and branch are mutually exclusive", name)
+		}
+		// one of tag or branch is required
+		if app.Tag == "" && app.Branch == "" {
+			return fmt.Errorf("app %q: one of branch or tag is required", name)
+		}
+		// tag_pattern only valid alongside branch
+		if app.TagPattern != "" && app.Tag != "" {
+			return fmt.Errorf("app %q: tag_pattern requires branch (not compatible with tag)", name)
+		}
+		// validate tag_pattern is a legal glob
+		if app.TagPattern != "" {
+			if _, err := path.Match(app.TagPattern, ""); err != nil {
+				return fmt.Errorf("app %q: tag_pattern %q is not a valid glob: %w", name, app.TagPattern, err)
+			}
+		}
 
 		if app.ConfigFile != "" {
 			if filepath.IsAbs(app.ConfigFile) {

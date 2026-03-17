@@ -321,6 +321,7 @@ func (d *Deployer) runCompose(ctx context.Context, appDir, appName, composeFile 
 	return runner.RunCmd(ctx, d.Logger, repoDir,
 		"docker", "compose",
 		"--project-name", "herald-"+appName,
+		"--progress", "plain",
 		"-f", composeFile,
 		"-f", overrideFile,
 		"up", "-d", "--build", "--remove-orphans",

@@ -68,7 +68,10 @@ func CloneOrFetch(ctx context.Context, token, dir, url, branch string) error {
 	if out, err := fetchCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	resetCmd := CmdWithAuth(ctx, token, dir, "reset", "--hard", "origin/"+branch)
+	// Use FETCH_HEAD rather than origin/<branch> so this works regardless of
+	// whether the local clone was created with --single-branch or the branch
+	// was renamed/changed after the initial clone.
+	resetCmd := CmdWithAuth(ctx, token, dir, "reset", "--hard", "FETCH_HEAD")
 	if out, err := resetCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
 	}
