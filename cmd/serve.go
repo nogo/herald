@@ -96,7 +96,7 @@ var serveCmd = &cobra.Command{
 			Verbose: verbose,
 			Web:     webHandler,
 			OnDeploy: func(req webhook.DeployRequest) {
-				d.DeployAsync(req.AppName, "")
+				d.DeployAsync(req.AppName, req.Ref)
 			},
 			IaCRepo:   getIaCRepo(dataDir),
 			OnIaCPush: makeIaCPushHandler(stackMgr),

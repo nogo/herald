@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -61,7 +62,9 @@ type DeployRequest struct {
 	AppName  string
 	App      config.App
 	Repo     string
-	Branch   string
+	Branch   string     // branch name for branch push; empty for tag push
+	Tag      string     // tag name (without refs/tags/ prefix) for tag push; empty for branch push
+	Ref      string     // full ref to deploy: branch name or "refs/tags/v1.2.3"
 	Commit   string
 	CloneURL string
 }
@@ -145,10 +148,19 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		repo = p.Repository.FullName
-		branch = strings.TrimPrefix(p.Ref, "refs/heads/")
 		commit = p.After
 		cloneURL = p.Repository.CloneURL
 		isDelete = p.Deleted || strings.HasPrefix(p.After, "000000")
+
+		if strings.HasPrefix(p.Ref, "refs/tags/") {
+			tagName := strings.TrimPrefix(p.Ref, "refs/tags/")
+			if !isDelete {
+				s.handleTagPush(repo, tagName, commit, cloneURL)
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"message": "tag push handled"})
+			return
+		}
+		branch = strings.TrimPrefix(p.Ref, "refs/heads/")
 
 	case "pull_request":
 		var p PullRequestPayload
@@ -229,6 +241,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			App:      app,
 			Repo:     repo,
 			Branch:   branch,
+			Ref:      branch,
 			Commit:   commit,
 			CloneURL: cloneURL,
 		}
@@ -239,6 +252,41 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"message": "accepted",
 		"apps":    matchedNames,
 	})
+}
+
+// handleTagPush matches a tag name against each app's tag_pattern and dispatches deploys.
+func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
+	var matched []string
+	for name, app := range s.Config.Apps {
+		if app.Repo != repo || app.TagPattern == "" {
+			continue
+		}
+		ok, err := path.Match(app.TagPattern, tag)
+		if err != nil || !ok {
+			continue
+		}
+		matched = append(matched, name)
+	}
+	if len(matched) == 0 {
+		slog.Info("webhook", "event", "push", "tag", tag, "result", "ignored: no matching tag_pattern")
+		return
+	}
+	slices.Sort(matched)
+	slog.Info("webhook", "event", "push", "tag", tag,
+		"result", fmt.Sprintf("accepted: %s", strings.Join(matched, ",")))
+	for _, name := range matched {
+		app := s.Config.Apps[name]
+		req := DeployRequest{
+			AppName:  name,
+			App:      app,
+			Repo:     repo,
+			Tag:      tag,
+			Ref:      "refs/tags/" + tag,
+			Commit:   commit,
+			CloneURL: cloneURL,
+		}
+		go s.OnDeploy(req)
+	}
 }
 
 // handlePreviewEvent dispatches preview deploy or teardown for preview-enabled apps.
