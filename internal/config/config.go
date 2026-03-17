@@ -40,10 +40,12 @@ type App struct {
 }
 
 type Stack struct {
-	Path         string `yaml:"path"                    json:"path"`
-	Domain       string `yaml:"domain"                  json:"domain"`
-	AutoDeploy   bool   `yaml:"auto_deploy"             json:"auto_deploy,omitzero"`
-	UpdateScript string `yaml:"update_script,omitempty" json:"update_script,omitzero"`
+	Path         string      `yaml:"path"                    json:"path"`
+	Domain       string      `yaml:"domain"                  json:"domain"`
+	AutoDeploy   bool        `yaml:"auto_deploy"             json:"auto_deploy,omitzero"`
+	UpdateScript string      `yaml:"update_script,omitempty" json:"update_script,omitzero"`
+	EnvFile      string      `yaml:"env_file,omitempty"      json:"env_file,omitzero"`
+	Secrets      []SecretRef `yaml:"secrets,omitempty"       json:"secrets,omitzero"`
 }
 
 type SecretRef struct {
@@ -174,6 +176,12 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("stack %q: domain %q already used by %s", name, stack.Domain, prev)
 		}
 		domains[stack.Domain] = "stack:" + name
+
+		for i, sec := range stack.Secrets {
+			if sec.Type != "env" && sec.Type != "docker-secret" {
+				return fmt.Errorf("stack %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
+			}
+		}
 	}
 
 	return nil

@@ -100,7 +100,50 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 	}
 	composeFile := filepath.Join(repoLink, composeName)
 
-	if err := m.generateOverride(deployDir, stackName, stack, composeFile); err != nil {
+	envVars, dockerSecrets, err := m.Secrets.Resolve(stack.Secrets)
+	if err != nil {
+		return fmt.Errorf("resolving secrets: %w", err)
+	}
+	if len(envVars)+len(dockerSecrets) > 0 {
+		m.Logger.Info("secrets resolved",
+			"stack", stackName,
+			"env_keys", slices.Sorted(maps.Keys(envVars)),
+			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
+		)
+	}
+
+	if stack.EnvFile != "" {
+		f, err := os.OpenFile(filepath.Join(deployDir, stack.EnvFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		if err != nil {
+			return fmt.Errorf("writing env file: %w", err)
+		}
+		for _, key := range slices.Sorted(maps.Keys(envVars)) {
+			if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); werr != nil {
+				f.Close()
+				return fmt.Errorf("writing env file: %w", werr)
+			}
+		}
+		f.Close()
+	}
+
+	if len(dockerSecrets) > 0 {
+		secretsDir := filepath.Join(deployDir, "secrets")
+		if err := os.MkdirAll(secretsDir, 0700); err != nil {
+			return fmt.Errorf("creating secrets dir: %w", err)
+		}
+		secretsRoot, err := os.OpenRoot(secretsDir)
+		if err != nil {
+			return fmt.Errorf("opening secrets root: %w", err)
+		}
+		defer secretsRoot.Close()
+		for name, val := range dockerSecrets {
+			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
+				return fmt.Errorf("writing docker secret %q: %w", name, err)
+			}
+		}
+	}
+
+	if err := m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets); err != nil {
 		return fmt.Errorf("generating compose override: %w", err)
 	}
 
@@ -134,6 +177,61 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 		if err := m.Setup(ctx, stackName); err != nil {
 			return fmt.Errorf("setting up stack: %w", err)
 		}
+	}
+
+	deployDir := m.stackDeployDir(stackName)
+	repoLink := filepath.Join(deployDir, "repo")
+
+	envVars, dockerSecrets, err := m.Secrets.Resolve(stack.Secrets)
+	if err != nil {
+		return fmt.Errorf("resolving secrets: %w", err)
+	}
+	if len(envVars)+len(dockerSecrets) > 0 {
+		m.Logger.Info("secrets resolved",
+			"stack", stackName,
+			"env_keys", slices.Sorted(maps.Keys(envVars)),
+			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
+		)
+	}
+
+	if stack.EnvFile != "" {
+		f, err := os.OpenFile(filepath.Join(deployDir, stack.EnvFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		if err != nil {
+			return fmt.Errorf("writing env file: %w", err)
+		}
+		for _, key := range slices.Sorted(maps.Keys(envVars)) {
+			if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); werr != nil {
+				f.Close()
+				return fmt.Errorf("writing env file: %w", werr)
+			}
+		}
+		f.Close()
+	}
+
+	if len(dockerSecrets) > 0 {
+		secretsDir := filepath.Join(deployDir, "secrets")
+		if err := os.MkdirAll(secretsDir, 0700); err != nil {
+			return fmt.Errorf("creating secrets dir: %w", err)
+		}
+		secretsRoot, err := os.OpenRoot(secretsDir)
+		if err != nil {
+			return fmt.Errorf("opening secrets root: %w", err)
+		}
+		defer secretsRoot.Close()
+		for name, val := range dockerSecrets {
+			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
+				return fmt.Errorf("writing docker secret %q: %w", name, err)
+			}
+		}
+	}
+
+	composeName, err := findComposeFile(repoLink)
+	if err != nil {
+		return err
+	}
+	composeFile := filepath.Join(repoLink, composeName)
+	if err := m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets); err != nil {
+		return fmt.Errorf("generating compose override: %w", err)
 	}
 
 	if err := m.RunUpdateScript(ctx, stackName); err != nil {
@@ -201,6 +299,7 @@ func (m *StackManager) RunUpdateScript(ctx context.Context, stackName string) er
 		"STACK_DIR="+deployDir,
 		"STACK_DOMAIN="+stack.Domain,
 		"COMPOSE_FILE="+composeFile,
+		"COMPOSE_OVERRIDE_FILE="+filepath.Join(deployDir, "compose.override.yml"),
 	)
 
 	m.Logger.Info("running update script", "stack", stackName, "script", scriptPath, "dir", deployDir)
@@ -275,7 +374,7 @@ func findComposeFile(dir string) (string, error) {
 	return "", fmt.Errorf("no compose file found in %s", dir)
 }
 
-func (m *StackManager) generateOverride(deployDir, stackName string, stack config.Stack, composeFile string) error {
+func (m *StackManager) generateOverride(deployDir, stackName string, stack config.Stack, composeFile string, envFile string, dockerSecrets map[string]string) error {
 	serviceName, port, err := compose.DetectServiceInfo(composeFile, stackName, "80")
 	if err != nil {
 		m.Logger.Warn("could not detect service info, using defaults", "stack", stackName, "error", err)
@@ -283,19 +382,35 @@ func (m *StackManager) generateOverride(deployDir, stackName string, stack confi
 		port = "80"
 	}
 
+	svc := compose.ServiceOverride{
+		Labels: map[string]string{
+			"caddy":               stack.Domain,
+			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
+		},
+		Networks: []string{"caddy"},
+	}
+
+	if envFile != "" {
+		svc.EnvFile = []string{filepath.Join(deployDir, envFile)}
+	}
+
+	secretNames := slices.Sorted(maps.Keys(dockerSecrets))
+	if len(secretNames) > 0 {
+		svc.Secrets = secretNames
+	}
+
 	override := compose.Override{
-		Services: map[string]compose.ServiceOverride{
-			serviceName: {
-				Labels: map[string]string{
-					"caddy":               stack.Domain,
-					"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
-				},
-				Networks: []string{"caddy"},
-			},
-		},
-		Networks: map[string]compose.NetworkDef{
-			"caddy": {External: true},
-		},
+		Services: map[string]compose.ServiceOverride{serviceName: svc},
+		Networks: map[string]compose.NetworkDef{"caddy": {External: true}},
+	}
+
+	if len(secretNames) > 0 {
+		override.Secrets = make(map[string]compose.SecretFileDef, len(secretNames))
+		for _, name := range secretNames {
+			override.Secrets[name] = compose.SecretFileDef{
+				File: filepath.Join(deployDir, "secrets", name),
+			}
+		}
 	}
 
 	data, err := yaml.Marshal(override)
