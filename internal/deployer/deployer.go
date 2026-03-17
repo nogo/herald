@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"strings"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -76,6 +77,16 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 	app, ok := d.Config.Apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found in config", appName)
+	}
+
+	// Pre-flight: check for missing required secrets.
+	missing, err := d.Secrets.MissingRequired(app.Secrets)
+	if err != nil {
+		return fmt.Errorf("checking secrets: %w", err)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("app %q: missing required secrets (use `herald secret set <key>`): %s",
+			appName, strings.Join(missing, ", "))
 	}
 
 	appDir := filepath.Join(d.Config.Server.StacksDir, "apps", appName)

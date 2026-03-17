@@ -71,6 +71,16 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 		return fmt.Errorf("stack %q not found in config", stackName)
 	}
 
+	// Pre-flight: check for missing required secrets.
+	missing, err := m.Secrets.MissingRequired(stack.Secrets)
+	if err != nil {
+		return fmt.Errorf("checking secrets: %w", err)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("stack %q: missing required secrets (use `herald secret set <key>`): %s",
+			stackName, strings.Join(missing, ", "))
+	}
+
 	stackRepoPath := m.stackRepoPath(stack)
 	if _, err := os.Stat(stackRepoPath); err != nil {
 		return fmt.Errorf("stack path %q not found in IaC repo: %w", stack.Path, err)
@@ -152,6 +162,16 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 	stack, ok := m.Config.Stacks[stackName]
 	if !ok {
 		return fmt.Errorf("stack %q not found in config", stackName)
+	}
+
+	// Pre-flight: check for missing required secrets.
+	missing, err := m.Secrets.MissingRequired(stack.Secrets)
+	if err != nil {
+		return fmt.Errorf("checking secrets: %w", err)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("stack %q: missing required secrets (use `herald secret set <key>`): %s",
+			stackName, strings.Join(missing, ", "))
 	}
 
 	start := time.Now()

@@ -215,6 +215,27 @@ func (s *Store) Get(key string) (string, error) {
 	return val, nil
 }
 
+// MissingRequired returns the keys of refs that are absent from the store and
+// have no Generate value (i.e. they cannot be auto-created). Returns nil, nil
+// if nothing is missing.
+func (s *Store) MissingRequired(refs []config.SecretRef) ([]string, error) {
+	secrets, err := s.readSecrets()
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for _, ref := range refs {
+		if ref.Generate != "" {
+			continue
+		}
+		if _, ok := secrets[ref.Key]; !ok {
+			missing = append(missing, ref.Key)
+		}
+	}
+	slices.Sort(missing)
+	return missing, nil
+}
+
 // List returns all secret keys sorted alphabetically.
 func (s *Store) List() ([]string, error) {
 	secrets, err := s.readSecrets()

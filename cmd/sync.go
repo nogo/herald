@@ -229,6 +229,38 @@ var syncCmd = &cobra.Command{
 			}
 		}
 
+		// 8. Advisory: warn about missing required secrets (non-blocking).
+		var warnLines []string
+		for _, name := range appNames {
+			app := cfg.Apps[name]
+			missing, merr := store.MissingRequired(app.Secrets)
+			if merr != nil {
+				fmt.Fprintf(os.Stderr, "warning: checking secrets for app %q: %v\n", name, merr)
+				continue
+			}
+			if len(missing) > 0 {
+				warnLines = append(warnLines, fmt.Sprintf("  app %q: %s", name, strings.Join(missing, ", ")))
+			}
+		}
+		for _, name := range stackNames {
+			stack := cfg.Stacks[name]
+			missing, merr := store.MissingRequired(stack.Secrets)
+			if merr != nil {
+				fmt.Fprintf(os.Stderr, "warning: checking secrets for stack %q: %v\n", name, merr)
+				continue
+			}
+			if len(missing) > 0 {
+				warnLines = append(warnLines, fmt.Sprintf("  stack %q: %s", name, strings.Join(missing, ", ")))
+			}
+		}
+		if len(warnLines) > 0 {
+			fmt.Fprintln(os.Stderr, "\nWarning: the following secrets are required but not set:")
+			for _, line := range warnLines {
+				fmt.Fprintln(os.Stderr, line)
+			}
+			fmt.Fprintln(os.Stderr, "Run `herald secret set <key>` to set them before deploying.")
+		}
+
 		return nil
 	},
 }
