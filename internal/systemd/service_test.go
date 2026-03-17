@@ -7,12 +7,13 @@ import (
 
 func TestGenerateUnitFile_structure(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath: "/usr/local/bin/herald",
-		ConfigPath: "/etc/herald/config.yml",
-		DataDir:    "/etc/herald/",
-		User:       "herald",
-		Group:      "herald",
-		ServicesDir:  "/opt/deploy",
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/etc/herald/config.yml",
+		DataDir:     "/etc/herald/",
+		User:        "herald",
+		Group:       "herald",
+		HomeDir:     "/home/herald",
+		ServicesDir: "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
