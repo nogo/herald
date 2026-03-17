@@ -113,17 +113,13 @@ func (m *StackManager) Setup(ctx context.Context, stackName string) error {
 	}
 
 	if stack.EnvFile != "" {
-		f, err := os.OpenFile(filepath.Join(deployDir, stack.EnvFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		envMap, err := m.buildEnvMap(stack, envVars)
 		if err != nil {
+			return fmt.Errorf("building env map: %w", err)
+		}
+		if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
 			return fmt.Errorf("writing env file: %w", err)
 		}
-		for _, key := range slices.Sorted(maps.Keys(envVars)) {
-			if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); werr != nil {
-				f.Close()
-				return fmt.Errorf("writing env file: %w", werr)
-			}
-		}
-		f.Close()
 	}
 
 	if len(dockerSecrets) > 0 {
@@ -195,17 +191,13 @@ func (m *StackManager) Update(ctx context.Context, stackName string) error {
 	}
 
 	if stack.EnvFile != "" {
-		f, err := os.OpenFile(filepath.Join(deployDir, stack.EnvFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		envMap, err := m.buildEnvMap(stack, envVars)
 		if err != nil {
+			return fmt.Errorf("building env map: %w", err)
+		}
+		if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
 			return fmt.Errorf("writing env file: %w", err)
 		}
-		for _, key := range slices.Sorted(maps.Keys(envVars)) {
-			if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); werr != nil {
-				f.Close()
-				return fmt.Errorf("writing env file: %w", werr)
-			}
-		}
-		f.Close()
 	}
 
 	if len(dockerSecrets) > 0 {
@@ -372,6 +364,84 @@ func findComposeFile(dir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no compose file found in %s", dir)
+}
+
+// validateConfigFilePath returns an error if p is absolute or contains ".." components.
+func validateConfigFilePath(p string) error {
+	if filepath.IsAbs(p) {
+		return fmt.Errorf("config file path must be relative, got %q", p)
+	}
+	for _, part := range strings.Split(filepath.ToSlash(p), "/") {
+		if part == ".." {
+			return fmt.Errorf("config file path must not contain '..': %q", p)
+		}
+	}
+	return nil
+}
+
+// loadConfigFile parses a KEY=VALUE env file, skipping comments and blank lines.
+func (m *StackManager) loadConfigFile(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("config file %q not found in IaC repo", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading config file %q: %w", path, err)
+	}
+	result := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		idx := strings.IndexByte(trimmed, '=')
+		if idx < 0 {
+			m.Logger.Debug("config file: ignoring line without '='", "line", trimmed)
+			continue
+		}
+		result[strings.TrimSpace(trimmed[:idx])] = strings.TrimSpace(trimmed[idx+1:])
+	}
+	return result, nil
+}
+
+// buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.
+func (m *StackManager) buildEnvMap(stack config.Stack, envVars map[string]string) (map[string]string, error) {
+	if stack.ConfigFile == "" {
+		return envVars, nil
+	}
+	if err := validateConfigFilePath(stack.ConfigFile); err != nil {
+		return nil, err
+	}
+	base, err := m.loadConfigFile(filepath.Join(m.repoDir(), stack.ConfigFile))
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(base)+len(envVars))
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range envVars {
+		if _, exists := result[k]; exists {
+			m.Logger.Debug("config key overridden by secret", "key", k)
+		}
+		result[k] = v
+	}
+	return result, nil
+}
+
+// writeEnvFile writes sorted KEY=VALUE pairs to the given file path.
+func writeEnvFile(path string, envMap map[string]string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	for _, key := range slices.Sorted(maps.Keys(envMap)) {
+		if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envMap[key]); werr != nil {
+			f.Close()
+			return werr
+		}
+	}
+	return f.Close()
 }
 
 func (m *StackManager) generateOverride(deployDir, stackName string, stack config.Stack, composeFile string, envFile string, dockerSecrets map[string]string) error {

@@ -45,6 +45,7 @@ type Stack struct {
 	AutoDeploy   bool        `yaml:"auto_deploy"             json:"auto_deploy,omitzero"`
 	UpdateScript string      `yaml:"update_script,omitempty" json:"update_script,omitzero"`
 	EnvFile      string      `yaml:"env_file,omitempty"      json:"env_file,omitzero"`
+	ConfigFile   string      `yaml:"config,omitempty"        json:"config,omitzero"`
 	Secrets      []SecretRef `yaml:"secrets,omitempty"       json:"secrets,omitzero"`
 }
 
