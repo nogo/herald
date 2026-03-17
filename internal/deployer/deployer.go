@@ -342,6 +342,37 @@ func (d *Deployer) generateOverride(
 	return err
 }
 
+// Down stops and removes the containers for the named app.
+// If removeVolumes is true, named volumes are also removed.
+func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool) error {
+	app, ok := d.Config.Apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found in config", appName)
+	}
+
+	appDir := filepath.Join(d.Config.Server.ServicesDir, "apps", appName)
+	repoDir := filepath.Join(appDir, "repo")
+	composeFile := resolveComposePath(app.Compose, repoDir)
+	overrideFile := filepath.Join(appDir, "compose.override.yml")
+
+	args := []string{
+		"compose",
+		"--project-name", "herald-" + appName,
+		"--progress", "plain",
+		"-f", composeFile,
+	}
+	if _, err := os.Stat(overrideFile); err == nil {
+		args = append(args, "-f", overrideFile)
+	}
+	args = append(args, "down", "--remove-orphans")
+	if removeVolumes {
+		args = append(args, "--volumes")
+	}
+
+	d.Logger.Info("compose down", "app", appName, "remove_volumes", removeVolumes)
+	return runner.RunCmd(ctx, d.Logger, repoDir, "docker", args...)
+}
+
 // runCompose executes docker compose up -d --build --remove-orphans.
 func (d *Deployer) runCompose(ctx context.Context, appDir, appName, composeFile string) error {
 	repoDir := filepath.Join(appDir, "repo")
