@@ -226,6 +226,7 @@ func makeIaCPushHandler(mgr *services.ServiceManager) func() {
 }
 
 func init() {
+	serveCmd.GroupID = "daemon"
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().IntVar(&port, "port", 9483, "Port to listen on")
 }

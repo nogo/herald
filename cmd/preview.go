@@ -101,5 +101,6 @@ func init() {
 	previewCmd.AddCommand(previewListCmd)
 	previewCmd.AddCommand(previewRemoveCmd)
 	previewCmd.AddCommand(previewCleanupCmd)
+	previewCmd.GroupID = "previews"
 	rootCmd.AddCommand(previewCmd)
 }

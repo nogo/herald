@@ -152,5 +152,6 @@ var secretDeleteCmd = &cobra.Command{
 
 func init() {
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretListCmd, secretImportCmd, secretDeleteCmd)
+	secretCmd.GroupID = "secrets"
 	rootCmd.AddCommand(secretCmd)
 }

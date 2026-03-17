@@ -27,5 +27,6 @@ var uninstallCmd = &cobra.Command{
 }
 
 func init() {
+	uninstallCmd.GroupID = "daemon"
 	rootCmd.AddCommand(uninstallCmd)
 }

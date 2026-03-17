@@ -101,6 +101,15 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "daemon", Title: "Daemon:"},
+		&cobra.Group{ID: "apps", Title: "Apps:"},
+		&cobra.Group{ID: "services", Title: "Services:"},
+		&cobra.Group{ID: "previews", Title: "Previews:"},
+		&cobra.Group{ID: "secrets", Title: "Secrets:"},
+		&cobra.Group{ID: "infra", Title: "Infrastructure:"},
+		&cobra.Group{ID: "auth", Title: "Auth:"},
+	)
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "/etc/herald/config.yml", "Path to config file")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "/etc/herald", "Directory for age key and secrets file")

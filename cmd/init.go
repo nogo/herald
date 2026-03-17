@@ -103,6 +103,7 @@ func resolveGitHubToken(ctx context.Context, flagToken, clientID, dDir string) (
 }
 
 func init() {
+	initCmd.GroupID = "auth"
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initGitHubToken, "github-token", "", "GitHub personal access token (or set GITHUB_TOKEN)")
 	initCmd.Flags().StringVar(&initClientID, "client-id", "", "GitHub OAuth App Client ID for device flow (or set HERALD_GITHUB_CLIENT_ID)")

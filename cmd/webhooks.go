@@ -105,5 +105,6 @@ var webhooksListCmd = &cobra.Command{
 func init() {
 	webhooksSyncCmd.Flags().Bool("force", false, "Delete and recreate all webhooks (use after changing webhook secret)")
 	webhooksCmd.AddCommand(webhooksSyncCmd, webhooksListCmd)
+	webhooksCmd.GroupID = "infra"
 	rootCmd.AddCommand(webhooksCmd)
 }

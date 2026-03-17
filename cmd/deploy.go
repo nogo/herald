@@ -81,6 +81,7 @@ var deployCmd = &cobra.Command{
 }
 
 func init() {
+	deployCmd.GroupID = "apps"
 	rootCmd.AddCommand(deployCmd)
 	deployCmd.Flags().BoolVar(&deployAll, "all", false, "Deploy all configured apps sequentially")
 }

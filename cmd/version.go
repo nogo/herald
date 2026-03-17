@@ -25,5 +25,6 @@ var versionCmd = &cobra.Command{
 }
 
 func init() {
+	versionCmd.GroupID = "auth"
 	rootCmd.AddCommand(versionCmd)
 }

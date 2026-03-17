@@ -111,6 +111,7 @@ var authLogoutCmd = &cobra.Command{
 }
 
 func init() {
+	authCmd.GroupID = "auth"
 	rootCmd.AddCommand(authCmd)
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)
