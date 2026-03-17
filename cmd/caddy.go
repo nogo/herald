@@ -82,5 +82,6 @@ var caddyStatusCmd = &cobra.Command{
 func init() {
 	caddyStartCmd.Flags().Int("herald-port", 9483, "Port where herald's webhook server is running")
 	caddyCmd.AddCommand(caddyStartCmd, caddyStopCmd, caddyStatusCmd)
+	caddyCmd.GroupID = "infra"
 	rootCmd.AddCommand(caddyCmd)
 }

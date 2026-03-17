@@ -94,6 +94,7 @@ func runUpdateList(cmd *cobra.Command, mgr *services.ServiceManager) error {
 }
 
 func init() {
+	updateCmd.GroupID = "services"
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVar(&updateList, "list", false, "List available services and their update scripts")
 	updateCmd.Flags().IntVar(&updateTimeout, "timeout", 30, "Update script timeout in minutes")

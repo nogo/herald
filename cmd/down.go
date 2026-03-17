@@ -47,6 +47,7 @@ This is irreversible without a backup.`,
 }
 
 func init() {
+	downCmd.GroupID = "apps"
 	rootCmd.AddCommand(downCmd)
 	downCmd.Flags().BoolVar(&downVolumes, "volumes", false, "Also remove named volumes (irreversible without a backup)")
 }

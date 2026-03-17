@@ -180,6 +180,7 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 }
 
 func init() {
+	statusCmd.GroupID = "daemon"
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output as JSON")
 }

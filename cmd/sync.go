@@ -317,5 +317,6 @@ func syncCmdOutput(ctx context.Context, dir, name string, args ...string) (strin
 }
 
 func init() {
+	syncCmd.GroupID = "daemon"
 	rootCmd.AddCommand(syncCmd)
 }

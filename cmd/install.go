@@ -134,6 +134,7 @@ func warnDockerGroup(u *user.User, username string) {
 }
 
 func init() {
+	installCmd.GroupID = "daemon"
 	rootCmd.AddCommand(installCmd)
 	installCmd.Flags().StringVar(&installUser, "user", "", "User to run the service as (default: current user)")
 	installCmd.Flags().BoolVar(&installStart, "start", true, "Start the service immediately after installing")
