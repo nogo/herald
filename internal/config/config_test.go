@@ -59,7 +59,7 @@ func TestLoad_DefaultBranchAndCompose(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
-  stacks_dir: /opt/deploy
+  services_dir: /opt/deploy
 apps:
   myapp:
     repo: owner/repo
@@ -88,7 +88,7 @@ func TestLoad_MissingServerName(t *testing.T) {
 	_, _ = tmp.WriteString(`
 server:
   deploy_domain: deploy.example.com
-  stacks_dir: /opt
+  services_dir: /opt
 `)
 	tmp.Close()
 
@@ -125,7 +125,7 @@ func TestLoad_InvalidSecretType(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
-  stacks_dir: /opt
+  services_dir: /opt
 apps:
   myapp:
     repo: owner/repo
@@ -154,7 +154,7 @@ func TestLoad_PreviewEnabledWithoutDomain(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
-  stacks_dir: /opt
+  services_dir: /opt
 apps:
   myapp:
     repo: owner/repo
@@ -181,7 +181,7 @@ func TestLoad_PreviewDomainWithoutWildcard(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
-  stacks_dir: /opt
+  services_dir: /opt
 apps:
   myapp:
     repo: owner/repo

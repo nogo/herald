@@ -23,7 +23,7 @@ type Config struct {
 type Server struct {
 	Name         string `yaml:"name"          json:"name"`
 	DeployDomain string `yaml:"deploy_domain" json:"deploy_domain"`
-	StacksDir    string `yaml:"stacks_dir"    json:"stacks_dir"`
+	ServicesDir  string `yaml:"services_dir"  json:"services_dir"`
 	GithubToken  string `yaml:"github_token"  json:"github_token,omitempty"`
 	AcmeEmail    string `yaml:"acme_email"    json:"acme_email,omitempty"`
 	Port         int    `yaml:"port,omitempty" json:"port,omitzero"`
@@ -147,8 +147,8 @@ func validate(cfg *Config) error {
 	if cfg.Server.DeployDomain == "" {
 		return errors.New("server.deploy_domain is required")
 	}
-	if cfg.Server.StacksDir == "" {
-		return errors.New("server.stacks_dir is required")
+	if cfg.Server.ServicesDir == "" {
+		return errors.New("server.services_dir is required")
 	}
 
 	// Collect all domains to detect duplicates across apps and services.

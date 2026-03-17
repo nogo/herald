@@ -51,7 +51,7 @@ type ProxiedDomain struct {
 }
 
 func (m *CaddyManager) composeFilePath() string {
-	return filepath.Join(m.Config.Server.StacksDir, "caddy", "compose.yml")
+	return filepath.Join(m.Config.Server.ServicesDir, "caddy", "compose.yml")
 }
 
 // EnsureNetwork creates the caddy Docker network if it doesn't exist.

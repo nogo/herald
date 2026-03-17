@@ -90,7 +90,7 @@ func (d *Deployer) Deploy(ctx context.Context, appName string) error {
 			appName, strings.Join(missing, ", "))
 	}
 
-	appDir := filepath.Join(d.Config.Server.StacksDir, "apps", appName)
+	appDir := filepath.Join(d.Config.Server.ServicesDir, "apps", appName)
 	start := time.Now()
 	d.Logger.Info("deploy started", "app", appName, "dir", appDir)
 

@@ -25,7 +25,7 @@ type ServiceConfig struct {
 	DataDir    string
 	User       string
 	Group      string
-	StacksDir  string
+	ServicesDir string
 }
 
 var unitTemplate = template.Must(template.New("unit").Parse(`[Unit]
@@ -51,7 +51,7 @@ EnvironmentFile=-/etc/herald/environment
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths={{.DataDir}} {{.StacksDir}} /var/run/docker.sock /home/{{.User}}
+ReadWritePaths={{.DataDir}} {{.ServicesDir}} /var/run/docker.sock /home/{{.User}}
 PrivateTmp=true
 
 # Logging

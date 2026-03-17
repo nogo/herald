@@ -1,7 +1,7 @@
 server:
   name: srv2
   deploy_domain: deploy.example.com
-  stacks_dir: /opt/deploy
+  services_dir: /opt/deploy
 
 apps:
   budget:

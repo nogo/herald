@@ -12,7 +12,7 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 		DataDir:    "/etc/herald/",
 		User:       "herald",
 		Group:      "herald",
-		StacksDir:  "/opt/deploy",
+		ServicesDir:  "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -53,7 +53,7 @@ func TestGenerateUnitFile_noTokenInUnitFile(t *testing.T) {
 		DataDir:    "/etc/herald/",
 		User:       "deploy",
 		Group:      "deploy",
-		StacksDir:  "/opt/deploy",
+		ServicesDir:  "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -77,7 +77,7 @@ func TestGenerateUnitFile_noGithubToken(t *testing.T) {
 		DataDir:    "/etc/herald/",
 		User:       "deploy",
 		Group:      "deploy",
-		StacksDir:  "/opt/deploy",
+		ServicesDir:  "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -93,7 +93,7 @@ func TestGenerateUnitFile_dataDirCleaned(t *testing.T) {
 		DataDir:    "/etc/herald/",
 		User:       "herald",
 		Group:      "herald",
-		StacksDir:  "/opt/deploy",
+		ServicesDir:  "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -106,19 +106,19 @@ func TestGenerateUnitFile_dataDirCleaned(t *testing.T) {
 	}
 }
 
-func TestGenerateUnitFile_customStacksDir(t *testing.T) {
+func TestGenerateUnitFile_customServicesDir(t *testing.T) {
 	cfg := ServiceConfig{
 		BinaryPath: "/usr/local/bin/herald",
 		ConfigPath: "/etc/herald/config.yml",
 		DataDir:    "/etc/herald",
 		User:       "deploy",
 		Group:      "deploy",
-		StacksDir:  "/srv/apps",
+		ServicesDir:  "/srv/apps",
 	}
 	got := GenerateUnitFile(cfg)
 
 	if !strings.Contains(got, "ReadWritePaths=/etc/herald /srv/apps /var/run/docker.sock") {
-		t.Errorf("expected custom StacksDir in ReadWritePaths, got:\n%s", got)
+		t.Errorf("expected custom ServicesDir in ReadWritePaths, got:\n%s", got)
 	}
 }
 

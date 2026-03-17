@@ -326,7 +326,7 @@ func (m *PreviewManager) Cleanup(ctx context.Context) error {
 
 // previewDir returns the directory for a preview deployment.
 func (m *PreviewManager) previewDir(id string) string {
-	return filepath.Join(m.Config.Server.StacksDir, "previews", id)
+	return filepath.Join(m.Config.Server.ServicesDir, "previews", id)
 }
 
 // branchExists checks whether the branch exists on the remote.

@@ -49,9 +49,9 @@ func (m *ServiceManager) stackRepoPath(stack config.Service) string {
 }
 
 // stackDeployDir returns the deploy directory for a named service.
-// e.g. /opt/deploy/stacks/nextcloud
+// e.g. /opt/deploy/services/nextcloud
 func (m *ServiceManager) stackDeployDir(stackName string) string {
-	return filepath.Join(m.Config.Server.StacksDir, "stacks", stackName)
+	return filepath.Join(m.Config.Server.ServicesDir, "services", stackName)
 }
 
 // isSetUp returns true if the service's deploy directory is already configured
@@ -276,10 +276,10 @@ func (m *ServiceManager) ComposeUp(ctx context.Context, stackName string) error 
 	composeFile := filepath.Join(repoLink, composeName)
 	overrideFile := filepath.Join(deployDir, "compose.override.yml")
 
-	m.Logger.Info("compose up", "service", stackName, "project", "herald-stack-"+stackName)
+	m.Logger.Info("compose up", "service", stackName, "project", "herald-svc-"+stackName)
 	return runStreamCmd(ctx, m.Logger, deployDir,
 		"docker", "compose",
-		"--project-name", "herald-stack-"+stackName,
+		"--project-name", "herald-svc-"+stackName,
 		"-f", composeFile,
 		"-f", overrideFile,
 		"up", "-d", "--build", "--remove-orphans",
@@ -307,7 +307,7 @@ func (m *ServiceManager) RunUpdateScript(ctx context.Context, stackName string) 
 	composeFile := filepath.Join(repoLink, composeName)
 
 	env := append(os.Environ(),
-		"STACK_NAME="+stackName,
+		"SERVICE_NAME="+stackName,
 		"STACK_DIR="+deployDir,
 		"STACK_DOMAIN="+stack.Domain,
 		"COMPOSE_FILE="+composeFile,

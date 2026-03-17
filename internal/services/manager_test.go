@@ -22,7 +22,7 @@ func newTestManager(t *testing.T, cfg *config.Config, dataDir string) *ServiceMa
 
 func TestList_empty(t *testing.T) {
 	cfg := &config.Config{
-		Server:   config.Server{StacksDir: t.TempDir()},
+		Server:   config.Server{ServicesDir: t.TempDir()},
 		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, t.TempDir())
@@ -33,7 +33,7 @@ func TestList_empty(t *testing.T) {
 
 func TestList_sorted(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: t.TempDir()},
+		Server: config.Server{ServicesDir: t.TempDir()},
 		Services: map[string]config.Service{
 			"zeppelin": {Path: "stacks/zeppelin", Domain: "z.example.com", UpdateScript: "stacks/zeppelin/update.sh"},
 			"alpha":    {Path: "stacks/alpha", Domain: "a.example.com"},
@@ -84,7 +84,7 @@ func TestRunUpdateScript_success(t *testing.T) {
 	}
 
 	// Create deploy dir with repo symlink.
-	deployDir := filepath.Join(stacksDir, "stacks", "mystack")
+	deployDir := filepath.Join(stacksDir, "services", "mystack")
 	if err := os.MkdirAll(deployDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestRunUpdateScript_success(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: stacksDir},
+		Server: config.Server{ServicesDir: stacksDir},
 		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",
@@ -133,7 +133,7 @@ func TestRunUpdateScript_fail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deployDir := filepath.Join(stacksDir, "stacks", "mystack")
+	deployDir := filepath.Join(stacksDir, "services", "mystack")
 	if err := os.MkdirAll(deployDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRunUpdateScript_fail(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: stacksDir},
+		Server: config.Server{ServicesDir: stacksDir},
 		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",
@@ -164,7 +164,7 @@ func TestRunUpdateScript_fail(t *testing.T) {
 
 func TestRunUpdateScript_noScript(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: t.TempDir()},
+		Server: config.Server{ServicesDir: t.TempDir()},
 		Services: map[string]config.Service{
 			"mystack": {Path: "stacks/mystack", Domain: "x.example.com"},
 		},
@@ -178,7 +178,7 @@ func TestRunUpdateScript_noScript(t *testing.T) {
 
 func TestRunUpdateScript_unknownStack(t *testing.T) {
 	cfg := &config.Config{
-		Server:   config.Server{StacksDir: t.TempDir()},
+		Server:   config.Server{ServicesDir: t.TempDir()},
 		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, t.TempDir())
@@ -190,13 +190,13 @@ func TestRunUpdateScript_unknownStack(t *testing.T) {
 
 func TestStackDeployDir(t *testing.T) {
 	cfg := &config.Config{
-		Server:   config.Server{StacksDir: "/opt/deploy"},
+		Server:   config.Server{ServicesDir: "/opt/deploy"},
 		Services: map[string]config.Service{},
 	}
 	m := newTestManager(t, cfg, "/etc/herald")
 
 	got := m.stackDeployDir("nextcloud")
-	want := "/opt/deploy/stacks/nextcloud"
+	want := "/opt/deploy/services/nextcloud"
 	if got != want {
 		t.Fatalf("stackDeployDir = %q, want %q", got, want)
 	}
@@ -232,10 +232,10 @@ func TestRunUpdateScript_envVars(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Script that echoes env vars; fails if STACK_NAME is wrong.
+	// Script that echoes env vars; fails if SERVICE_NAME is wrong.
 	script := `#!/bin/bash
 set -euo pipefail
-[ "$STACK_NAME" = "mystack" ] || { echo "bad STACK_NAME: $STACK_NAME"; exit 1; }
+[ "$SERVICE_NAME" = "mystack" ] || { echo "bad SERVICE_NAME: $SERVICE_NAME"; exit 1; }
 [ -n "$STACK_DIR" ]    || { echo "STACK_DIR empty"; exit 1; }
 [ -n "$STACK_DOMAIN" ] || { echo "STACK_DOMAIN empty"; exit 1; }
 [ -n "$COMPOSE_FILE" ] || { echo "COMPOSE_FILE empty"; exit 1; }
@@ -249,7 +249,7 @@ echo "env ok"
 		t.Fatal(err)
 	}
 
-	deployDir := filepath.Join(stacksDir, "stacks", "mystack")
+	deployDir := filepath.Join(stacksDir, "services", "mystack")
 	if err := os.MkdirAll(deployDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ echo "env ok"
 	}
 
 	cfg := &config.Config{
-		Server: config.Server{StacksDir: stacksDir},
+		Server: config.Server{ServicesDir: stacksDir},
 		Services: map[string]config.Service{
 			"mystack": {
 				Path:         "stacks/mystack",

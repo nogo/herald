@@ -14,7 +14,7 @@ import (
 var (
 	initGitHubToken string
 	initClientID    string
-	initStacksDir   string
+	initServicesDir string
 )
 
 var initCmd = &cobra.Command{
@@ -41,7 +41,7 @@ var initCmd = &cobra.Command{
 			ServerRepo:  serverRepo,
 			GitHubToken: token,
 			DataDir:     dataDir,
-			StacksDir:   initStacksDir,
+			ServicesDir: initServicesDir,
 			HeraldPort:  0, // resolved from config in Bootstrap
 		}
 
@@ -106,5 +106,5 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initGitHubToken, "github-token", "", "GitHub personal access token (or set GITHUB_TOKEN)")
 	initCmd.Flags().StringVar(&initClientID, "client-id", "", "GitHub OAuth App Client ID for device flow (or set HERALD_GITHUB_CLIENT_ID)")
-	initCmd.Flags().StringVar(&initStacksDir, "stacks-dir", "", "Override stacks directory (default from config)")
+	initCmd.Flags().StringVar(&initServicesDir, "services-dir", "", "Override services directory (default from config)")
 }

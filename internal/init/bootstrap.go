@@ -27,7 +27,7 @@ type Options struct {
 	ServerRepo  string // GitHub repo path, e.g. "nogo/srv2"
 	GitHubToken string
 	DataDir     string
-	StacksDir   string // Override stacks dir from config
+	ServicesDir string // Override services dir from config
 	HeraldPort  int    // Port herald listens on (default 9483)
 }
 
@@ -172,8 +172,8 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	if opts.StacksDir != "" {
-		cfg.Server.StacksDir = opts.StacksDir
+	if opts.ServicesDir != "" {
+		cfg.Server.ServicesDir = opts.ServicesDir
 	}
 	// Use port from config if not explicitly set via CLI.
 	if cfg.Server.Port > 0 {
@@ -230,9 +230,9 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	// Step 6: Create directories
 	fmt.Fprintln(w, "\nCreating directories...")
 	dirs := []string{
-		filepath.Join(cfg.Server.StacksDir, "apps"),
-		filepath.Join(cfg.Server.StacksDir, "stacks"),
-		filepath.Join(cfg.Server.StacksDir, "envs"),
+		filepath.Join(cfg.Server.ServicesDir, "apps"),
+		filepath.Join(cfg.Server.ServicesDir, "services"),
+		filepath.Join(cfg.Server.ServicesDir, "envs"),
 	}
 	for _, d := range dirs {
 		fmt.Fprintf(w, "  → %s/\n", d)
@@ -308,7 +308,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	cloned := 0
 	for _, appName := range appNames {
 		app := cfg.Apps[appName]
-		appRepoDir := filepath.Join(cfg.Server.StacksDir, "apps", appName, "repo")
+		appRepoDir := filepath.Join(cfg.Server.ServicesDir, "apps", appName, "repo")
 		fmt.Fprintf(w, "  → %-10s %s:%s → %s\n", appName, app.Repo, app.Branch, appRepoDir)
 		if err := os.MkdirAll(filepath.Dir(appRepoDir), 0755); err != nil {
 			fmt.Fprintf(w, "    ✗ %v\n", err)
@@ -451,7 +451,7 @@ func printCompletion(w io.Writer, cfg *config.Config, opts Options) {
 	fmt.Fprintf(w, "Server:     %s\n", cfg.Server.Name)
 	fmt.Fprintf(w, "Config:     %s\n", filepath.Join(opts.DataDir, "repo", "config.yml"))
 	fmt.Fprintf(w, "Data:       %s\n", opts.DataDir)
-	fmt.Fprintf(w, "Stacks:     %s\n", cfg.Server.StacksDir)
+	fmt.Fprintf(w, "Services:   %s\n", cfg.Server.ServicesDir)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Next steps:")
 	fmt.Fprintln(w, "  1. Create env files for your apps:")

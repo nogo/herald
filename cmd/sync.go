@@ -116,7 +116,7 @@ var syncCmd = &cobra.Command{
 
 		for _, name := range appNames {
 			app := cfg.Apps[name]
-			appDir := filepath.Join(cfg.Server.StacksDir, "apps", name)
+			appDir := filepath.Join(cfg.Server.ServicesDir, "apps", name)
 			if _, err := os.Stat(appDir); os.IsNotExist(err) {
 				appsNotDeployed++
 				pendingActions = append(pendingActions,
@@ -170,7 +170,7 @@ var syncCmd = &cobra.Command{
 		stacksRunning := 0
 
 		for _, name := range stackNames {
-			deployDir := filepath.Join(cfg.Server.StacksDir, "stacks", name)
+			deployDir := filepath.Join(cfg.Server.ServicesDir, "services", name)
 			repoLink := filepath.Join(deployDir, "repo")
 			overrideFile := filepath.Join(deployDir, "compose.override.yml")
 
@@ -190,7 +190,7 @@ var syncCmd = &cobra.Command{
 			}
 
 			psOut, psErr := exec.CommandContext(ctx, "docker", "compose",
-				"-p", "herald-stack-"+name, "ps", "--format", "json").Output()
+				"-p", "herald-svc-"+name, "ps", "--format", "json").Output()
 			trimmed := strings.TrimSpace(string(psOut))
 			if psErr != nil || trimmed == "" || trimmed == "[]" {
 				slog.Warn("service is stopped", "service", name)
@@ -290,7 +290,7 @@ func detectOrphans(ctx context.Context, cfg *config.Config) []string {
 		known["herald-"+name] = true
 	}
 	for name := range cfg.Services {
-		known["herald-stack-"+name] = true
+		known["herald-svc-"+name] = true
 	}
 
 	var orphans []string

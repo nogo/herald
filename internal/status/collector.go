@@ -199,7 +199,7 @@ func (c *StatusCollector) collectAppStatus(ctx context.Context, name string, app
 		Branch: app.Branch,
 	}
 
-	appDir := filepath.Join(c.Config.Server.StacksDir, "apps", name)
+	appDir := filepath.Join(c.Config.Server.ServicesDir, "apps", name)
 	if _, err := os.Stat(appDir); os.IsNotExist(err) {
 		s.State = "not deployed"
 		return s
@@ -228,7 +228,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 		Domain: stack.Domain,
 	}
 
-	up, total, state, err := queryDockerCompose(ctx, "herald-stack-"+name)
+	up, total, state, err := queryDockerCompose(ctx, "herald-svc-"+name)
 	if err != nil {
 		c.Logger.Warn("docker compose ps failed", "stack", name, "error", err)
 		s.State = "error"

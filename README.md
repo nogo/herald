@@ -7,13 +7,13 @@ Push to GitHub, your app deploys. Config is a YAML file per server. Secrets are 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/install.sh | sh
 ```
 
 Or with wget:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/nogo/herald/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/nogo/herald/main/scripts/install.sh | sh
 ```
 
 This creates a `herald` user, downloads the latest binary, and sets up directories. Run as root.
@@ -51,7 +51,7 @@ Each server has its own repo with a `config.yml`:
 server:
   name: srv1
   deploy_domain: deploy.example.com
-  stacks_dir: /opt/deploy
+  services_dir: /opt/deploy
   port: 9483
 
 apps:
@@ -158,7 +158,7 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 
 /opt/deploy/           deployments
   apps/<name>/repo/    cloned app repos
-  stacks/<name>/       service compose files
+  services/<name>/     service compose files
   caddy/               caddy-docker-proxy
 ```
 

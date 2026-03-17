@@ -60,9 +60,9 @@ var installCmd = &cobra.Command{
 		}
 
 		stacksDir := "/opt/deploy"
-		// Try loading config for stacks_dir (optional — install works without config)
-		if loadedCfg, err := LoadConfigWithToken(configPath, dataDir); err == nil && loadedCfg.Server.StacksDir != "" {
-			stacksDir = loadedCfg.Server.StacksDir
+		// Try loading config for services_dir (optional — install works without config)
+		if loadedCfg, err := LoadConfigWithToken(configPath, dataDir); err == nil && loadedCfg.Server.ServicesDir != "" {
+			stacksDir = loadedCfg.Server.ServicesDir
 		}
 
 		cfg := systemd.ServiceConfig{
@@ -71,7 +71,7 @@ var installCmd = &cobra.Command{
 			DataDir:    dataDir,
 			User:       installUser,
 			Group:      g.Name,
-			StacksDir:  stacksDir,
+			ServicesDir: stacksDir,
 		}
 
 		if err := systemd.Install(cfg); err != nil {

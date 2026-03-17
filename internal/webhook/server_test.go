@@ -23,7 +23,7 @@ func newServer() *webhook.Server {
 			Server: config.Server{
 				Name:         "test",
 				DeployDomain: "deploy.example.com",
-				StacksDir:    "/opt/stacks",
+				ServicesDir:    "/opt/stacks",
 			},
 			Apps: map[string]config.App{
 				"budget": {Repo: "nogo/budget-app", Branch: "main"},
