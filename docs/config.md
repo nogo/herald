@@ -126,6 +126,22 @@ override: |
         - /opt/deploy/apps/myapp/.env
 ```
 
+### `!override` — replacing lists in compose
+
+Docker Compose merges lists by appending. Herald uses the `!override` YAML tag on `env_file` lists so they **replace** the base compose file's value instead of appending to it. This ensures the generated `.env` file is the single source of environment variables.
+
+The tag is applied automatically by herald on the main service's `env_file`. If you need the same behavior in your `override:` YAML (e.g., to replace a list rather than append), use the tag explicitly:
+
+```yaml
+override: |
+  services:
+    worker:
+      env_file: !override
+        - /opt/deploy/apps/myapp/.env
+```
+
+Without `!override`, the worker's `env_file` list would be appended to whatever the base compose file defines. With it, the list is replaced entirely.
+
 ---
 
 ## `services`
