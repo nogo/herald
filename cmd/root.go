@@ -106,6 +106,7 @@ func init() {
 		&cobra.Group{ID: "apps", Title: "Apps:"},
 		&cobra.Group{ID: "services", Title: "Services:"},
 		&cobra.Group{ID: "previews", Title: "Previews:"},
+		&cobra.Group{ID: "ops", Title: "Operations:"},
 		&cobra.Group{ID: "secrets", Title: "Secrets:"},
 		&cobra.Group{ID: "infra", Title: "Infrastructure:"},
 		&cobra.Group{ID: "auth", Title: "Auth:"},

@@ -21,9 +21,29 @@ type Override struct {
 // ServiceOverride holds per-service overrides.
 type ServiceOverride struct {
 	Labels   map[string]string `yaml:"labels,omitempty"`
-	EnvFile  []string          `yaml:"env_file,omitempty"`
+	EnvFile  OverrideList      `yaml:"env_file,omitempty"`
 	Secrets  []string          `yaml:"secrets,omitempty"`
 	Networks []string          `yaml:"networks,omitempty"`
+}
+
+// OverrideList is a string slice that marshals with the !override YAML tag.
+// Docker Compose uses !override to replace (not merge) a list from the base file.
+type OverrideList []string
+
+// MarshalYAML emits the list with the !override tag so Docker Compose replaces
+// rather than appends to the base compose file's value.
+func (o OverrideList) MarshalYAML() (any, error) {
+	node := &yaml.Node{
+		Kind: yaml.SequenceNode,
+		Tag:  "!override",
+	}
+	for _, s := range o {
+		node.Content = append(node.Content, &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Value: s,
+		})
+	}
+	return node, nil
 }
 
 // NetworkDef declares a Docker network.
