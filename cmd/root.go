@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -92,6 +93,15 @@ func resolveToken() string {
 		return token
 	}
 	return ""
+}
+
+// quietLogger returns a logger that only emits WARN and above.
+// Used in CLI commands where the UI handles progress output.
+func quietLogger() *slog.Logger {
+	if verbose {
+		return slog.Default()
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
 func Execute() {

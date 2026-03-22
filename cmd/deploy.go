@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"os"
 	"slices"
@@ -27,7 +26,7 @@ var deployCmd = &cobra.Command{
 		d := &deployer.Deployer{
 			Config:  Cfg,
 			Secrets: store,
-			Logger:  slog.Default(),
+			Logger:  quietLogger(),
 			DataDir: dataDir,
 			UI:      ui.NewTTY(os.Stdout),
 		}

@@ -3,6 +3,7 @@ package compose
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,6 +175,97 @@ func TestDeepMerge(t *testing.T) {
 		got := DeepMerge(base, overlay)
 		if got["a"] != 1 || got["b"] != 2 {
 			t.Errorf("got %v, want {a:1, b:2}", got)
+		}
+	})
+}
+
+func TestDeepMergeYAML(t *testing.T) {
+	t.Run("preserves override tag", func(t *testing.T) {
+		base := `
+services:
+  budget-app:
+    env_file: !override
+      - /opt/deploy/apps/budget/.env
+    labels:
+      caddy: budget.example.com
+    networks:
+      - caddy
+networks:
+  caddy:
+    external: true
+`
+		overlay := `
+services:
+  budget-app:
+    env_file: !override
+      - /opt/deploy/apps/budget/.env
+  budget-migrate:
+    env_file: !override
+      - /opt/deploy/apps/budget/.env
+volumes:
+  budget-data:
+    driver: local
+`
+		merged, err := DeepMergeYAML([]byte(base), []byte(overlay))
+		if err != nil {
+			t.Fatalf("DeepMergeYAML: %v", err)
+		}
+		result := string(merged)
+
+		// The !override tag must be preserved in the merged output.
+		if !strings.Contains(result, "!override") {
+			t.Errorf("merged YAML lost !override tag:\n%s", result)
+		}
+
+		// Both services should be present.
+		if !strings.Contains(result, "budget-app") {
+			t.Errorf("merged YAML missing budget-app:\n%s", result)
+		}
+		if !strings.Contains(result, "budget-migrate") {
+			t.Errorf("merged YAML missing budget-migrate:\n%s", result)
+		}
+
+		// Volumes from overlay should be present.
+		if !strings.Contains(result, "budget-data") {
+			t.Errorf("merged YAML missing budget-data volume:\n%s", result)
+		}
+
+		// Labels from base should survive the merge.
+		if !strings.Contains(result, "budget.example.com") {
+			t.Errorf("merged YAML lost caddy label from base:\n%s", result)
+		}
+
+		// Networks from base should survive.
+		if !strings.Contains(result, "caddy") {
+			t.Errorf("merged YAML lost caddy network:\n%s", result)
+		}
+	})
+
+	t.Run("overlay replaces non-map values", func(t *testing.T) {
+		base := `
+services:
+  app:
+    image: old:v1
+    labels:
+      caddy: old.example.com
+`
+		overlay := `
+services:
+  app:
+    image: new:v2
+`
+		merged, err := DeepMergeYAML([]byte(base), []byte(overlay))
+		if err != nil {
+			t.Fatalf("DeepMergeYAML: %v", err)
+		}
+		result := string(merged)
+
+		if !strings.Contains(result, "new:v2") {
+			t.Errorf("overlay image not applied:\n%s", result)
+		}
+		// Labels from base should survive (maps merge).
+		if !strings.Contains(result, "old.example.com") {
+			t.Errorf("base labels lost:\n%s", result)
 		}
 	})
 }

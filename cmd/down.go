@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/nogo/herald/internal/deployer"
@@ -35,7 +34,7 @@ This is irreversible without a backup.`,
 		d := &deployer.Deployer{
 			Config:  Cfg,
 			Secrets: secrets.NewStore(dataDir),
-			Logger:  slog.Default(),
+			Logger:  quietLogger(),
 			DataDir: dataDir,
 			UI:      ui.NewTTY(os.Stdout),
 		}

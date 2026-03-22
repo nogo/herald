@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
@@ -29,7 +28,7 @@ var updateCmd = &cobra.Command{
 			Config:  Cfg,
 			Secrets: store,
 			DataDir: dataDir,
-			Logger:  slog.Default(),
+			Logger:  quietLogger(),
 			UI:      ui.NewTTY(os.Stdout),
 		}
 
