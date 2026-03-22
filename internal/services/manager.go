@@ -15,11 +15,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"io"
+
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/ui"
 )
 
 // ServiceManager manages service setup and updates.
@@ -28,6 +31,14 @@ type ServiceManager struct {
 	Secrets *secrets.Store
 	DataDir string // where the IaC repo lives (e.g. /etc/herald)
 	Logger  *slog.Logger
+	UI      ui.UI // optional; nil defaults to ui.Nop()
+}
+
+func (m *ServiceManager) ui() ui.UI {
+	if m.UI != nil {
+		return m.UI
+	}
+	return ui.Nop()
 }
 
 // ServiceInfo holds display info about a configured service.
@@ -164,90 +175,130 @@ func (m *ServiceManager) Update(ctx context.Context, stackName string) error {
 		return fmt.Errorf("service %q not found in config", stackName)
 	}
 
-	// Pre-flight: check for missing required secrets.
-	missing, err := m.Secrets.MissingRequired(stack.Secrets)
-	if err != nil {
-		return fmt.Errorf("checking secrets: %w", err)
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("service %q: missing required secrets (use `herald secret set <key>`): %s",
-			stackName, strings.Join(missing, ", "))
+	u := m.ui()
+	start := time.Now()
+	var updateErr error
+	defer func() {
+		u.Done(stackName, updateErr, time.Since(start))
+	}()
+
+	step := func(name string, fn func() error) error {
+		u.Step(name)
+		if err := fn(); err != nil {
+			u.StepFail(err)
+			return err
+		}
+		u.StepDone("")
+		return nil
 	}
 
-	start := time.Now()
+	// Pre-flight.
+	updateErr = step("Preflight", func() error {
+		missing, err := m.Secrets.MissingRequired(stack.Secrets)
+		if err != nil {
+			return fmt.Errorf("checking secrets: %w", err)
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("missing secrets (use `herald secret set <key>`): %s",
+				strings.Join(missing, ", "))
+		}
+		return nil
+	})
+	if updateErr != nil {
+		return updateErr
+	}
+
 	m.Logger.Info("service update started", "service", stackName)
 
-	if err := m.gitPull(ctx); err != nil {
-		return fmt.Errorf("pulling IaC repo: %w", err)
+	// Git pull.
+	updateErr = step("Git pull", func() error {
+		return m.gitPull(ctx)
+	})
+	if updateErr != nil {
+		return updateErr
 	}
 
 	if stack.UpdateScript == "" {
-		return fmt.Errorf("service %q has no update_script configured", stackName)
+		updateErr = fmt.Errorf("service %q has no update_script configured", stackName)
+		return updateErr
 	}
 	scriptPath := filepath.Join(m.repoDir(), stack.UpdateScript)
 	if _, err := os.Stat(scriptPath); err != nil {
-		return fmt.Errorf("update script %q not found in server repo", stack.UpdateScript)
+		updateErr = fmt.Errorf("update script %q not found in server repo", stack.UpdateScript)
+		return updateErr
 	}
 
+	// Setup if needed.
 	if !m.isSetUp(stackName) {
-		if err := m.Setup(ctx, stackName); err != nil {
-			return fmt.Errorf("setting up service: %w", err)
+		updateErr = step("Setup", func() error {
+			return m.Setup(ctx, stackName)
+		})
+		if updateErr != nil {
+			return updateErr
 		}
 	}
 
-	deployDir := m.stackDeployDir(stackName)
-	repoLink := filepath.Join(deployDir, "repo")
+	// Secrets + env + override.
+	updateErr = step("Secrets", func() error {
+		deployDir := m.stackDeployDir(stackName)
+		repoLink := filepath.Join(deployDir, "repo")
 
-	envVars, dockerSecrets, err := m.Secrets.Resolve(stack.Secrets)
-	if err != nil {
-		return fmt.Errorf("resolving secrets: %w", err)
-	}
-	if len(envVars)+len(dockerSecrets) > 0 {
-		m.Logger.Info("secrets resolved",
-			"service", stackName,
-			"env_keys", slices.Sorted(maps.Keys(envVars)),
-			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
-		)
-	}
-
-	if stack.EnvFile != "" {
-		envMap, err := m.buildEnvMap(stack, envVars)
+		envVars, dockerSecrets, err := m.Secrets.Resolve(stack.Secrets)
 		if err != nil {
-			return fmt.Errorf("building env map: %w", err)
+			return fmt.Errorf("resolving secrets: %w", err)
 		}
-		if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
-			return fmt.Errorf("writing env file: %w", err)
+		if len(envVars)+len(dockerSecrets) > 0 {
+			m.Logger.Info("secrets resolved",
+				"service", stackName,
+				"env_keys", slices.Sorted(maps.Keys(envVars)),
+				"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
+			)
 		}
-	}
 
-	if len(dockerSecrets) > 0 {
-		secretsDir := filepath.Join(deployDir, "secrets")
-		if err := os.MkdirAll(secretsDir, 0700); err != nil {
-			return fmt.Errorf("creating secrets dir: %w", err)
-		}
-		secretsRoot, err := os.OpenRoot(secretsDir)
-		if err != nil {
-			return fmt.Errorf("opening secrets root: %w", err)
-		}
-		defer secretsRoot.Close()
-		for name, val := range dockerSecrets {
-			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-				return fmt.Errorf("writing docker secret %q: %w", name, err)
+		if stack.EnvFile != "" {
+			envMap, err := m.buildEnvMap(stack, envVars)
+			if err != nil {
+				return fmt.Errorf("building env map: %w", err)
+			}
+			if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
+				return fmt.Errorf("writing env file: %w", err)
 			}
 		}
+
+		if len(dockerSecrets) > 0 {
+			secretsDir := filepath.Join(deployDir, "secrets")
+			if err := os.MkdirAll(secretsDir, 0700); err != nil {
+				return fmt.Errorf("creating secrets dir: %w", err)
+			}
+			secretsRoot, err := os.OpenRoot(secretsDir)
+			if err != nil {
+				return fmt.Errorf("opening secrets root: %w", err)
+			}
+			defer secretsRoot.Close()
+			for name, val := range dockerSecrets {
+				if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
+					return fmt.Errorf("writing docker secret %q: %w", name, err)
+				}
+			}
+		}
+
+		composeName, err := findComposeFile(repoLink)
+		if err != nil {
+			return err
+		}
+		composeFile := filepath.Join(repoLink, composeName)
+		return m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets)
+	})
+	if updateErr != nil {
+		return updateErr
 	}
 
-	composeName, err := findComposeFile(repoLink)
-	if err != nil {
-		return err
-	}
-	composeFile := filepath.Join(repoLink, composeName)
-	if err := m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets); err != nil {
-		return fmt.Errorf("generating compose override: %w", err)
-	}
-
-	if err := m.RunUpdateScript(ctx, stackName); err != nil {
-		return err
+	// Run update script.
+	updateErr = step("Update script", func() error {
+		return m.RunUpdateScript(ctx, stackName)
+	})
+	if updateErr != nil {
+		return updateErr
 	}
 
 	m.Logger.Info("service update complete", "service", stackName, "duration", time.Since(start).Round(time.Millisecond))
@@ -312,15 +363,31 @@ func (m *ServiceManager) RunUpdateScript(ctx context.Context, stackName string) 
 	cmd.Env = env
 
 	ring := newRingBuffer(50)
-	outWriter := &lineWriter{logger: m.Logger, cmd: "update-script[" + stackName + "]", level: slog.LevelInfo, ring: ring}
-	errWriter := &lineWriter{logger: m.Logger, cmd: "update-script[" + stackName + "]", level: slog.LevelWarn, ring: ring}
-	cmd.Stdout = outWriter
-	cmd.Stderr = errWriter
+
+	// Use stream writer from UI if available (CLI mode), otherwise fall back to lineWriter (daemon mode).
+	var outW, errW io.Writer
+	if sw := m.ui().StreamWriter(); sw != nil {
+		outW = sw
+		errW = sw
+	} else {
+		outWriter := &lineWriter{logger: m.Logger, cmd: "update-script[" + stackName + "]", level: slog.LevelInfo, ring: ring}
+		errWriter := &lineWriter{logger: m.Logger, cmd: "update-script[" + stackName + "]", level: slog.LevelWarn, ring: ring}
+		outW = outWriter
+		errW = errWriter
+	}
+	cmd.Stdout = outW
+	cmd.Stderr = errW
 
 	start := time.Now()
 	runErr := cmd.Run()
-	outWriter.flush()
-	errWriter.flush()
+	// Flush line-based writers.
+	if lw, ok := outW.(*lineWriter); ok {
+		lw.flush()
+	}
+	if lw, ok := errW.(*lineWriter); ok {
+		lw.flush()
+	}
+	ui.FlushStreamWriter(m.ui())
 	dur := time.Since(start).Round(time.Millisecond)
 
 	if runErr != nil {
@@ -329,7 +396,10 @@ func (m *ServiceManager) RunUpdateScript(ctx context.Context, stackName string) 
 			exitCode = exitErr.ExitCode()
 		}
 		lastLines := strings.Join(ring.get(), "\n")
-		return fmt.Errorf("update script exited with code %d (duration: %s):\n%s", exitCode, dur, lastLines)
+		if lastLines != "" {
+			return fmt.Errorf("update script exited with code %d (duration: %s):\n%s", exitCode, dur, lastLines)
+		}
+		return fmt.Errorf("update script exited with code %d (duration: %s)", exitCode, dur)
 	}
 
 	m.Logger.Info("update script completed", "service", stackName, "duration", dur)

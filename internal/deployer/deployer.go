@@ -21,6 +21,7 @@ import (
 	"github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/runner"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/ui"
 )
 
 // Deployer executes app deploys.
@@ -29,9 +30,17 @@ type Deployer struct {
 	Secrets *secrets.Store
 	Logger  *slog.Logger
 	DataDir string // path to herald data dir (e.g. /etc/herald); IaC repo lives at DataDir/repo
+	UI      ui.UI  // optional; nil defaults to ui.Nop()
 
 	appLocks sync.Map // string → *appLock
 	wg       sync.WaitGroup
+}
+
+func (d *Deployer) ui() ui.UI {
+	if d.UI != nil {
+		return d.UI
+	}
+	return ui.Nop()
 }
 
 type appLock struct {
@@ -92,98 +101,159 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 		return fmt.Errorf("app %q not found in config", appName)
 	}
 
-	// Pre-flight: check for missing required secrets.
-	missing, err := d.Secrets.MissingRequired(app.Secrets)
-	if err != nil {
-		return fmt.Errorf("checking secrets: %w", err)
+	u := d.ui()
+	start := time.Now()
+	var deployErr error
+	defer func() {
+		u.Done(appName, deployErr, time.Since(start))
+	}()
+
+	// step is a helper that wraps a step with UI calls.
+	step := func(name string, fn func() error) error {
+		u.Step(name)
+		if err := fn(); err != nil {
+			u.StepFail(err)
+			return err
+		}
+		u.StepDone("")
+		return nil
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("app %q: missing required secrets (use `herald secret set <key>`): %s",
-			appName, strings.Join(missing, ", "))
+	stepDetail := func(name string, fn func() (string, error)) error {
+		u.Step(name)
+		detail, err := fn()
+		if err != nil {
+			u.StepFail(err)
+			return err
+		}
+		u.StepDone(detail)
+		return nil
+	}
+
+	// Pre-flight: check for missing required secrets.
+	deployErr = step("Preflight", func() error {
+		missing, err := d.Secrets.MissingRequired(app.Secrets)
+		if err != nil {
+			return fmt.Errorf("checking secrets: %w", err)
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("missing secrets (use `herald secret set <key>`): %s",
+				strings.Join(missing, ", "))
+		}
+		return nil
+	})
+	if deployErr != nil {
+		return deployErr
 	}
 
 	appDir := filepath.Join(d.Config.Server.ServicesDir, "apps", appName)
-	start := time.Now()
 	d.Logger.Info("deploy started", "app", appName, "dir", appDir)
 
 	if err := os.MkdirAll(appDir, 0755); err != nil {
-		return fmt.Errorf("creating app dir: %w", err)
+		deployErr = fmt.Errorf("creating app dir: %w", err)
+		return deployErr
 	}
 
 	// 1. Git clone or pull.
-	if err := d.gitSync(ctx, appDir, app, effectiveRef(app, ref)); err != nil {
-		return fmt.Errorf("git: %w", err)
+	gitRef := effectiveRef(app, ref)
+	deployErr = step(fmt.Sprintf("Git sync (%s)", gitRef), func() error {
+		return d.gitSync(ctx, appDir, app, gitRef)
+	})
+	if deployErr != nil {
+		return deployErr
 	}
 
 	// 2. Verify env_file exists if configured.
 	if app.EnvFile != "" {
 		if _, err := os.Stat(app.EnvFile); err != nil {
-			return fmt.Errorf("env_file %q not found", app.EnvFile)
+			deployErr = fmt.Errorf("env_file %q not found", app.EnvFile)
+			return deployErr
 		}
 	}
 
-	// 3. Resolve secrets.
-	envVars, dockerSecrets, err := d.Secrets.Resolve(app.Secrets)
-	if err != nil {
-		return fmt.Errorf("resolving secrets: %w", err)
-	}
-	if len(envVars)+len(dockerSecrets) > 0 {
-		d.Logger.Info("secrets resolved",
-			"app", appName,
-			"env_keys", slices.Sorted(maps.Keys(envVars)),
-			"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
-		)
-	}
-
-	// Open root for scoped file writes.
-	appRoot, err := os.OpenRoot(appDir)
-	if err != nil {
-		return fmt.Errorf("opening app root: %w", err)
-	}
-	defer appRoot.Close()
-
-	// 4. Write .env file (config file base merged with resolved secrets).
-	merged, err := d.buildEnvMap(app, envVars)
-	if err != nil {
-		return fmt.Errorf("building env map: %w", err)
-	}
-	if err := compose.WriteEnvFile(appRoot, merged); err != nil {
-		return fmt.Errorf("writing .env: %w", err)
-	}
-
-	// 5. Write docker secrets.
-	if len(dockerSecrets) > 0 {
-		secretsDir := filepath.Join(appDir, "secrets")
-		if err := os.MkdirAll(secretsDir, 0700); err != nil {
-			return fmt.Errorf("creating secrets dir: %w", err)
-		}
-		secretsRoot, err := appRoot.OpenRoot("secrets")
+	// 3. Resolve secrets + write env + write docker secrets.
+	var dockerSecrets map[string]string
+	deployErr = stepDetail("Secrets", func() (string, error) {
+		envVars, ds, err := d.Secrets.Resolve(app.Secrets)
 		if err != nil {
-			return fmt.Errorf("opening secrets root: %w", err)
+			return "", fmt.Errorf("resolving secrets: %w", err)
 		}
-		defer secretsRoot.Close()
-		for name, val := range dockerSecrets {
-			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-				return fmt.Errorf("writing docker secret %q: %w", name, err)
+		dockerSecrets = ds
+		if len(envVars)+len(dockerSecrets) > 0 {
+			d.Logger.Info("secrets resolved",
+				"app", appName,
+				"env_keys", slices.Sorted(maps.Keys(envVars)),
+				"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
+			)
+		}
+
+		// Open root for scoped file writes.
+		appRoot, err := os.OpenRoot(appDir)
+		if err != nil {
+			return "", fmt.Errorf("opening app root: %w", err)
+		}
+		defer appRoot.Close()
+
+		// Write .env file (config file base merged with resolved secrets).
+		merged, err := d.buildEnvMap(app, envVars)
+		if err != nil {
+			return "", fmt.Errorf("building env map: %w", err)
+		}
+		if err := compose.WriteEnvFile(appRoot, merged); err != nil {
+			return "", fmt.Errorf("writing .env: %w", err)
+		}
+
+		// Write docker secrets.
+		if len(dockerSecrets) > 0 {
+			secretsDir := filepath.Join(appDir, "secrets")
+			if err := os.MkdirAll(secretsDir, 0700); err != nil {
+				return "", fmt.Errorf("creating secrets dir: %w", err)
+			}
+			secretsRoot, err := appRoot.OpenRoot("secrets")
+			if err != nil {
+				return "", fmt.Errorf("opening secrets root: %w", err)
+			}
+			defer secretsRoot.Close()
+			for name, val := range dockerSecrets {
+				if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
+					return "", fmt.Errorf("writing docker secret %q: %w", name, err)
+				}
 			}
 		}
+
+		detail := fmt.Sprintf("%d env, %d docker", len(envVars), len(dockerSecrets))
+		return detail, nil
+	})
+	if deployErr != nil {
+		return deployErr
 	}
 
-	// 6. Generate compose override.
+	// 4. Generate compose override.
 	repoDir := filepath.Join(appDir, "repo")
 	composeFile := resolveComposePath(app.Compose, repoDir)
-	if err := d.generateOverride(appRoot, appDir, appName, app, composeFile, dockerSecrets); err != nil {
-		return fmt.Errorf("generating compose override: %w", err)
+	deployErr = step("Compose override", func() error {
+		appRoot, err := os.OpenRoot(appDir)
+		if err != nil {
+			return fmt.Errorf("opening app root: %w", err)
+		}
+		defer appRoot.Close()
+		return d.generateOverride(appRoot, appDir, appName, app, composeFile, dockerSecrets)
+	})
+	if deployErr != nil {
+		return deployErr
 	}
 
-	// 7. Ensure the caddy network exists before compose up.
+	// 5. Ensure the caddy network exists before compose up.
 	if err := caddy.EnsureNetwork(ctx, d.Logger); err != nil {
-		return fmt.Errorf("ensuring caddy network: %w", err)
+		deployErr = fmt.Errorf("ensuring caddy network: %w", err)
+		return deployErr
 	}
 
-	// 8. Run docker compose up.
-	if err := d.runCompose(ctx, appDir, appName, composeFile); err != nil {
-		return fmt.Errorf("compose: %w", err)
+	// 6. Run docker compose up.
+	deployErr = step("Compose up", func() error {
+		return d.runCompose(ctx, appDir, appName, composeFile)
+	})
+	if deployErr != nil {
+		return deployErr
 	}
 
 	// Write deployed ref for status reporting.
@@ -345,9 +415,17 @@ func (d *Deployer) generateOverride(
 // Down stops and removes the containers for the named app.
 // If removeVolumes is true, named volumes are also removed.
 func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool) error {
+	u := d.ui()
+	start := time.Now()
+	var downErr error
+	defer func() {
+		u.Done(appName, downErr, time.Since(start))
+	}()
+
 	cctx, err := compose.ResolveApp(d.Config, appName)
 	if err != nil {
-		return err
+		downErr = err
+		return downErr
 	}
 
 	args := cctx.BaseArgs()
@@ -356,8 +434,18 @@ func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool)
 		args = append(args, "--volumes")
 	}
 
+	u.Step("Compose down")
 	d.Logger.Info("compose down", "app", appName, "remove_volumes", removeVolumes)
-	return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
+	sw := u.StreamWriter()
+	downErr = runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
+	if downErr != nil {
+		ui.FlushStreamWriter(u)
+		u.StepFail(downErr)
+		return downErr
+	}
+	ui.FlushStreamWriter(u)
+	u.StepDone("")
+	return nil
 }
 
 // runCompose executes docker compose up -d --build --remove-orphans.
@@ -373,5 +461,8 @@ func (d *Deployer) runCompose(ctx context.Context, appDir, appName, composeFile 
 	d.Logger.Info("compose up", "app", appName, "project", cctx.ProjectName)
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
-	return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
+	sw := d.ui().StreamWriter()
+	err := runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
+	ui.FlushStreamWriter(d.ui())
+	return err
 }

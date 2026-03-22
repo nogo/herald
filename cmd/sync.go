@@ -111,7 +111,7 @@ var syncCmd = &cobra.Command{
 
 		// 5. Check each app.
 		appNames := slices.Sorted(maps.Keys(cfg.Apps))
-		appsDeployed, appsNotDeployed := 0, 0
+		appsDeployed, appsNotDeployed, appsRunning, appsStopped := 0, 0, 0, 0
 		var pendingActions []string
 
 		for _, name := range appNames {
@@ -130,9 +130,10 @@ var syncCmd = &cobra.Command{
 				"-p", "herald-"+name, "ps", "--format", "json").Output()
 			trimmed := strings.TrimSpace(string(psOut))
 			if psErr != nil || trimmed == "" || trimmed == "[]" {
-				slog.Warn("app is not running", "app", name)
+				appsStopped++
 				continue
 			}
+			appsRunning++
 
 			// Check for pending commits (compare local HEAD vs remote).
 			repoDir := filepath.Join(appDir, "repo")
@@ -167,7 +168,9 @@ var syncCmd = &cobra.Command{
 
 		// 6. Check each service.
 		stackNames := slices.Sorted(maps.Keys(cfg.Services))
-		stacksRunning := 0
+		stacksRunning, stacksStopped := 0, 0
+		var serviceNotes []string
+		var serviceErrors []string
 
 		for _, name := range stackNames {
 			deployDir := filepath.Join(cfg.Server.ServicesDir, "services", name)
@@ -182,9 +185,9 @@ var syncCmd = &cobra.Command{
 			}
 
 			if !isSetUp {
-				slog.Info("service not set up, configuring", "service", name)
+				serviceNotes = append(serviceNotes, fmt.Sprintf("    → Configured %s (first setup)", name))
 				if setupErr := stackMgr.Setup(ctx, name); setupErr != nil {
-					slog.Error("service setup failed", "service", name, "error", setupErr)
+					serviceErrors = append(serviceErrors, fmt.Sprintf("  service %q: setup failed: %v", name, setupErr))
 					continue
 				}
 			}
@@ -193,7 +196,7 @@ var syncCmd = &cobra.Command{
 				"-p", "herald-svc-"+name, "ps", "--format", "json").Output()
 			trimmed := strings.TrimSpace(string(psOut))
 			if psErr != nil || trimmed == "" || trimmed == "[]" {
-				slog.Warn("service is stopped", "service", name)
+				stacksStopped++
 			} else {
 				stacksRunning++
 			}
@@ -201,9 +204,6 @@ var syncCmd = &cobra.Command{
 
 		// 7. Orphan detection.
 		orphans := detectOrphans(ctx, cfg)
-		for _, o := range orphans {
-			fmt.Fprintf(os.Stderr, "orphan detected: %s (not in config)\n", o)
-		}
 
 		// Print summary.
 		fmt.Fprintln(out, "Sync complete:")
@@ -215,11 +215,19 @@ var syncCmd = &cobra.Command{
 		} else {
 			fmt.Fprintln(out, "  Webhooks: skipped (no GitHub token configured)")
 		}
-		fmt.Fprintf(out, "  Apps: %d configured, %d deployed, %d not deployed\n",
-			len(appNames), appsDeployed, appsNotDeployed)
-		fmt.Fprintf(out, "  Services: %d configured, %d running\n",
-			len(stackNames), stacksRunning)
+		fmt.Fprintf(out, "  Apps: %d configured, %d running, %d stopped, %d not deployed\n",
+			len(appNames), appsRunning, appsStopped, appsNotDeployed)
+		fmt.Fprintf(out, "  Services: %d configured, %d running, %d stopped\n",
+			len(stackNames), stacksRunning, stacksStopped)
+		for _, note := range serviceNotes {
+			fmt.Fprintln(out, note)
+		}
 		fmt.Fprintf(out, "  Orphans: %d\n", len(orphans))
+		if len(orphans) > 0 {
+			for _, o := range orphans {
+				fmt.Fprintf(out, "    %s (not in config)\n", o)
+			}
+		}
 
 		if len(pendingActions) > 0 {
 			fmt.Fprintln(out)
@@ -235,7 +243,7 @@ var syncCmd = &cobra.Command{
 			app := cfg.Apps[name]
 			missing, merr := store.MissingRequired(app.Secrets)
 			if merr != nil {
-				fmt.Fprintf(os.Stderr, "warning: checking secrets for app %q: %v\n", name, merr)
+				warnLines = append(warnLines, fmt.Sprintf("  app %q: error checking secrets: %v", name, merr))
 				continue
 			}
 			if len(missing) > 0 {
@@ -246,19 +254,21 @@ var syncCmd = &cobra.Command{
 			svc := cfg.Services[name]
 			missing, merr := store.MissingRequired(svc.Secrets)
 			if merr != nil {
-				fmt.Fprintf(os.Stderr, "warning: checking secrets for service %q: %v\n", name, merr)
+				warnLines = append(warnLines, fmt.Sprintf("  service %q: error checking secrets: %v", name, merr))
 				continue
 			}
 			if len(missing) > 0 {
 				warnLines = append(warnLines, fmt.Sprintf("  service %q: %s", name, strings.Join(missing, ", ")))
 			}
 		}
+		warnLines = append(warnLines, serviceErrors...)
 		if len(warnLines) > 0 {
-			fmt.Fprintln(os.Stderr, "\nWarning: the following secrets are required but not set:")
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Warnings:")
 			for _, line := range warnLines {
-				fmt.Fprintln(os.Stderr, line)
+				fmt.Fprintln(out, line)
 			}
-			fmt.Fprintln(os.Stderr, "Run `herald secret set <key>` to set them before deploying.")
+			fmt.Fprintln(out, "Run `herald secret set <key>` to set missing secrets.")
 		}
 
 		return nil
