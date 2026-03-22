@@ -48,7 +48,7 @@ func (o OverrideList) MarshalYAML() (any, error) {
 
 // NetworkDef declares a Docker network.
 type NetworkDef struct {
-	External bool `yaml:"external"`
+	External bool `yaml:"external,omitempty"`
 }
 
 // SecretFileDef points to a secret file on disk.

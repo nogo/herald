@@ -350,12 +350,13 @@ func (d *Deployer) generateOverride(
 		port = "3000"
 	}
 
+	internalNet := "herald-" + appName + "-internal"
 	svc := compose.ServiceOverride{
 		Labels: map[string]string{
 			"caddy":               app.Domain,
 			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
 		},
-		Networks: []string{"caddy"},
+		Networks: []string{"caddy", internalNet},
 	}
 
 	svc.EnvFile = []string{filepath.Join(appDir, ".env")}
@@ -370,7 +371,10 @@ func (d *Deployer) generateOverride(
 
 	override := compose.Override{
 		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{"caddy": {External: true}},
+		Networks: map[string]compose.NetworkDef{
+			"caddy":     {External: true},
+			internalNet: {},
+		},
 	}
 
 	if len(secretNames) > 0 {

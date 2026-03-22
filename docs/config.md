@@ -359,7 +359,28 @@ apps:
         generate: alphanumeric
 ```
 
-Each entry gets its own deploy directory, Docker Compose project (`herald-<name>`), and secret namespace.
+Each entry gets its own deploy directory, Docker Compose project (`herald-<name>`), secret namespace, and isolated Docker network.
+
+---
+
+## Networking
+
+Every app, service, and preview gets its own isolated Docker network. The main service (the one Caddy routes to) joins both the shared `caddy` network and the app-specific internal network. All other services in the compose file (databases, caches, workers) only see the internal network.
+
+| Type | Network name | Cleaned up by |
+|---|---|---|
+| App | `herald-<name>-internal` | `herald down <name>` |
+| Service | `herald-svc-<name>-internal` | `docker compose down` |
+| Preview | `herald-preview-<id>-internal` | `herald preview remove` / `herald preview cleanup` |
+
+The `caddy` network is a shared external network created once by herald. App-internal networks are project-scoped and removed automatically by `docker compose down`.
+
+This means:
+- Containers from different apps cannot reach each other directly
+- A database in `myapp`'s compose file is unreachable from `otherapp`
+- Only the front service is exposed to Caddy for reverse proxying
+
+If your compose file defines additional services (workers, migrations), use the `override` field to attach them to the internal network or pass the generated `.env` file. Herald only injects the detected main service automatically.
 
 ---
 

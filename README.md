@@ -170,6 +170,7 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 - Webhook HMAC-SHA256 + rate limiting
 - Status page uses constant-time auth comparison
 - Systemd hardening (NoNewPrivileges, ProtectSystem, PrivateTmp)
+- Per-app Docker network isolation (only the front service joins Caddy)
 
 ## Comparison
 
