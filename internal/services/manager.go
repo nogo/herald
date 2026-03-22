@@ -266,24 +266,15 @@ func (m *ServiceManager) ComposeUp(ctx context.Context, stackName string) error 
 		}
 	}
 
-	deployDir := m.stackDeployDir(stackName)
-	repoLink := filepath.Join(deployDir, "repo")
-
-	composeName, err := findComposeFile(repoLink)
+	cctx, err := compose.ResolveService(m.Config, stackName)
 	if err != nil {
 		return err
 	}
-	composeFile := filepath.Join(repoLink, composeName)
-	overrideFile := filepath.Join(deployDir, "compose.override.yml")
 
-	m.Logger.Info("compose up", "service", stackName, "project", "herald-svc-"+stackName)
-	return runStreamCmd(ctx, m.Logger, deployDir,
-		"docker", "compose",
-		"--project-name", "herald-svc-"+stackName,
-		"-f", composeFile,
-		"-f", overrideFile,
-		"up", "-d", "--build", "--remove-orphans",
-	)
+	m.Logger.Info("compose up", "service", stackName, "project", cctx.ProjectName)
+	args := cctx.BaseArgs()
+	args = append(args, "up", "-d", "--build", "--remove-orphans")
+	return runStreamCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
 }
 
 // RunUpdateScript executes the service's update script with the required environment.

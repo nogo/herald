@@ -346,30 +346,34 @@ func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app con
 	return git.CloneOrFetch(ctx, m.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), branch)
 }
 
-func (m *PreviewManager) runCompose(ctx context.Context, previewDir, composeProject, composeFile string) error {
+func (m *PreviewManager) composeContext(previewDir, composeProject, composeFile string) compose.Context {
 	repoDir := filepath.Join(previewDir, "repo")
-	overrideFile := filepath.Join(previewDir, "compose.override.yml")
+	if !filepath.IsAbs(composeFile) {
+		composeFile = filepath.Join(repoDir, composeFile)
+	}
+	return compose.Context{
+		ProjectName:  composeProject,
+		ComposeFile:  composeFile,
+		OverrideFile: filepath.Join(previewDir, "compose.override.yml"),
+		EnvFile:      filepath.Join(previewDir, ".env"),
+		WorkDir:      repoDir,
+	}
+}
+
+func (m *PreviewManager) runCompose(ctx context.Context, previewDir, composeProject, composeFile string) error {
+	cctx := m.composeContext(previewDir, composeProject, composeFile)
 	m.Logger.Info("compose up", "project", composeProject)
-	return runner.RunCmd(ctx, m.Logger, repoDir,
-		"docker", "compose",
-		"--project-name", composeProject,
-		"-f", composeFile,
-		"-f", overrideFile,
-		"up", "-d", "--build", "--remove-orphans",
-	)
+	args := cctx.BaseArgs()
+	args = append(args, "up", "-d", "--build", "--remove-orphans")
+	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
 }
 
 func (m *PreviewManager) runComposeDown(ctx context.Context, previewDir, composeProject, composeFile string) error {
-	repoDir := filepath.Join(previewDir, "repo")
-	overrideFile := filepath.Join(previewDir, "compose.override.yml")
+	cctx := m.composeContext(previewDir, composeProject, composeFile)
 	m.Logger.Info("compose down", "project", composeProject)
-	return runner.RunCmd(ctx, m.Logger, repoDir,
-		"docker", "compose",
-		"--project-name", composeProject,
-		"-f", composeFile,
-		"-f", overrideFile,
-		"down", "--volumes", "--remove-orphans",
-	)
+	args := cctx.BaseArgs()
+	args = append(args, "down", "--volumes", "--remove-orphans")
+	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
 }
 
 func (m *PreviewManager) generateOverride(
@@ -395,8 +399,9 @@ func (m *PreviewManager) generateOverride(
 		Networks: []string{"caddy"},
 	}
 
+	svc.EnvFile = compose.OverrideList{filepath.Join(previewDir, ".env")}
 	if app.EnvFile != "" {
-		svc.EnvFile = []string{app.EnvFile}
+		svc.EnvFile = append(svc.EnvFile, app.EnvFile)
 	}
 
 	secretNames := slices.Sorted(maps.Keys(dockerSecrets))

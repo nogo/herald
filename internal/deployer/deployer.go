@@ -345,45 +345,33 @@ func (d *Deployer) generateOverride(
 // Down stops and removes the containers for the named app.
 // If removeVolumes is true, named volumes are also removed.
 func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool) error {
-	app, ok := d.Config.Apps[appName]
-	if !ok {
-		return fmt.Errorf("app %q not found in config", appName)
+	cctx, err := compose.ResolveApp(d.Config, appName)
+	if err != nil {
+		return err
 	}
 
-	appDir := filepath.Join(d.Config.Server.ServicesDir, "apps", appName)
-	repoDir := filepath.Join(appDir, "repo")
-	composeFile := resolveComposePath(app.Compose, repoDir)
-	overrideFile := filepath.Join(appDir, "compose.override.yml")
-
-	args := []string{
-		"compose",
-		"--project-name", "herald-" + appName,
-		"--progress", "plain",
-		"-f", composeFile,
-	}
-	if _, err := os.Stat(overrideFile); err == nil {
-		args = append(args, "-f", overrideFile)
-	}
-	args = append(args, "down", "--remove-orphans")
+	args := cctx.BaseArgs()
+	args = append(args, "--progress", "plain", "down", "--remove-orphans")
 	if removeVolumes {
 		args = append(args, "--volumes")
 	}
 
 	d.Logger.Info("compose down", "app", appName, "remove_volumes", removeVolumes)
-	return runner.RunCmd(ctx, d.Logger, repoDir, "docker", args...)
+	return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
 }
 
 // runCompose executes docker compose up -d --build --remove-orphans.
 func (d *Deployer) runCompose(ctx context.Context, appDir, appName, composeFile string) error {
-	repoDir := filepath.Join(appDir, "repo")
-	overrideFile := filepath.Join(appDir, "compose.override.yml")
-	d.Logger.Info("compose up", "app", appName, "project", "herald-"+appName)
-	return runner.RunCmd(ctx, d.Logger, repoDir,
-		"docker", "compose",
-		"--project-name", "herald-"+appName,
-		"--progress", "plain",
-		"-f", composeFile,
-		"-f", overrideFile,
-		"up", "-d", "--build", "--remove-orphans",
-	)
+	cctx := compose.Context{
+		ProjectName:  "herald-" + appName,
+		ComposeFile:  composeFile,
+		OverrideFile: filepath.Join(appDir, "compose.override.yml"),
+		EnvFile:      filepath.Join(appDir, ".env"),
+		WorkDir:      filepath.Join(appDir, "repo"),
+	}
+
+	d.Logger.Info("compose up", "app", appName, "project", cctx.ProjectName)
+	args := cctx.BaseArgs()
+	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
+	return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
 }
