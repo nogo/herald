@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -35,13 +37,14 @@ This is irreversible without a backup.`,
 			Secrets: secrets.NewStore(dataDir),
 			Logger:  slog.Default(),
 			DataDir: dataDir,
+			UI:      ui.NewTTY(os.Stdout),
 		}
 
+		fmt.Fprintf(cmd.OutOrStdout(), "Stopping %s...\n", appName)
 		if err := d.Down(context.Background(), appName, downVolumes); err != nil {
-			return fmt.Errorf("down %s: %w", appName, err)
+			return err
 		}
 
-		fmt.Printf("down %s: containers stopped\n", appName)
 		return nil
 	},
 }

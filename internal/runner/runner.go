@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -30,6 +31,28 @@ func RunCmd(ctx context.Context, logger *slog.Logger, dir string, name string, a
 		cmd.Dir = dir
 	}
 	return RunExecCmd(ctx, logger, cmd)
+}
+
+// RunCmdStream is like RunCmd but sends stdout and stderr to the provided writers
+// instead of using TTY detection or slog buffering. When both writers are nil,
+// it falls through to RunExecCmd with its default behavior.
+func RunCmdStream(ctx context.Context, logger *slog.Logger, dir string, stdout, stderr io.Writer, name string, args ...string) error {
+	if stdout == nil && stderr == nil {
+		return RunCmd(ctx, logger, dir, name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	start := time.Now()
+	runErr := cmd.Run()
+	dur := time.Since(start).Round(time.Millisecond)
+	if runErr != nil {
+		return fmt.Errorf("%s: %w (duration: %s)", cmd.Path, runErr, dur)
+	}
+	return nil
 }
 
 // RunExecCmd executes a pre-built command and returns an error on non-zero exit.

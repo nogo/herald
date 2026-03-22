@@ -11,6 +11,7 @@ import (
 
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,7 @@ var deployCmd = &cobra.Command{
 			Secrets: store,
 			Logger:  slog.Default(),
 			DataDir: dataDir,
+			UI:      ui.NewTTY(os.Stdout),
 		}
 
 		if deployAll {
@@ -38,13 +40,12 @@ var deployCmd = &cobra.Command{
 			}
 			var failed []string
 			for _, name := range names {
-				fmt.Fprintf(cmd.OutOrStdout(), "deploying %s...\n", name)
+				d.UI = ui.NewTTY(os.Stdout)
+				fmt.Fprintf(cmd.OutOrStdout(), "Deploying %s...\n", name)
 				if err := d.Deploy(context.Background(), name, ""); err != nil {
-					fmt.Fprintf(os.Stderr, "deploy %s: failed: %v\n", name, err)
 					failed = append(failed, name)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "deploy %s: success\n", name)
 				}
+				fmt.Fprintln(cmd.OutOrStdout())
 			}
 			if len(failed) > 0 {
 				return fmt.Errorf("%d app(s) failed to deploy: %s", len(failed), strings.Join(failed, ", "))
@@ -71,11 +72,11 @@ var deployCmd = &cobra.Command{
 			return fmt.Errorf("app %q not found. Available: %s", appName, strings.Join(names, ", "))
 		}
 
+		fmt.Fprintf(cmd.OutOrStdout(), "Deploying %s...\n", appName)
 		if err := d.Deploy(context.Background(), appName, ""); err != nil {
-			return fmt.Errorf("deploy %s: %w", appName, err)
+			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "deploy %s: success\n", appName)
 		return nil
 	},
 }

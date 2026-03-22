@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/services"
+	"github.com/nogo/herald/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +30,7 @@ var updateCmd = &cobra.Command{
 			Secrets: store,
 			DataDir: dataDir,
 			Logger:  slog.Default(),
+			UI:      ui.NewTTY(os.Stdout),
 		}
 
 		if updateList {
@@ -46,12 +49,11 @@ var updateCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(updateTimeout)*time.Minute)
 		defer cancel()
 
-		start := time.Now()
+		fmt.Fprintf(cmd.OutOrStdout(), "Updating %s...\n", stackName)
 		if err := mgr.Update(ctx, stackName); err != nil {
-			return fmt.Errorf("update %s: %w", stackName, err)
+			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "update %s: success (%s)\n", stackName, time.Since(start).Round(time.Millisecond))
 		return nil
 	},
 }
