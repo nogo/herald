@@ -533,12 +533,13 @@ func (m *ServiceManager) generateOverride(deployDir, stackName string, stack con
 		port = "80"
 	}
 
+	internalNet := "herald-svc-" + stackName + "-internal"
 	svc := compose.ServiceOverride{
 		Labels: map[string]string{
 			"caddy":               stack.Domain,
 			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
 		},
-		Networks: []string{"caddy"},
+		Networks: []string{"caddy", internalNet},
 	}
 
 	if envFile != "" {
@@ -552,7 +553,10 @@ func (m *ServiceManager) generateOverride(deployDir, stackName string, stack con
 
 	override := compose.Override{
 		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{"caddy": {External: true}},
+		Networks: map[string]compose.NetworkDef{
+			"caddy":     {External: true},
+			internalNet: {},
+		},
 	}
 
 	if len(secretNames) > 0 {

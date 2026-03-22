@@ -390,13 +390,14 @@ func (m *PreviewManager) generateOverride(
 		port = "3000"
 	}
 
+	internalNet := "herald-preview-" + previewID + "-internal"
 	svc := compose.ServiceOverride{
 		Labels: map[string]string{
 			"caddy":               domain,
 			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
 			"com.herald.preview":  previewID,
 		},
-		Networks: []string{"caddy"},
+		Networks: []string{"caddy", internalNet},
 	}
 
 	svc.EnvFile = compose.OverrideList{filepath.Join(previewDir, ".env")}
@@ -411,7 +412,10 @@ func (m *PreviewManager) generateOverride(
 
 	override := compose.Override{
 		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{"caddy": {External: true}},
+		Networks: map[string]compose.NetworkDef{
+			"caddy":     {External: true},
+			internalNet: {},
+		},
 	}
 
 	if len(secretNames) > 0 {
