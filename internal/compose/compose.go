@@ -154,6 +154,50 @@ func DeepMerge(base, overlay map[string]any) map[string]any {
 	return result
 }
 
+// DeepMergeYAML merges overlay YAML bytes into base YAML bytes, preserving
+// YAML tags (e.g. !override). Returns the merged YAML bytes.
+// Only mapping nodes are merged recursively; all other node types from the
+// overlay replace the base value entirely (including their tags).
+func DeepMergeYAML(base, overlay []byte) ([]byte, error) {
+	var baseDoc, overlayDoc yaml.Node
+	if err := yaml.Unmarshal(base, &baseDoc); err != nil {
+		return nil, fmt.Errorf("parsing base YAML: %w", err)
+	}
+	if err := yaml.Unmarshal(overlay, &overlayDoc); err != nil {
+		return nil, fmt.Errorf("parsing overlay YAML: %w", err)
+	}
+	// Unmarshal wraps content in a document node.
+	if baseDoc.Kind == yaml.DocumentNode && len(baseDoc.Content) > 0 {
+		mergeNodes(baseDoc.Content[0], overlayDoc.Content[0])
+	}
+	return yaml.Marshal(&baseDoc)
+}
+
+// mergeNodes recursively merges src into dst. Both must be mapping nodes
+// for recursive merge; otherwise src replaces dst.
+func mergeNodes(dst, src *yaml.Node) {
+	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
+		*dst = *src
+		return
+	}
+	// Build index of dst keys → value node index.
+	dstIdx := make(map[string]int, len(dst.Content)/2)
+	for i := 0; i < len(dst.Content)-1; i += 2 {
+		dstIdx[dst.Content[i].Value] = i + 1
+	}
+	for i := 0; i < len(src.Content)-1; i += 2 {
+		key := src.Content[i]
+		val := src.Content[i+1]
+		if vi, ok := dstIdx[key.Value]; ok {
+			// Key exists in dst — recurse if both are mappings, else replace.
+			mergeNodes(dst.Content[vi], val)
+		} else {
+			// New key — append.
+			dst.Content = append(dst.Content, key, val)
+		}
+	}
+}
+
 // WriteEnvFile writes KEY=value pairs to .env in the given root, sorted by key.
 func WriteEnvFile(root *os.Root, envVars map[string]string) error {
 	f, err := root.OpenFile(".env", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)

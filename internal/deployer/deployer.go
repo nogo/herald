@@ -387,19 +387,11 @@ func (d *Deployer) generateOverride(
 		return fmt.Errorf("marshaling override: %w", err)
 	}
 
-	// If app has inline override YAML, deep-merge it.
+	// If app has inline override YAML, deep-merge it (preserving YAML tags like !override).
 	if app.Override != "" {
-		var baseMap, overlayMap map[string]any
-		if err := yaml.Unmarshal(data, &baseMap); err != nil {
-			return fmt.Errorf("re-parsing generated override: %w", err)
-		}
-		if err := yaml.Unmarshal([]byte(app.Override), &overlayMap); err != nil {
-			return fmt.Errorf("parsing app override YAML: %w", err)
-		}
-		merged := compose.DeepMerge(baseMap, overlayMap)
-		data, err = yaml.Marshal(merged)
+		data, err = compose.DeepMergeYAML(data, []byte(app.Override))
 		if err != nil {
-			return fmt.Errorf("marshaling merged override: %w", err)
+			return fmt.Errorf("merging app override: %w", err)
 		}
 	}
 
