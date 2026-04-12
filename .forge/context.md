@@ -43,6 +43,7 @@ Preview environments use the same pipeline with ephemeral lifecycle.
 
 ## Build and verification
 
+- **Always run `gofmt -w .` before finishing.** The fmt:check gate rejects unformatted code.
 - `mise run check` must pass after every change (vet, fmt, tidy, test, lint).
 - `.forge/verify` is the authoritative gate (runs `mise run check` + boundary import checks).
 - Tests use `go test -race -count=1 ./...`.

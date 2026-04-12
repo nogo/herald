@@ -196,7 +196,7 @@ func TestDeleteWebhook_Error(t *testing.T) {
 
 func TestUniqueRepos(t *testing.T) {
 	cfg := &config.Config{
-		Apps: map[string]config.App{
+		Stacks: map[string]config.Stack{
 			"budget":   {Repo: "nogo/budget-app"},
 			"tracker":  {Repo: "nogo/budget-app"}, // duplicate
 			"sidenote": {Repo: "nogo/sidenote"},
@@ -219,7 +219,7 @@ func TestUniqueRepos(t *testing.T) {
 
 func TestEventsForRepo(t *testing.T) {
 	cfg := &config.Config{
-		Apps: map[string]config.App{
+		Stacks: map[string]config.Stack{
 			"no-preview": {Repo: "nogo/plain"},
 			"with-preview": {
 				Repo:    "nogo/preview-app",

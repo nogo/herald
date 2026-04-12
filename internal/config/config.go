@@ -18,11 +18,6 @@ import (
 type Config struct {
 	Server Server           `yaml:"server"           json:"server"`
 	Stacks map[string]Stack `yaml:"stacks,omitempty" json:"stacks,omitempty"`
-
-	// Deprecated computed fields — populated by Load() from Stacks.
-	// Will be removed once all downstream packages migrate to Stacks.
-	Apps     map[string]Stack `yaml:"-" json:"-"`
-	Services map[string]Stack `yaml:"-" json:"-"`
 }
 
 type Server struct {
@@ -65,12 +60,6 @@ type Stack struct {
 	AutoDeploy   bool   `yaml:"auto_deploy,omitempty" json:"auto_deploy,omitzero"`
 	UpdateScript string `yaml:"update,omitempty"      json:"update,omitzero"`
 }
-
-// Deprecated: use Stack directly.
-type App = Stack
-
-// Deprecated: use Stack directly.
-type Service = Stack
 
 type SecretRef struct {
 	Key      string `yaml:"key"                json:"key"`
@@ -139,18 +128,6 @@ func Load(path string) (*Config, error) {
 
 	if err := validate(&cfg); err != nil {
 		return nil, err
-	}
-
-	// Populate computed backwards-compat fields.
-	cfg.Apps = make(map[string]Stack)
-	cfg.Services = make(map[string]Stack)
-	for name, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			cfg.Apps[name] = stack
-		}
-		if stack.Path != "" {
-			cfg.Services[name] = stack
-		}
 	}
 
 	return &cfg, nil
