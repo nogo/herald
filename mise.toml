@@ -1,0 +1,85 @@
+[tools]
+go = "1.26.1"
+
+[env]
+MODULE  = "github.com/nogo/herald"
+BINARY  = "bin/herald"
+TAG     = "{{ exec(command='git describe --tags --exact-match 2>/dev/null') }}"
+COMMIT  = "{{ exec(command='git rev-parse --short HEAD 2>/dev/null || echo unknown') }}"
+
+[tasks.build]
+description = "Build the binary"
+sources    = ["**/*.go", "go.mod", "go.sum", "mise.toml"]
+outputs    = ["bin/herald"]
+run = """
+DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+TAG=$(git describe --tags --exact-match 2>/dev/null || echo "")
+LDFLAGS="-s -w -X $MODULE/cmd.commit=$COMMIT -X $MODULE/cmd.tag=$TAG -X $MODULE/cmd.date=$DATE"
+go build -ldflags "$LDFLAGS" -o "$BINARY" .
+"""
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf bin/"
+
+[tasks.test]
+description = "Run tests with race detector (no cache)"
+run = "go test -race -count=1 ./..."
+
+[tasks.vet]
+description = "Run go vet"
+sources = ["**/*.go", "go.mod"]
+outputs = { auto = true }
+run = "go vet ./..."
+
+[tasks.fmt]
+description = "Apply gofmt formatting"
+run = "gofmt -w ."
+
+[tasks."fmt:check"]
+description = "Fail if any .go files are unformatted"
+sources = ["**/*.go"]
+outputs = { auto = true }
+run = """
+UNFORMATTED=$(gofmt -l .)
+if [[ -n "$UNFORMATTED" ]]; then
+    echo "FAIL: unformatted files:"
+    echo "$UNFORMATTED"
+    exit 1
+fi
+"""
+
+[tasks.tidy]
+description = "Check go.mod and go.sum are tidy"
+run = """
+go mod tidy
+if [[ -n "$(git diff --name-only go.mod go.sum 2>/dev/null)" ]]; then
+    echo "FAIL: go.mod/go.sum updated by tidy — commit the changes"
+    exit 1
+fi
+"""
+
+[tasks.lint]
+description = "Run staticcheck (skipped if not installed)"
+sources = ["**/*.go", "go.mod"]
+outputs = { auto = true }
+run = """
+if command -v staticcheck >/dev/null 2>&1; then
+    staticcheck ./...
+else
+    echo "staticcheck not installed, skipping"
+fi
+"""
+
+[tasks.check]
+description = "Full local verification: vet, fmt, tidy, test, lint"
+depends = ["vet", "fmt:check", "tidy", "test", "lint"]
+run = 'echo "All checks passed."'
+
+[tasks.verify]
+description = "Run .forge/verify (authoritative project gate)"
+run = ".forge/verify"
+
+[tasks.dev]
+description = "Rebuild on source changes (requires watchexec)"
+run = "mise watch build"

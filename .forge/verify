@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Project-specific verification. Called by the runner after each WU.
+# Exit 0 = green. Non-zero = broken.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+echo "verify: check (vet, fmt, tidy, test, lint)"
+mise run check 2>&1
+
+echo "verify: boundary — supporting packages must not import each other"
+# Allowed exceptions (documented in architecture):
+#   github -> secrets (OAuth token storage)
+VIOLATIONS=""
+for pkg in compose caddy secrets github; do
+    for other in compose caddy secrets github; do
+        [[ "$pkg" == "$other" ]] && continue
+        [[ "$pkg" == "github" && "$other" == "secrets" ]] && continue
+        if grep -rq "\"github.com/nogo/herald/internal/$other\"" "internal/$pkg/" 2>/dev/null; then
+            VIOLATIONS+="  internal/$pkg imports internal/$other\n"
+        fi
+    done
+done
+if [[ -n "$VIOLATIONS" ]]; then
+    echo "FAIL: supporting package boundary violations:"
+    echo -e "$VIOLATIONS"
+    exit 1
+fi
+
+echo "verify: all green"
