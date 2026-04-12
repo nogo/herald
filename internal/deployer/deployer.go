@@ -13,8 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
@@ -194,7 +192,8 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 		defer appRoot.Close()
 
 		// Write .env file (config file base merged with resolved secrets).
-		merged, err := d.buildEnvMap(app, envVars)
+		iacRepoDir := filepath.Join(d.DataDir, "repo")
+		merged, err := BuildEnvMap(app.ConfigFile, iacRepoDir, envVars, d.Logger)
 		if err != nil {
 			return "", fmt.Errorf("building env map: %w", err)
 		}
@@ -236,7 +235,32 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 			return fmt.Errorf("opening app root: %w", err)
 		}
 		defer appRoot.Close()
-		return d.generateOverride(appRoot, appDir, appName, app, composeFile, dockerSecrets)
+
+		envFilePaths := []string{filepath.Join(appDir, ".env")}
+		if app.EnvFile != "" {
+			envFilePaths = append(envFilePaths, app.EnvFile)
+		}
+		data, err := GenerateOverride(OverrideParams{
+			DeployDir:      appDir,
+			StackName:      appName,
+			Domain:         app.Domain,
+			ComposeFile:    composeFile,
+			EnvFilePaths:   envFilePaths,
+			DockerSecrets:  dockerSecrets,
+			DefaultPort:    "3000",
+			InternalNet:    "herald-" + appName + "-internal",
+			InlineOverride: app.Override,
+		})
+		if err != nil {
+			return err
+		}
+		f, err := appRoot.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.Write(data)
+		return err
 	})
 	if deployErr != nil {
 		return deployErr
@@ -284,46 +308,6 @@ func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App, r
 	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), ref)
 }
 
-// buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.
-func (d *Deployer) buildEnvMap(app config.App, envVars map[string]string) (map[string]string, error) {
-	if app.ConfigFile == "" {
-		return envVars, nil
-	}
-	iacRepoDir := filepath.Join(d.DataDir, "repo")
-	configPath := filepath.Join(iacRepoDir, app.ConfigFile)
-	data, err := os.ReadFile(configPath)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("config file %q not found in IaC repo", app.ConfigFile)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading config file %q: %w", app.ConfigFile, err)
-	}
-	base := make(map[string]string)
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		idx := strings.IndexByte(trimmed, '=')
-		if idx < 0 {
-			d.Logger.Debug("config file: ignoring line without '='", "line", trimmed)
-			continue
-		}
-		base[strings.TrimSpace(trimmed[:idx])] = strings.TrimSpace(trimmed[idx+1:])
-	}
-	result := make(map[string]string, len(base)+len(envVars))
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range envVars {
-		if _, exists := result[k]; exists {
-			d.Logger.Debug("config key overridden by secret", "key", k)
-		}
-		result[k] = v
-	}
-	return result, nil
-}
-
 // resolveComposePath returns an absolute path to the compose file.
 // If the compose field is already absolute, use it directly.
 // Otherwise, resolve relative to the repo directory.
@@ -332,80 +316,6 @@ func resolveComposePath(composeField, repoDir string) string {
 		return composeField
 	}
 	return filepath.Join(repoDir, composeField)
-}
-
-func (d *Deployer) generateOverride(
-	root *os.Root,
-	appDir, appName string,
-	app config.App,
-	composeFile string,
-	dockerSecrets map[string]string,
-) error {
-	// Detect service name and port from the app's compose file.
-	serviceName, port, err := compose.DetectServiceInfo(composeFile, appName, "3000")
-	if err != nil {
-		d.Logger.Warn("could not detect service info, using defaults",
-			"app", appName, "error", err)
-		serviceName = "app"
-		port = "3000"
-	}
-
-	internalNet := "herald-" + appName + "-internal"
-	svc := compose.ServiceOverride{
-		Labels: map[string]string{
-			"caddy":               app.Domain,
-			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
-		},
-		Networks: []string{"caddy", internalNet},
-	}
-
-	svc.EnvFile = []string{filepath.Join(appDir, ".env")}
-	if app.EnvFile != "" {
-		svc.EnvFile = append(svc.EnvFile, app.EnvFile)
-	}
-
-	secretNames := slices.Sorted(maps.Keys(dockerSecrets))
-	if len(secretNames) > 0 {
-		svc.Secrets = secretNames
-	}
-
-	override := compose.Override{
-		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{
-			"caddy":     {External: true},
-			internalNet: {},
-		},
-	}
-
-	if len(secretNames) > 0 {
-		override.Secrets = make(map[string]compose.SecretFileDef, len(secretNames))
-		for _, name := range secretNames {
-			override.Secrets[name] = compose.SecretFileDef{
-				File: filepath.Join(appDir, "secrets", name),
-			}
-		}
-	}
-
-	data, err := yaml.Marshal(override)
-	if err != nil {
-		return fmt.Errorf("marshaling override: %w", err)
-	}
-
-	// If app has inline override YAML, deep-merge it (preserving YAML tags like !override).
-	if app.Override != "" {
-		data, err = compose.DeepMergeYAML(data, []byte(app.Override))
-		if err != nil {
-			return fmt.Errorf("merging app override: %w", err)
-		}
-	}
-
-	f, err := root.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
 }
 
 // Down stops and removes the containers for the named app.

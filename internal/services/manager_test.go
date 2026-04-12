@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 )
 
@@ -206,7 +207,7 @@ func TestFindComposeFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// No compose file.
-	if _, err := findComposeFile(dir); err == nil {
+	if _, err := compose.FindComposeFile(dir); err == nil {
 		t.Fatal("expected error when no compose file")
 	}
 
@@ -214,7 +215,7 @@ func TestFindComposeFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte{}, 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := findComposeFile(dir)
+	got, err := compose.FindComposeFile(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
