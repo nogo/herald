@@ -243,11 +243,11 @@ func TestSpecialCharacters(t *testing.T) {
 	s := initedStore(t)
 
 	cases := map[string]string{
-		"quotes":   `it's a "test"`,
-		"newlines": "line1\nline2\nline3",
-		"unicode":  "日本語テスト",
+		"quotes":    `it's a "test"`,
+		"newlines":  "line1\nline2\nline3",
+		"unicode":   "日本語テスト",
 		"backslash": `C:\Users\test\path`,
-		"json":     `{"key":"value","nested":{"a":1}}`,
+		"json":      `{"key":"value","nested":{"a":1}}`,
 	}
 
 	for k, v := range cases {

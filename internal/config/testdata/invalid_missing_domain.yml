@@ -3,7 +3,7 @@ server:
   deploy_domain: deploy.example.com
   services_dir: /opt/deploy
 
-apps:
+stacks:
   budget:
     repo: nogo/budget-app
     branch: main

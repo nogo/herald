@@ -49,12 +49,12 @@ func TestGenerateUnitFile_structure(t *testing.T) {
 
 func TestGenerateUnitFile_noTokenInUnitFile(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath: "/usr/local/bin/herald",
-		ConfigPath: "/etc/herald/config.yml",
-		DataDir:    "/etc/herald/",
-		User:       "deploy",
-		Group:      "deploy",
-		ServicesDir:  "/opt/deploy",
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/etc/herald/config.yml",
+		DataDir:     "/etc/herald/",
+		User:        "deploy",
+		Group:       "deploy",
+		ServicesDir: "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -73,12 +73,12 @@ func TestGenerateUnitFile_noTokenInUnitFile(t *testing.T) {
 
 func TestGenerateUnitFile_noGithubToken(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath: "/usr/local/bin/herald",
-		ConfigPath: "/etc/herald/config.yml",
-		DataDir:    "/etc/herald/",
-		User:       "deploy",
-		Group:      "deploy",
-		ServicesDir:  "/opt/deploy",
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/etc/herald/config.yml",
+		DataDir:     "/etc/herald/",
+		User:        "deploy",
+		Group:       "deploy",
+		ServicesDir: "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -89,12 +89,12 @@ func TestGenerateUnitFile_noGithubToken(t *testing.T) {
 
 func TestGenerateUnitFile_dataDirCleaned(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath: "/usr/local/bin/herald",
-		ConfigPath: "/etc/herald/config.yml",
-		DataDir:    "/etc/herald/",
-		User:       "herald",
-		Group:      "herald",
-		ServicesDir:  "/opt/deploy",
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/etc/herald/config.yml",
+		DataDir:     "/etc/herald/",
+		User:        "herald",
+		Group:       "herald",
+		ServicesDir: "/opt/deploy",
 	}
 	got := GenerateUnitFile(cfg)
 
@@ -109,12 +109,12 @@ func TestGenerateUnitFile_dataDirCleaned(t *testing.T) {
 
 func TestGenerateUnitFile_customServicesDir(t *testing.T) {
 	cfg := ServiceConfig{
-		BinaryPath: "/usr/local/bin/herald",
-		ConfigPath: "/etc/herald/config.yml",
-		DataDir:    "/etc/herald",
-		User:       "deploy",
-		Group:      "deploy",
-		ServicesDir:  "/srv/apps",
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/etc/herald/config.yml",
+		DataDir:     "/etc/herald",
+		User:        "deploy",
+		Group:       "deploy",
+		ServicesDir: "/srv/apps",
 	}
 	got := GenerateUnitFile(cfg)
 

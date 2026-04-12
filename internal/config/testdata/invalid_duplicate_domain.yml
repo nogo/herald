@@ -3,13 +3,12 @@ server:
   deploy_domain: deploy.example.com
   services_dir: /opt/deploy
 
-apps:
+stacks:
   budget:
     repo: nogo/budget-app
     branch: main
     domain: shared.example.com
 
-services:
   nextcloud:
     path: stacks/nextcloud
     domain: shared.example.com  # duplicate of budget

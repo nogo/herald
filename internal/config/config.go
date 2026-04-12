@@ -16,55 +16,73 @@ import (
 )
 
 type Config struct {
-	Server   Server              `yaml:"server"             json:"server"`
-	Apps     map[string]App      `yaml:"apps,omitempty"     json:"apps,omitempty"`
-	Services map[string]Service  `yaml:"services,omitempty" json:"services,omitempty"`
+	Server Server           `yaml:"server"           json:"server"`
+	Stacks map[string]Stack `yaml:"stacks,omitempty" json:"stacks,omitempty"`
+
+	// Deprecated computed fields — populated by Load() from Stacks.
+	// Will be removed once all downstream packages migrate to Stacks.
+	Apps     map[string]Stack `yaml:"-" json:"-"`
+	Services map[string]Stack `yaml:"-" json:"-"`
 }
 
 type Server struct {
-	Name         string `yaml:"name"          json:"name"`
-	DeployDomain string `yaml:"deploy_domain" json:"deploy_domain"`
-	ServicesDir  string `yaml:"services_dir"  json:"services_dir"`
-	GithubToken  string `yaml:"github_token"  json:"github_token,omitempty"`
-	AcmeEmail    string `yaml:"acme_email"    json:"acme_email,omitempty"`
+	Name         string `yaml:"name"           json:"name"`
+	DeployDomain string `yaml:"deploy_domain"  json:"deploy_domain"`
+	ServicesDir  string `yaml:"services_dir"   json:"services_dir"`
+	GithubToken  string `yaml:"github_token"   json:"github_token,omitempty"`
+	AcmeEmail    string `yaml:"acme_email"     json:"acme_email,omitempty"`
 	Port         int    `yaml:"port,omitempty" json:"port,omitzero"`
 }
 
-type App struct {
-	Repo       string         `yaml:"repo"                  json:"repo"`
-	Branch     string         `yaml:"branch,omitempty"      json:"branch,omitzero"`
-	Tag        string         `yaml:"tag,omitempty"         json:"tag,omitzero"`
-	TagPattern string         `yaml:"tag_pattern,omitempty" json:"tag_pattern,omitzero"`
-	Domain     string         `yaml:"domain"                json:"domain"`
-	EnvFile    string         `yaml:"env_file,omitempty"    json:"env_file,omitzero"`
-	ConfigFile string         `yaml:"config,omitempty"      json:"config,omitzero"`
-	Compose    string         `yaml:"compose,omitempty"     json:"compose,omitzero"`
-	Override   string         `yaml:"override,omitempty"    json:"override,omitzero"`
-	Secrets    []SecretRef    `yaml:"secrets,omitempty"     json:"secrets,omitzero"`
-	Preview    *PreviewConfig `yaml:"preview,omitempty"     json:"preview,omitzero"`
+type Stack struct {
+	// Source (mutually exclusive)
+	Repo string `yaml:"repo,omitempty" json:"repo,omitzero"`
+	Path string `yaml:"path,omitempty" json:"path,omitzero"`
+
+	// Git tracking (repo: stacks only)
+	Branch     string `yaml:"branch,omitempty"      json:"branch,omitzero"`
+	Tag        string `yaml:"tag,omitempty"          json:"tag,omitzero"`
+	TagPattern string `yaml:"tag_pattern,omitempty"  json:"tag_pattern,omitzero"`
+
+	// Routing
+	Domain string `yaml:"domain" json:"domain"`
+
+	// Compose
+	Compose  string `yaml:"compose,omitempty"  json:"compose,omitzero"`
+	Override string `yaml:"override,omitempty" json:"override,omitzero"`
+
+	// Environment
+	EnvFile    string `yaml:"env_file,omitempty" json:"env_file,omitzero"`
+	ConfigFile string `yaml:"config,omitempty"   json:"config,omitzero"`
+
+	// Secrets
+	Secrets []SecretRef `yaml:"secrets,omitempty" json:"secrets,omitzero"`
+
+	// Preview (repo: stacks only)
+	Preview *PreviewConfig `yaml:"preview,omitempty" json:"preview,omitzero"`
+
+	// Path-stack specific
+	AutoDeploy   bool   `yaml:"auto_deploy,omitempty" json:"auto_deploy,omitzero"`
+	UpdateScript string `yaml:"update,omitempty"      json:"update,omitzero"`
 }
 
-type Service struct {
-	Path         string      `yaml:"path"                    json:"path"`
-	Domain       string      `yaml:"domain"                  json:"domain"`
-	AutoDeploy   bool        `yaml:"auto_deploy"             json:"auto_deploy,omitzero"`
-	UpdateScript string      `yaml:"update_script,omitempty" json:"update_script,omitzero"`
-	EnvFile      string      `yaml:"env_file,omitempty"      json:"env_file,omitzero"`
-	ConfigFile   string      `yaml:"config,omitempty"        json:"config,omitzero"`
-	Secrets      []SecretRef `yaml:"secrets,omitempty"       json:"secrets,omitzero"`
-}
+// Deprecated: use Stack directly.
+type App = Stack
+
+// Deprecated: use Stack directly.
+type Service = Stack
 
 type SecretRef struct {
-	Key      string `yaml:"key"               json:"key"`
-	Type     string `yaml:"type"              json:"type"`
-	Target   string `yaml:"target"            json:"target"`
+	Key      string `yaml:"key"                json:"key"`
+	Type     string `yaml:"type"               json:"type"`
+	Target   string `yaml:"target"             json:"target"`
 	Generate string `yaml:"generate,omitempty" json:"generate,omitzero"`
 	Length   int    `yaml:"length,omitempty"   json:"length,omitzero"`
 }
 
 type PreviewConfig struct {
-	Enabled bool   `yaml:"enabled"           json:"enabled,omitzero"`
-	Domain  string `yaml:"domain,omitempty"  json:"domain,omitzero"`
+	Enabled bool   `yaml:"enabled"          json:"enabled,omitzero"`
+	Domain  string `yaml:"domain,omitempty" json:"domain,omitzero"`
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
@@ -106,19 +124,33 @@ func Load(path string) (*Config, error) {
 		cfg.Server.Port = 9483
 	}
 
-	// Apply defaults for app fields.
-	for name, app := range cfg.Apps {
-		if app.Branch == "" && app.Tag == "" {
-			app.Branch = "main"
+	// Apply defaults for repo stacks.
+	for name, stack := range cfg.Stacks {
+		if stack.Repo != "" {
+			if stack.Branch == "" && stack.Tag == "" {
+				stack.Branch = "main"
+			}
+			if stack.Compose == "" {
+				stack.Compose = "compose.yml"
+			}
+			cfg.Stacks[name] = stack
 		}
-		if app.Compose == "" {
-			app.Compose = "compose.yml"
-		}
-		cfg.Apps[name] = app
 	}
 
 	if err := validate(&cfg); err != nil {
 		return nil, err
+	}
+
+	// Populate computed backwards-compat fields.
+	cfg.Apps = make(map[string]Stack)
+	cfg.Services = make(map[string]Stack)
+	for name, stack := range cfg.Stacks {
+		if stack.Repo != "" {
+			cfg.Apps[name] = stack
+		}
+		if stack.Path != "" {
+			cfg.Services[name] = stack
+		}
 	}
 
 	return &cfg, nil
@@ -154,95 +186,88 @@ func validate(cfg *Config) error {
 		return errors.New("server.services_dir is required")
 	}
 
-	// Collect all domains to detect duplicates across apps and services.
-	domains := make(map[string]string) // domain -> "app:name" or "service:name"
+	// Collect all domains to detect duplicates across stacks.
+	domains := make(map[string]string) // domain -> "stack:name"
 
 	repoRe := regexp.MustCompile(`^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$`)
 
-	for _, name := range slices.Sorted(maps.Keys(cfg.Apps)) {
-		app := cfg.Apps[name]
-		if app.Repo == "" {
-			return fmt.Errorf("app %q: repo is required", name)
-		}
-		if !repoRe.MatchString(app.Repo) {
-			return fmt.Errorf("app %q: repo %q must be in owner/name format with alphanumeric characters", name, app.Repo)
-		}
-		if app.Domain == "" {
-			return fmt.Errorf("app %q: domain is required", name)
-		}
-		if prev, exists := domains[app.Domain]; exists {
-			return fmt.Errorf("app %q: domain %q already used by %s", name, app.Domain, prev)
-		}
-		domains[app.Domain] = "app:" + name
+	for _, name := range slices.Sorted(maps.Keys(cfg.Stacks)) {
+		stack := cfg.Stacks[name]
 
-		// tag and branch are mutually exclusive
-		if app.Tag != "" && app.Branch != "" {
-			return fmt.Errorf("app %q: tag and branch are mutually exclusive", name)
+		// Exactly one source must be set.
+		if stack.Repo == "" && stack.Path == "" {
+			return fmt.Errorf("stack %q: one of repo or path is required", name)
 		}
-		// one of tag or branch is required
-		if app.Tag == "" && app.Branch == "" {
-			return fmt.Errorf("app %q: one of branch or tag is required", name)
+		if stack.Repo != "" && stack.Path != "" {
+			return fmt.Errorf("stack %q: repo and path are mutually exclusive", name)
 		}
-		// tag_pattern only valid alongside branch
-		if app.TagPattern != "" && app.Tag != "" {
-			return fmt.Errorf("app %q: tag_pattern requires branch (not compatible with tag)", name)
+
+		// Domain required and unique.
+		if stack.Domain == "" {
+			return fmt.Errorf("stack %q: domain is required", name)
 		}
-		// validate tag_pattern is a legal glob
-		if app.TagPattern != "" {
-			if _, err := path.Match(app.TagPattern, ""); err != nil {
-				return fmt.Errorf("app %q: tag_pattern %q is not a valid glob: %w", name, app.TagPattern, err)
+		if prev, exists := domains[stack.Domain]; exists {
+			return fmt.Errorf("stack %q: domain %q already used by %s", name, stack.Domain, prev)
+		}
+		domains[stack.Domain] = "stack:" + name
+
+		// Secret validation.
+		for i, sec := range stack.Secrets {
+			if sec.Type != "env" && sec.Type != "docker-secret" {
+				return fmt.Errorf("stack %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
+			}
+			if err := validateSecretRefGenerate("stack", name, i, sec); err != nil {
+				return err
 			}
 		}
 
-		if app.ConfigFile != "" {
-			if filepath.IsAbs(app.ConfigFile) {
-				return fmt.Errorf("app %q: config must be a relative path within the IaC repo, got %q", name, app.ConfigFile)
+		if stack.Repo != "" {
+			if !repoRe.MatchString(stack.Repo) {
+				return fmt.Errorf("stack %q: repo %q must be in owner/name format with alphanumeric characters", name, stack.Repo)
 			}
-			for _, part := range strings.Split(filepath.ToSlash(app.ConfigFile), "/") {
-				if part == ".." {
-					return fmt.Errorf("app %q: config must be a relative path within the IaC repo, got %q", name, app.ConfigFile)
+			if stack.Tag != "" && stack.Branch != "" {
+				return fmt.Errorf("stack %q: tag and branch are mutually exclusive", name)
+			}
+			if stack.Tag == "" && stack.Branch == "" {
+				return fmt.Errorf("stack %q: one of branch or tag is required", name)
+			}
+			if stack.TagPattern != "" && stack.Tag != "" {
+				return fmt.Errorf("stack %q: tag_pattern requires branch (not compatible with tag)", name)
+			}
+			if stack.TagPattern != "" {
+				if _, err := path.Match(stack.TagPattern, ""); err != nil {
+					return fmt.Errorf("stack %q: tag_pattern %q is not a valid glob: %w", name, stack.TagPattern, err)
+				}
+			}
+			if stack.ConfigFile != "" {
+				if filepath.IsAbs(stack.ConfigFile) {
+					return fmt.Errorf("stack %q: config must be a relative path within the IaC repo, got %q", name, stack.ConfigFile)
+				}
+				for _, part := range strings.Split(filepath.ToSlash(stack.ConfigFile), "/") {
+					if part == ".." {
+						return fmt.Errorf("stack %q: config must be a relative path within the IaC repo, got %q", name, stack.ConfigFile)
+					}
+				}
+			}
+			if stack.Preview != nil && stack.Preview.Enabled {
+				if stack.Preview.Domain == "" {
+					return fmt.Errorf("stack %q: preview.domain is required when preview.enabled is true", name)
+				}
+				if !strings.Contains(stack.Preview.Domain, "*") {
+					return fmt.Errorf("stack %q: preview.domain must contain a wildcard (*)", name)
 				}
 			}
 		}
 
-		for i, sec := range app.Secrets {
-			if sec.Type != "env" && sec.Type != "docker-secret" {
-				return fmt.Errorf("app %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
+		if stack.Path != "" {
+			if stack.Branch != "" || stack.Tag != "" || stack.TagPattern != "" {
+				return fmt.Errorf("stack %q: branch, tag, and tag_pattern are not valid for path stacks", name)
 			}
-			if err := validateSecretRefGenerate("app", name, i, sec); err != nil {
-				return err
+			if stack.Preview != nil {
+				return fmt.Errorf("stack %q: preview is not valid for path stacks", name)
 			}
-		}
-
-		if app.Preview != nil && app.Preview.Enabled {
-			if app.Preview.Domain == "" {
-				return fmt.Errorf("app %q: preview.domain is required when preview.enabled is true", name)
-			}
-			if !strings.Contains(app.Preview.Domain, "*") {
-				return fmt.Errorf("app %q: preview.domain must contain a wildcard (*)", name)
-			}
-		}
-	}
-
-	for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
-		svc := cfg.Services[name]
-		if svc.Path == "" {
-			return fmt.Errorf("service %q: path is required", name)
-		}
-		if svc.Domain == "" {
-			return fmt.Errorf("service %q: domain is required", name)
-		}
-		if prev, exists := domains[svc.Domain]; exists {
-			return fmt.Errorf("service %q: domain %q already used by %s", name, svc.Domain, prev)
-		}
-		domains[svc.Domain] = "service:" + name
-
-		for i, sec := range svc.Secrets {
-			if sec.Type != "env" && sec.Type != "docker-secret" {
-				return fmt.Errorf("service %q: secrets[%d]: type must be \"env\" or \"docker-secret\", got %q", name, i, sec.Type)
-			}
-			if err := validateSecretRefGenerate("service", name, i, sec); err != nil {
-				return err
+			if stack.Compose != "" || stack.Override != "" {
+				return fmt.Errorf("stack %q: compose and override are not valid for path stacks", name)
 			}
 		}
 	}

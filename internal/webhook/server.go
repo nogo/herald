@@ -62,9 +62,9 @@ type DeployRequest struct {
 	AppName  string
 	App      config.App
 	Repo     string
-	Branch   string     // branch name for branch push; empty for tag push
-	Tag      string     // tag name (without refs/tags/ prefix) for tag push; empty for branch push
-	Ref      string     // full ref to deploy: branch name or "refs/tags/v1.2.3"
+	Branch   string // branch name for branch push; empty for tag push
+	Tag      string // tag name (without refs/tags/ prefix) for tag push; empty for branch push
+	Ref      string // full ref to deploy: branch name or "refs/tags/v1.2.3"
 	Commit   string
 	CloneURL string
 }

@@ -12,8 +12,8 @@ import (
 // Context holds the resolved paths needed to run docker compose commands
 // for an app, service, or preview.
 type Context struct {
-	ProjectName string
-	ComposeFile string
+	ProjectName  string
+	ComposeFile  string
 	OverrideFile string // empty if file doesn't exist
 	EnvFile      string // empty if file doesn't exist
 	WorkDir      string
