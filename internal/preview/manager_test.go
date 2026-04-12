@@ -1,9 +1,17 @@
 package preview
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/nogo/herald/internal/compose"
+	"github.com/nogo/herald/internal/deployer"
 )
 
 func TestSubdomainFromBranch(t *testing.T) {
@@ -142,5 +150,77 @@ func TestStateAtomicWrite(t *testing.T) {
 	}
 	if len(loaded.Previews) != 1 || loaded.Previews[0].ID != "c" {
 		t.Errorf("unexpected state after overwrite: %+v", loaded.Previews)
+	}
+}
+
+func makeTestComposeFile(t *testing.T, dir string) string {
+	t.Helper()
+	composeContent := "services:\n  app:\n    image: myapp:latest\n"
+	path := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(path, []byte(composeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func makeTestOverrideData(t *testing.T, dir, composeFile, inlineOverride string) []byte {
+	t.Helper()
+	data, err := deployer.GenerateOverride(deployer.OverrideParams{
+		DeployDir:      dir,
+		StackName:      "myapp",
+		Domain:         "feature-test.preview.example.com",
+		ComposeFile:    composeFile,
+		EnvFilePaths:   []string{filepath.Join(dir, ".env")},
+		DefaultPort:    "3000",
+		InternalNet:    "herald-preview-myapp-feature-test-internal",
+		InlineOverride: inlineOverride,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// applyPreviewLabel replicates the label post-processing in Deploy().
+func applyPreviewLabel(overrideData []byte, id string) []byte {
+	var parsedSvcs struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if parseErr := yaml.Unmarshal(overrideData, &parsedSvcs); parseErr == nil {
+		for svcName := range parsedSvcs.Services {
+			fragment := fmt.Sprintf("services:\n  %s:\n    labels:\n      com.herald.preview: %s\n", svcName, id)
+			if merged, mergeErr := compose.DeepMergeYAML(overrideData, []byte(fragment)); mergeErr == nil {
+				return merged
+			}
+			break
+		}
+	}
+	return overrideData
+}
+
+func TestPreviewOverrideContainsLabel(t *testing.T) {
+	dir := t.TempDir()
+	composeFile := makeTestComposeFile(t, dir)
+	id := "myapp-feature-test"
+
+	overrideData := makeTestOverrideData(t, dir, composeFile, "")
+	overrideData = applyPreviewLabel(overrideData, id)
+
+	if !strings.Contains(string(overrideData), "com.herald.preview: "+id) {
+		t.Errorf("override missing com.herald.preview label:\n%s", overrideData)
+	}
+}
+
+func TestPreviewOverridePreservesYAMLTags(t *testing.T) {
+	// Regression: the old DeepMerge (map[string]any) discarded YAML tags like !override.
+	// deployer.GenerateOverride uses DeepMergeYAML which preserves them.
+	dir := t.TempDir()
+	composeFile := makeTestComposeFile(t, dir)
+
+	inlineOverride := "services:\n  app:\n    environment: !override\n      - FOO=bar\n"
+	overrideData := makeTestOverrideData(t, dir, composeFile, inlineOverride)
+
+	if !strings.Contains(string(overrideData), "!override") {
+		t.Errorf("YAML !override tag was lost in merge:\n%s", overrideData)
 	}
 }

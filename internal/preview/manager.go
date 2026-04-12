@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/runner"
 	"github.com/nogo/herald/internal/secrets"
@@ -79,7 +79,7 @@ func makeID(appName, branch string) string {
 
 // Deploy creates or updates a preview for the given app and branch.
 func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit string) error {
-	app, ok := m.Config.Apps[appName]
+	app, ok := m.Config.Stacks[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found in config", appName)
 	}
@@ -133,36 +133,58 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		return fmt.Errorf("resolving secrets: %w", err)
 	}
 
-	previewRoot, err := os.OpenRoot(previewDir)
-	if err != nil {
-		return fmt.Errorf("opening preview root: %w", err)
-	}
-	defer previewRoot.Close()
-
-	if err := compose.WriteEnvFile(previewRoot, envVars); err != nil {
+	if err := deployer.WriteEnvFile(filepath.Join(previewDir, ".env"), envVars); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
 	}
 
 	if len(dockerSecrets) > 0 {
-		secretsDir := filepath.Join(previewDir, "secrets")
-		if err := os.MkdirAll(secretsDir, 0700); err != nil {
-			return fmt.Errorf("creating secrets dir: %w", err)
-		}
-		secretsRoot, err := previewRoot.OpenRoot("secrets")
-		if err != nil {
-			return fmt.Errorf("opening secrets root: %w", err)
-		}
-		defer secretsRoot.Close()
-		for name, val := range dockerSecrets {
-			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-				return fmt.Errorf("writing secret %q: %w", name, err)
-			}
+		if err := deployer.WriteDockerSecrets(filepath.Join(previewDir, "secrets"), dockerSecrets); err != nil {
+			return fmt.Errorf("writing docker secrets: %w", err)
 		}
 	}
 
 	repoDir := filepath.Join(previewDir, "repo")
-	if err := m.generateOverride(previewRoot, previewDir, appName, id, domain, app, repoDir, dockerSecrets); err != nil {
+	envFilePaths := []string{filepath.Join(previewDir, ".env")}
+	if app.EnvFile != "" {
+		envFilePaths = append(envFilePaths, app.EnvFile)
+	}
+	composeFile := app.Compose
+	if !filepath.IsAbs(composeFile) {
+		composeFile = filepath.Join(repoDir, composeFile)
+	}
+	internalNet := "herald-preview-" + id + "-internal"
+
+	overrideData, err := deployer.GenerateOverride(deployer.OverrideParams{
+		DeployDir:      previewDir,
+		StackName:      appName,
+		Domain:         domain,
+		ComposeFile:    composeFile,
+		EnvFilePaths:   envFilePaths,
+		DockerSecrets:  dockerSecrets,
+		DefaultPort:    "3000",
+		InternalNet:    internalNet,
+		InlineOverride: app.Override,
+	})
+	if err != nil {
 		return fmt.Errorf("generating override: %w", err)
+	}
+
+	// Merge the preview-specific label into the override.
+	var parsedSvcs struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if parseErr := yaml.Unmarshal(overrideData, &parsedSvcs); parseErr == nil {
+		for svcName := range parsedSvcs.Services {
+			fragment := fmt.Sprintf("services:\n  %s:\n    labels:\n      com.herald.preview: %s\n", svcName, id)
+			if merged, mergeErr := compose.DeepMergeYAML(overrideData, []byte(fragment)); mergeErr == nil {
+				overrideData = merged
+			}
+			break
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(previewDir, "compose.override.yml"), overrideData, 0644); err != nil {
+		return fmt.Errorf("writing override: %w", err)
 	}
 
 	if err := caddy.EnsureNetwork(ctx, m.Logger); err != nil {
@@ -291,7 +313,7 @@ func (m *PreviewManager) Cleanup(ctx context.Context) error {
 
 	var removed []string
 	for _, p := range state.Previews {
-		app, ok := m.Config.Apps[p.AppName]
+		app, ok := m.Config.Stacks[p.AppName]
 		if !ok {
 			m.Logger.Warn("preview references unknown app, removing", "id", p.ID)
 			if err := m.Remove(ctx, p.ID); err != nil {
@@ -374,84 +396,4 @@ func (m *PreviewManager) runComposeDown(ctx context.Context, previewDir, compose
 	args := cctx.BaseArgs()
 	args = append(args, "down", "--volumes", "--remove-orphans")
 	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
-}
-
-func (m *PreviewManager) generateOverride(
-	root *os.Root,
-	previewDir, appName, previewID, domain string,
-	app config.App,
-	repoDir string,
-	dockerSecrets map[string]string,
-) error {
-	serviceName, port, err := compose.DetectServiceInfo(filepath.Join(repoDir, app.Compose), appName, "3000")
-	if err != nil {
-		m.Logger.Warn("could not detect service info, using defaults", "app", appName, "error", err)
-		serviceName = "app"
-		port = "3000"
-	}
-
-	internalNet := "herald-preview-" + previewID + "-internal"
-	svc := compose.ServiceOverride{
-		Labels: map[string]string{
-			"caddy":               domain,
-			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
-			"com.herald.preview":  previewID,
-		},
-		Networks: []string{"caddy", internalNet},
-	}
-
-	svc.EnvFile = compose.OverrideList{filepath.Join(previewDir, ".env")}
-	if app.EnvFile != "" {
-		svc.EnvFile = append(svc.EnvFile, app.EnvFile)
-	}
-
-	secretNames := slices.Sorted(maps.Keys(dockerSecrets))
-	if len(secretNames) > 0 {
-		svc.Secrets = secretNames
-	}
-
-	override := compose.Override{
-		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{
-			"caddy":     {External: true},
-			internalNet: {},
-		},
-	}
-
-	if len(secretNames) > 0 {
-		override.Secrets = make(map[string]compose.SecretFileDef, len(secretNames))
-		for _, name := range secretNames {
-			override.Secrets[name] = compose.SecretFileDef{
-				File: filepath.Join(previewDir, "secrets", name),
-			}
-		}
-	}
-
-	data, err := yaml.Marshal(override)
-	if err != nil {
-		return fmt.Errorf("marshaling override: %w", err)
-	}
-
-	if app.Override != "" {
-		var baseMap, overlayMap map[string]any
-		if err := yaml.Unmarshal(data, &baseMap); err != nil {
-			return fmt.Errorf("re-parsing generated override: %w", err)
-		}
-		if err := yaml.Unmarshal([]byte(app.Override), &overlayMap); err != nil {
-			return fmt.Errorf("parsing app override YAML: %w", err)
-		}
-		merged := compose.DeepMerge(baseMap, overlayMap)
-		data, err = yaml.Marshal(merged)
-		if err != nil {
-			return fmt.Errorf("marshaling merged override: %w", err)
-		}
-	}
-
-	f, err := root.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
 }
