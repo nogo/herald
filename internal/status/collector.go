@@ -33,7 +33,6 @@ type StatusCollector struct {
 type ServerStatus struct {
 	ServerName      string          `json:"server_name"`
 	Caddy           CaddyStatus     `json:"caddy"`
-	Apps            []AppStatus     `json:"apps,omitempty"`
 	Stacks          []StackStatus   `json:"stacks,omitempty"`
 	Previews        []PreviewStatus `json:"previews,omitempty"`
 	Webhooks        []WebhookStatus `json:"webhooks,omitempty"`
@@ -48,22 +47,14 @@ type CaddyStatus struct {
 	DomainCount int    `json:"domain_count,omitzero"`
 }
 
-// AppStatus describes the runtime state of a configured app.
-type AppStatus struct {
-	Name            string `json:"name"`
-	Domain          string `json:"domain"`
-	DeployedRef     string `json:"deployed_ref,omitzero"`
-	State           string `json:"state"` // "running", "degraded", "stopped", "not deployed", "error"
-	ContainersUp    int    `json:"containers_up,omitzero"`
-	ContainersTotal int    `json:"containers_total,omitzero"`
-	LastCommit      string `json:"last_commit,omitzero"`
-}
-
 // StackStatus describes the runtime state of a configured stack.
 type StackStatus struct {
 	Name            string `json:"name"`
 	Domain          string `json:"domain"`
-	State           string `json:"state"`
+	Source          string `json:"source"` // "repo" or "path"
+	DeployedRef     string `json:"deployed_ref,omitzero"`
+	LastCommit      string `json:"last_commit,omitzero"`
+	State           string `json:"state"` // "running", "degraded", "stopped", "not deployed", "error"
 	ContainersUp    int    `json:"containers_up,omitzero"`
 	ContainersTotal int    `json:"containers_total,omitzero"`
 }
@@ -142,24 +133,13 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 		}
 	}
 
-	// App statuses (concurrent).
-	appNames := slices.Sorted(maps.Keys(c.Config.Apps))
-	appStatuses := make([]AppStatus, len(appNames))
-	var wg sync.WaitGroup
-	for i, name := range appNames {
-		wg.Go(func() {
-			appStatuses[i] = c.collectAppStatus(ctx, name, c.Config.Apps[name])
-		})
-	}
-	wg.Wait()
-	s.Apps = appStatuses
-
 	// Stack statuses (concurrent).
-	stackNames := slices.Sorted(maps.Keys(c.Config.Services))
+	stackNames := slices.Sorted(maps.Keys(c.Config.Stacks))
 	stackStatuses := make([]StackStatus, len(stackNames))
+	var wg sync.WaitGroup
 	for i, name := range stackNames {
 		wg.Go(func() {
-			stackStatuses[i] = c.collectStackStatus(ctx, name, c.Config.Services[name])
+			stackStatuses[i] = c.collectStackStatus(ctx, name, c.Config.Stacks[name])
 		})
 	}
 	wg.Wait()
@@ -192,46 +172,33 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 	return s, nil
 }
 
-func (c *StatusCollector) collectAppStatus(ctx context.Context, name string, app config.App) AppStatus {
-	s := AppStatus{
+func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, stack config.Stack) StackStatus {
+	s := StackStatus{
 		Name:   name,
-		Domain: app.Domain,
+		Domain: stack.Domain,
+		Source: "path",
+	}
+	if stack.Repo != "" {
+		s.Source = "repo"
 	}
 
-	appDir := filepath.Join(c.Config.Server.ServicesDir, "apps", name)
-	if _, err := os.Stat(appDir); os.IsNotExist(err) {
+	deployDir := filepath.Join(c.Config.Server.ServicesDir, name)
+	if _, err := os.Stat(deployDir); os.IsNotExist(err) {
 		s.State = "not deployed"
 		return s
 	}
 
-	if data, err := os.ReadFile(filepath.Join(appDir, "deployed_ref")); err == nil {
-		s.DeployedRef = strings.TrimSpace(string(data))
-	}
-
-	repoDir := filepath.Join(appDir, "repo")
-	if commit, err := readGitHead(ctx, repoDir); err == nil {
-		s.LastCommit = commit
+	if stack.Repo != "" {
+		if data, err := os.ReadFile(filepath.Join(deployDir, "deployed_ref")); err == nil {
+			s.DeployedRef = strings.TrimSpace(string(data))
+		}
+		repoDir := filepath.Join(deployDir, "repo")
+		if commit, err := readGitHead(ctx, repoDir); err == nil {
+			s.LastCommit = commit
+		}
 	}
 
 	up, total, state, err := queryDockerCompose(ctx, "herald-"+name)
-	if err != nil {
-		c.Logger.Warn("docker compose ps failed", "app", name, "error", err)
-		s.State = "error"
-		return s
-	}
-	s.ContainersUp = up
-	s.ContainersTotal = total
-	s.State = state
-	return s
-}
-
-func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, stack config.Service) StackStatus {
-	s := StackStatus{
-		Name:   name,
-		Domain: stack.Domain,
-	}
-
-	up, total, state, err := queryDockerCompose(ctx, "herald-svc-"+name)
 	if err != nil {
 		c.Logger.Warn("docker compose ps failed", "stack", name, "error", err)
 		s.State = "error"
@@ -371,11 +338,13 @@ func readGitHead(ctx context.Context, repoDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// uniqueRepos returns sorted, deduplicated repos from config.Apps.
+// uniqueRepos returns sorted, deduplicated repos from config.Stacks (repo stacks only).
 func uniqueRepos(cfg *config.Config) []string {
 	seen := make(map[string]struct{})
-	for _, app := range cfg.Apps {
-		seen[app.Repo] = struct{}{}
+	for _, stack := range cfg.Stacks {
+		if stack.Repo != "" {
+			seen[stack.Repo] = struct{}{}
+		}
 	}
 	return slices.Sorted(maps.Keys(seen))
 }

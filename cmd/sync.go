@@ -18,7 +18,6 @@ import (
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/secrets"
-	"github.com/nogo/herald/internal/services"
 	"github.com/nogo/herald/internal/status"
 	"github.com/spf13/cobra"
 )
@@ -53,13 +52,6 @@ var syncCmd = &cobra.Command{
 			Config:     cfg,
 			Logger:     slog.Default(),
 			HeraldPort: port,
-		}
-
-		stackMgr := &services.ServiceManager{
-			Config:  cfg,
-			Secrets: store,
-			DataDir: dataDir,
-			Logger:  slog.Default(),
 		}
 
 		// 3. Ensure Caddy is running.
@@ -109,96 +101,60 @@ var syncCmd = &cobra.Command{
 			}
 		}
 
-		// 5. Check each app.
-		appNames := slices.Sorted(maps.Keys(cfg.Apps))
-		appsDeployed, appsNotDeployed, appsRunning, appsStopped := 0, 0, 0, 0
+		// 5. Check each stack.
+		stackNames := slices.Sorted(maps.Keys(cfg.Stacks))
+		stacksNotDeployed, stacksRunning, stacksStopped := 0, 0, 0
 		var pendingActions []string
 
-		for _, name := range appNames {
-			app := cfg.Apps[name]
-			appDir := filepath.Join(cfg.Server.ServicesDir, "apps", name)
-			if _, err := os.Stat(appDir); os.IsNotExist(err) {
-				appsNotDeployed++
+		for _, name := range stackNames {
+			stack := cfg.Stacks[name]
+			deployDir := filepath.Join(cfg.Server.ServicesDir, name)
+			if _, err := os.Stat(deployDir); os.IsNotExist(err) {
+				stacksNotDeployed++
 				pendingActions = append(pendingActions,
 					fmt.Sprintf("  → Run 'herald deploy %s' to deploy (not yet deployed)", name))
 				continue
 			}
-			appsDeployed++
-
 			// Check Docker running state.
 			psOut, psErr := exec.CommandContext(ctx, "docker", "compose",
 				"-p", "herald-"+name, "ps", "--format", "json").Output()
 			trimmed := strings.TrimSpace(string(psOut))
 			if psErr != nil || trimmed == "" || trimmed == "[]" {
-				appsStopped++
-				continue
-			}
-			appsRunning++
-
-			// Check for pending commits (compare local HEAD vs remote).
-			repoDir := filepath.Join(appDir, "repo")
-			localCmd := githelper.CmdWithAuth(ctx, "", repoDir, "rev-parse", "--short", "HEAD")
-			localOut, localErr := localCmd.Output()
-			localCommit := strings.TrimSpace(string(localOut))
-			if localErr != nil {
-				continue
-			}
-			token := resolveToken()
-			lsCmd := githelper.CmdWithAuth(ctx, token, repoDir, "ls-remote", "origin", app.Branch)
-			lsOut, remoteErr := lsCmd.Output()
-			lsRemote := strings.TrimSpace(string(lsOut))
-			if remoteErr != nil {
-				continue
-			}
-			// ls-remote output: "<sha>\trefs/heads/<branch>"
-			fields := strings.Fields(lsRemote)
-			if len(fields) == 0 {
-				continue
-			}
-			remoteSHA := fields[0]
-			if len(remoteSHA) > 7 {
-				remoteSHA = remoteSHA[:7]
-			}
-			if localCommit != "" && remoteSHA != "" && localCommit != remoteSHA {
-				pendingActions = append(pendingActions,
-					fmt.Sprintf("  → App '%s' has new commits (deployed: %s, remote: %s)",
-						name, localCommit, remoteSHA))
-			}
-		}
-
-		// 6. Check each service.
-		stackNames := slices.Sorted(maps.Keys(cfg.Services))
-		stacksRunning, stacksStopped := 0, 0
-		var serviceNotes []string
-		var serviceErrors []string
-
-		for _, name := range stackNames {
-			deployDir := filepath.Join(cfg.Server.ServicesDir, "services", name)
-			repoLink := filepath.Join(deployDir, "repo")
-			overrideFile := filepath.Join(deployDir, "compose.override.yml")
-
-			isSetUp := false
-			if _, err1 := os.Lstat(repoLink); err1 == nil {
-				if _, err2 := os.Lstat(overrideFile); err2 == nil {
-					isSetUp = true
-				}
-			}
-
-			if !isSetUp {
-				serviceNotes = append(serviceNotes, fmt.Sprintf("    → Configured %s (first setup)", name))
-				if setupErr := stackMgr.Setup(ctx, name); setupErr != nil {
-					serviceErrors = append(serviceErrors, fmt.Sprintf("  service %q: setup failed: %v", name, setupErr))
-					continue
-				}
-			}
-
-			psOut, psErr := exec.CommandContext(ctx, "docker", "compose",
-				"-p", "herald-svc-"+name, "ps", "--format", "json").Output()
-			trimmed := strings.TrimSpace(string(psOut))
-			if psErr != nil || trimmed == "" || trimmed == "[]" {
 				stacksStopped++
 			} else {
 				stacksRunning++
+			}
+
+			if stack.Repo != "" {
+				// Check for pending commits (compare local HEAD vs remote).
+				repoDir := filepath.Join(deployDir, "repo")
+				localCmd := githelper.CmdWithAuth(ctx, "", repoDir, "rev-parse", "--short", "HEAD")
+				localOut, localErr := localCmd.Output()
+				localCommit := strings.TrimSpace(string(localOut))
+				if localErr != nil {
+					continue
+				}
+				token := resolveToken()
+				lsCmd := githelper.CmdWithAuth(ctx, token, repoDir, "ls-remote", "origin", stack.Branch)
+				lsOut, remoteErr := lsCmd.Output()
+				lsRemote := strings.TrimSpace(string(lsOut))
+				if remoteErr != nil {
+					continue
+				}
+				// ls-remote output: "<sha>\trefs/heads/<branch>"
+				fields := strings.Fields(lsRemote)
+				if len(fields) == 0 {
+					continue
+				}
+				remoteSHA := fields[0]
+				if len(remoteSHA) > 7 {
+					remoteSHA = remoteSHA[:7]
+				}
+				if localCommit != "" && remoteSHA != "" && localCommit != remoteSHA {
+					pendingActions = append(pendingActions,
+						fmt.Sprintf("  → Stack '%s' has new commits (deployed: %s, remote: %s)",
+							name, localCommit, remoteSHA))
+				}
 			}
 		}
 
@@ -215,13 +171,8 @@ var syncCmd = &cobra.Command{
 		} else {
 			fmt.Fprintln(out, "  Webhooks: skipped (no GitHub token configured)")
 		}
-		fmt.Fprintf(out, "  Apps: %d configured, %d running, %d stopped, %d not deployed\n",
-			len(appNames), appsRunning, appsStopped, appsNotDeployed)
-		fmt.Fprintf(out, "  Services: %d configured, %d running, %d stopped\n",
-			len(stackNames), stacksRunning, stacksStopped)
-		for _, note := range serviceNotes {
-			fmt.Fprintln(out, note)
-		}
+		fmt.Fprintf(out, "  Stacks: %d configured, %d running, %d stopped, %d not deployed\n",
+			len(stackNames), stacksRunning, stacksStopped, stacksNotDeployed)
 		fmt.Fprintf(out, "  Orphans: %d\n", len(orphans))
 		if len(orphans) > 0 {
 			for _, o := range orphans {
@@ -239,29 +190,17 @@ var syncCmd = &cobra.Command{
 
 		// 8. Advisory: warn about missing required secrets (non-blocking).
 		var warnLines []string
-		for _, name := range appNames {
-			app := cfg.Apps[name]
-			missing, merr := store.MissingRequired(app.Secrets)
-			if merr != nil {
-				warnLines = append(warnLines, fmt.Sprintf("  app %q: error checking secrets: %v", name, merr))
-				continue
-			}
-			if len(missing) > 0 {
-				warnLines = append(warnLines, fmt.Sprintf("  app %q: %s", name, strings.Join(missing, ", ")))
-			}
-		}
 		for _, name := range stackNames {
-			svc := cfg.Services[name]
-			missing, merr := store.MissingRequired(svc.Secrets)
+			stack := cfg.Stacks[name]
+			missing, merr := store.MissingRequired(stack.Secrets)
 			if merr != nil {
-				warnLines = append(warnLines, fmt.Sprintf("  service %q: error checking secrets: %v", name, merr))
+				warnLines = append(warnLines, fmt.Sprintf("  stack %q: error checking secrets: %v", name, merr))
 				continue
 			}
 			if len(missing) > 0 {
-				warnLines = append(warnLines, fmt.Sprintf("  service %q: %s", name, strings.Join(missing, ", ")))
+				warnLines = append(warnLines, fmt.Sprintf("  stack %q: %s", name, strings.Join(missing, ", ")))
 			}
 		}
-		warnLines = append(warnLines, serviceErrors...)
 		if len(warnLines) > 0 {
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Warnings:")
@@ -296,11 +235,8 @@ func detectOrphans(ctx context.Context, cfg *config.Config) []string {
 	known := map[string]bool{
 		"herald-caddy": true,
 	}
-	for name := range cfg.Apps {
+	for name := range cfg.Stacks {
 		known["herald-"+name] = true
-	}
-	for name := range cfg.Services {
-		known["herald-svc-"+name] = true
 	}
 
 	var orphans []string

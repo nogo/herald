@@ -104,14 +104,14 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 		fmt.Fprintf(w, "  Domains: %d active\n", s.Caddy.DomainCount)
 	}
 
-	// Apps.
-	if len(s.Apps) > 0 {
+	// Stacks.
+	if len(s.Stacks) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Apps:")
+		fmt.Fprintln(w, "Stacks:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tRef")
-		for _, a := range s.Apps {
-			ref := a.DeployedRef
+		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tSource\tRef")
+		for _, st := range s.Stacks {
+			ref := st.DeployedRef
 			if strings.HasPrefix(ref, "refs/tags/") {
 				ref = "tag:" + strings.TrimPrefix(ref, "refs/tags/")
 			}
@@ -119,25 +119,11 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 				ref = "-"
 			}
 			containers := ""
-			if a.State != "not deployed" {
-				containers = fmt.Sprintf("%d/%d", a.ContainersUp, a.ContainersTotal)
+			if st.State != "not deployed" {
+				containers = fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
 			}
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-				a.Name, a.Domain, stateIcon(a.State), containers, ref)
-		}
-		tw.Flush()
-	}
-
-	// Services.
-	if len(s.Stacks) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Services:")
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers")
-		for _, st := range s.Stacks {
-			containers := fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n",
-				st.Name, st.Domain, stateIcon(st.State), containers)
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n",
+				st.Name, st.Domain, stateIcon(st.State), containers, st.Source, ref)
 		}
 		tw.Flush()
 	}

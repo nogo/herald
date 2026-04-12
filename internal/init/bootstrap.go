@@ -179,9 +179,8 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if cfg.Server.Port > 0 {
 		opts.HeraldPort = cfg.Server.Port
 	}
-	fmt.Fprintf(w, "  ✓ Config loaded: %d app%s, %d service%s\n",
-		len(cfg.Apps), plural(len(cfg.Apps)),
-		len(cfg.Services), plural(len(cfg.Services)))
+	fmt.Fprintf(w, "  ✓ Config loaded: %d stack%s\n",
+		len(cfg.Stacks), plural(len(cfg.Stacks)))
 
 	// Step 3: Initialize secrets store
 	fmt.Fprintln(w, "\nInitializing secrets store...")
@@ -230,9 +229,9 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	// Step 6: Create directories
 	fmt.Fprintln(w, "\nCreating directories...")
 	dirs := []string{
-		filepath.Join(cfg.Server.ServicesDir, "apps"),
-		filepath.Join(cfg.Server.ServicesDir, "services"),
-		filepath.Join(cfg.Server.ServicesDir, "envs"),
+		cfg.Server.ServicesDir,
+		filepath.Join(cfg.Server.ServicesDir, "previews"),
+		filepath.Join(cfg.Server.ServicesDir, "caddy"),
 	}
 	for _, d := range dirs {
 		fmt.Fprintf(w, "  → %s/\n", d)
@@ -302,19 +301,22 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 		fmt.Fprintln(w, "  → No GitHub token provided, skipping webhook registration")
 	}
 
-	// Step 9: Clone app repositories
-	fmt.Fprintln(w, "\nCloning app repositories...")
-	appNames := slices.Sorted(maps.Keys(cfg.Apps))
+	// Step 9: Clone repo stack repositories
+	fmt.Fprintln(w, "\nCloning stack repositories...")
+	stackNames := slices.Sorted(maps.Keys(cfg.Stacks))
 	cloned := 0
-	for _, appName := range appNames {
-		app := cfg.Apps[appName]
-		appRepoDir := filepath.Join(cfg.Server.ServicesDir, "apps", appName, "repo")
-		fmt.Fprintf(w, "  → %-10s %s:%s → %s\n", appName, app.Repo, app.Branch, appRepoDir)
-		if err := os.MkdirAll(filepath.Dir(appRepoDir), 0755); err != nil {
+	for _, stackName := range stackNames {
+		stack := cfg.Stacks[stackName]
+		if stack.Repo == "" {
+			continue // path stacks don't need cloning
+		}
+		stackRepoDir := filepath.Join(cfg.Server.ServicesDir, stackName, "repo")
+		fmt.Fprintf(w, "  → %-10s %s:%s → %s\n", stackName, stack.Repo, stack.Branch, stackRepoDir)
+		if err := os.MkdirAll(filepath.Dir(stackRepoDir), 0755); err != nil {
 			fmt.Fprintf(w, "    ✗ %v\n", err)
 			continue
 		}
-		if err := git.CloneOrFetch(ctx, token, appRepoDir, git.RepoURL(app.Repo), app.Branch); err != nil {
+		if err := git.CloneOrFetch(ctx, token, stackRepoDir, git.RepoURL(stack.Repo), stack.Branch); err != nil {
 			fmt.Fprintf(w, "    ✗ %v\n", err)
 		} else {
 			cloned++
@@ -366,9 +368,9 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 func syncServerRepoWebhook(ctx context.Context, cfg *config.Config, client *github.GitHubClient, store *secrets.Store, serverRepo string) github.SyncResult {
 	result := github.SyncResult{Repo: serverRepo}
 
-	// Skip if the server repo is already an app repo (handled by SyncWebhooks).
-	for _, app := range cfg.Apps {
-		if app.Repo == serverRepo {
+	// Skip if the server repo is already a repo stack (handled by SyncWebhooks).
+	for _, stack := range cfg.Stacks {
+		if stack.Repo == serverRepo {
 			result.Action = "exists"
 			return result
 		}
@@ -460,8 +462,8 @@ func printCompletion(w io.Writer, cfg *config.Config, opts Options) {
 	fmt.Fprintln(w, "  2. Start the herald daemon:")
 	fmt.Fprintln(w, "     herald serve")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  3. Deploy your apps:")
-	for _, name := range slices.Sorted(maps.Keys(cfg.Apps)) {
+	fmt.Fprintln(w, "  3. Deploy your stacks:")
+	for _, name := range slices.Sorted(maps.Keys(cfg.Stacks)) {
 		fmt.Fprintf(w, "     herald deploy %s\n", name)
 	}
 	fmt.Fprintln(w)

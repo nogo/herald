@@ -154,8 +154,8 @@ type appData struct {
 	*status.ServerStatus
 	CollectedAt time.Time
 	AppName     string
-	AppConfig   config.App
-	AppStatus   *status.AppStatus
+	AppConfig   config.Stack
+	AppStatus   *status.StackStatus
 }
 
 func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +174,7 @@ func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	app, ok := h.Config.Apps[name]
+	stack, ok := h.Config.Stacks[name]
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -185,10 +185,10 @@ func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service temporarily unavailable", http.StatusInternalServerError)
 		return
 	}
-	var appSt *status.AppStatus
-	for i := range s.Apps {
-		if s.Apps[i].Name == name {
-			appSt = &s.Apps[i]
+	var stackSt *status.StackStatus
+	for i := range s.Stacks {
+		if s.Stacks[i].Name == name {
+			stackSt = &s.Stacks[i]
 			break
 		}
 	}
@@ -196,8 +196,8 @@ func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
 		ServerStatus: s,
 		CollectedAt:  time.Now(),
 		AppName:      name,
-		AppConfig:    app,
-		AppStatus:    appSt,
+		AppConfig:    stack,
+		AppStatus:    stackSt,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.Templates.ExecuteTemplate(w, "app", data); err != nil {
