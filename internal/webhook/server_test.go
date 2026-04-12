@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/webhook"
@@ -275,5 +276,118 @@ func TestPathStackNotMatchedByWebhook(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&resp) //nolint:errcheck
 	if resp["message"] != "no matching stacks" {
 		t.Errorf("expected no matching stacks, got %q", resp["message"])
+	}
+}
+
+func TestTagPush(t *testing.T) {
+	called := make(chan webhook.DeployRequest, 4)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{
+				"myapp": {Repo: "nogo/myapp", Branch: "main", TagPattern: "v*"},
+			},
+		},
+		Secret: testSecret,
+		OnDeploy: func(req webhook.DeployRequest) {
+			called <- req
+		},
+	}
+
+	body := []byte(`{"ref":"refs/tags/v1.2.3","after":"abc123","deleted":false,"repository":{"full_name":"nogo/myapp","clone_url":"https://github.com/nogo/myapp.git"},"pusher":{"name":"test"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "push",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case req := <-called:
+		if req.StackName != "myapp" {
+			t.Errorf("StackName = %q, want %q", req.StackName, "myapp")
+		}
+		if req.Tag != "v1.2.3" {
+			t.Errorf("Tag = %q, want %q", req.Tag, "v1.2.3")
+		}
+		if req.Ref != "refs/tags/v1.2.3" {
+			t.Errorf("Ref = %q, want %q", req.Ref, "refs/tags/v1.2.3")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for deploy callback")
+	}
+}
+
+func TestIaCRepoPush(t *testing.T) {
+	called := make(chan struct{}, 1)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{},
+		},
+		Secret:    testSecret,
+		OnDeploy:  func(webhook.DeployRequest) {},
+		IaCRepo:   "nogo/srv2",
+		OnIaCPush: func() { called <- struct{}{} },
+	}
+
+	body := []byte(`{"ref":"refs/heads/main","after":"abc123","deleted":false,"repository":{"full_name":"nogo/srv2","clone_url":"https://github.com/nogo/srv2.git"},"pusher":{"name":"test"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "push",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case <-called:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for OnIaCPush callback")
+	}
+}
+
+func TestPreviewDeploy(t *testing.T) {
+	type previewEvent struct{ name, branch, commit string }
+	called := make(chan previewEvent, 1)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{
+				"myapp": {
+					Repo:    "nogo/myapp",
+					Branch:  "main",
+					Preview: &config.PreviewConfig{Enabled: true},
+				},
+			},
+		},
+		Secret:   testSecret,
+		OnDeploy: func(webhook.DeployRequest) {},
+		OnPreviewDeploy: func(name, branch, commit string) {
+			called <- previewEvent{name, branch, commit}
+		},
+	}
+
+	body := []byte(`{"ref":"refs/heads/feature-xyz","after":"def456","deleted":false,"repository":{"full_name":"nogo/myapp","clone_url":"https://github.com/nogo/myapp.git"},"pusher":{"name":"test"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "push",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case ev := <-called:
+		if ev.name != "myapp" {
+			t.Errorf("name = %q, want %q", ev.name, "myapp")
+		}
+		if ev.branch != "feature-xyz" {
+			t.Errorf("branch = %q, want %q", ev.branch, "feature-xyz")
+		}
+		if ev.commit != "def456" {
+			t.Errorf("commit = %q, want %q", ev.commit, "def456")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for OnPreviewDeploy callback")
 	}
 }
