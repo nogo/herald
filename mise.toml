@@ -4,7 +4,6 @@ go = "1.26.1"
 [env]
 MODULE  = "github.com/nogo/herald"
 BINARY  = "bin/herald"
-TAG     = "{{ exec(command='git describe --tags --exact-match 2>/dev/null') }}"
 COMMIT  = "{{ exec(command='git rev-parse --short HEAD 2>/dev/null || echo unknown') }}"
 
 [tasks.build]
