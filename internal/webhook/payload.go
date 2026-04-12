@@ -14,7 +14,7 @@ type Pusher struct {
 
 // PushPayload represents a GitHub push event.
 type PushPayload struct {
-	Ref        string     `json:"ref"`        // "refs/heads/main"
+	Ref        string     `json:"ref"` // "refs/heads/main"
 	Before     string     `json:"before"`
 	After      string     `json:"after"`   // commit SHA; all zeros on branch deletion
 	Deleted    bool       `json:"deleted"` // true when a branch is deleted

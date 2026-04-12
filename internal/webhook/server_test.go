@@ -23,12 +23,12 @@ func newServer() *webhook.Server {
 			Server: config.Server{
 				Name:         "test",
 				DeployDomain: "deploy.example.com",
-				ServicesDir:    "/opt/stacks",
+				ServicesDir:  "/opt/stacks",
 			},
 			Apps: map[string]config.App{
-				"budget": {Repo: "nogo/budget-app", Branch: "main"},
+				"budget":  {Repo: "nogo/budget-app", Branch: "main"},
 				"tracker": {Repo: "nogo/budget-app", Branch: "main"},
-				"other":  {Repo: "nogo/other-app", Branch: "main"},
+				"other":   {Repo: "nogo/other-app", Branch: "main"},
 			},
 		},
 		Secret:   testSecret,

@@ -15,8 +15,8 @@ func testCollector(t *testing.T) *status.StatusCollector {
 	t.Helper()
 	return &status.StatusCollector{
 		Config: &config.Config{
-			Server: config.Server{Name: "test-server"},
-			Apps:   map[string]config.App{},
+			Server:   config.Server{Name: "test-server"},
+			Apps:     map[string]config.App{},
 			Services: map[string]config.Service{},
 		},
 		DataDir: t.TempDir(),
@@ -27,8 +27,8 @@ func testCollector(t *testing.T) *status.StatusCollector {
 func testHandler(t *testing.T, password string) *WebHandler {
 	t.Helper()
 	h := NewWebHandler(testCollector(t), &config.Config{
-		Server: config.Server{Name: "test-server"},
-		Apps:   map[string]config.App{},
+		Server:   config.Server{Name: "test-server"},
+		Apps:     map[string]config.App{},
 		Services: map[string]config.Service{},
 	}, password, slog.Default())
 	if h == nil {

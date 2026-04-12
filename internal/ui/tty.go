@@ -115,4 +115,3 @@ func FlushStreamWriter(u UI) {
 		t.stream.Flush()
 	}
 }
-

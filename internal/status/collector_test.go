@@ -126,7 +126,7 @@ func TestCollectWebhookStatuses_MissingFile(t *testing.T) {
 		Server: config.Server{
 			Name:         "test",
 			DeployDomain: "example.com",
-			ServicesDir:    dir,
+			ServicesDir:  dir,
 		},
 		Apps: map[string]config.App{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
@@ -164,7 +164,7 @@ func TestCollectWebhookStatuses_WithFile(t *testing.T) {
 		Server: config.Server{
 			Name:         "test",
 			DeployDomain: "example.com",
-			ServicesDir:    dir,
+			ServicesDir:  dir,
 		},
 		Apps: map[string]config.App{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
@@ -202,7 +202,7 @@ func TestCollectWebhookStatuses_UnregisteredRepo(t *testing.T) {
 		Server: config.Server{
 			Name:         "test",
 			DeployDomain: "example.com",
-			ServicesDir:    dir,
+			ServicesDir:  dir,
 		},
 		Apps: map[string]config.App{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
