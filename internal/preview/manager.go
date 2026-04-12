@@ -352,7 +352,7 @@ func (m *PreviewManager) previewDir(id string) string {
 }
 
 // branchExists checks whether the branch exists on the remote.
-func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branch string) (bool, error) {
+func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, branch string) (bool, error) {
 	cmd := git.CmdWithAuth(ctx, m.Config.Server.GithubToken, "", "ls-remote", "--heads", git.RepoURL(app.Repo), branch)
 	out, err := cmd.Output()
 	if err != nil {
@@ -363,7 +363,7 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.App, branc
 
 // --- Deploy helpers ---
 
-func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app config.App, branch string) error {
+func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app config.Stack, branch string) error {
 	repoDir := filepath.Join(previewDir, "repo")
 	return git.CloneOrFetch(ctx, m.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), branch)
 }

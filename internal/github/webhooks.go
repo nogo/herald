@@ -246,11 +246,13 @@ func (c *GitHubClient) DeleteWebhook(ctx context.Context, owner, repo string, id
 	return nil
 }
 
-// uniqueRepos returns a sorted, deduplicated list of repos referenced by config.Apps.
+// uniqueRepos returns a sorted, deduplicated list of repos referenced by repo stacks.
 func uniqueRepos(cfg *config.Config) []string {
 	repoSet := make(map[string]struct{})
-	for _, app := range cfg.Apps {
-		repoSet[app.Repo] = struct{}{}
+	for _, stack := range cfg.Stacks {
+		if stack.Repo != "" {
+			repoSet[stack.Repo] = struct{}{}
+		}
 	}
 	return slices.Collect(maps.Keys(repoSet))
 }
@@ -270,10 +272,10 @@ func webhookURL(cfg *config.Config) string {
 }
 
 // eventsForRepo returns the events to subscribe to for a repo.
-// Subscribes to pull_request if any app referencing the repo has preview enabled.
+// Subscribes to pull_request if any stack referencing the repo has preview enabled.
 func eventsForRepo(cfg *config.Config, repo string) []string {
-	for _, app := range cfg.Apps {
-		if app.Repo == repo && app.Preview != nil && app.Preview.Enabled {
+	for _, stack := range cfg.Stacks {
+		if stack.Repo == repo && stack.Preview != nil && stack.Preview.Enabled {
 			return []string{"push", "pull_request"}
 		}
 	}
