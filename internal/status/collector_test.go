@@ -291,3 +291,110 @@ func TestSaveWebhookState(t *testing.T) {
 		t.Errorf("got SyncedAt=%v, want %v", loaded.SyncedAt, ts)
 	}
 }
+
+func TestCollectStackStatus_DeployedRef(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create deploy dir and deployed_ref file to simulate a deployed repo stack.
+	deployDir := filepath.Join(dir, "myapp")
+	if err := os.MkdirAll(deployDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte("main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Server: config.Server{
+			Name:         "test",
+			DeployDomain: "example.com",
+			ServicesDir:  dir,
+		},
+		Stacks: map[string]config.Stack{
+			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
+			"mysvc": {Path: "services/mysvc", Domain: "mysvc.example.com"},
+		},
+	}
+	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+
+	repoStatus := c.collectStackStatus(t.Context(), "myapp", cfg.Stacks["myapp"])
+	if repoStatus.Source != "repo" {
+		t.Errorf("Source = %q, want %q", repoStatus.Source, "repo")
+	}
+	if repoStatus.DeployedRef != "main" {
+		t.Errorf("DeployedRef = %q, want %q", repoStatus.DeployedRef, "main")
+	}
+
+	// Path stack has no deploy dir → DeployedRef stays empty.
+	pathStatus := c.collectStackStatus(t.Context(), "mysvc", cfg.Stacks["mysvc"])
+	if pathStatus.Source != "path" {
+		t.Errorf("Source = %q, want %q", pathStatus.Source, "path")
+	}
+	if pathStatus.DeployedRef != "" {
+		t.Errorf("DeployedRef = %q, want empty for path stack", pathStatus.DeployedRef)
+	}
+}
+
+func TestCollect_Empty(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Server: config.Server{
+			Name:         "test",
+			DeployDomain: "example.com",
+			ServicesDir:  dir,
+		},
+		Stacks: map[string]config.Stack{},
+	}
+	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+
+	status, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Stacks) != 0 {
+		t.Errorf("expected no stacks, got %d", len(status.Stacks))
+	}
+}
+
+func TestCollect_MixedStacksSortedByName(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Server: config.Server{
+			Name:         "test",
+			DeployDomain: "example.com",
+			ServicesDir:  dir,
+		},
+		Stacks: map[string]config.Stack{
+			"zebra": {Repo: "nogo/zebra", Branch: "main", Domain: "zebra.example.com"},
+			"alpha": {Path: "services/alpha", Domain: "alpha.example.com"},
+			"beta":  {Repo: "nogo/beta", Branch: "main", Domain: "beta.example.com"},
+		},
+	}
+	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+
+	status, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Stacks) != 3 {
+		t.Fatalf("expected 3 stacks, got %d", len(status.Stacks))
+	}
+
+	names := []string{status.Stacks[0].Name, status.Stacks[1].Name, status.Stacks[2].Name}
+	if names[0] != "alpha" || names[1] != "beta" || names[2] != "zebra" {
+		t.Errorf("stacks not sorted by name: got %v", names)
+	}
+
+	for _, s := range status.Stacks {
+		switch s.Name {
+		case "alpha":
+			if s.Source != "path" {
+				t.Errorf("alpha Source = %q, want path", s.Source)
+			}
+		case "beta", "zebra":
+			if s.Source != "repo" {
+				t.Errorf("%s Source = %q, want repo", s.Name, s.Source)
+			}
+		}
+	}
+}
