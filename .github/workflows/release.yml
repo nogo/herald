@@ -14,11 +14,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+      - run: mise run check
 
   release:
     needs: test
@@ -32,16 +29,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
-        with:
-          go-version-file: go.mod
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
 
-      - uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7
-        with:
-          version: "~> v2"
-          args: release --clean
+      - run: mise run release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
         with:

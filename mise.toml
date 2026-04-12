@@ -79,6 +79,10 @@ run = 'echo "All checks passed."'
 description = "Run .forge/verify (authoritative project gate)"
 run = ".forge/verify"
 
+[tasks.release]
+description = "Build and publish a GitHub release for the current tag"
+run = "scripts/release.sh"
+
 [tasks.dev]
 description = "Rebuild on source changes (requires watchexec)"
 run = "mise watch build"

@@ -31,7 +31,7 @@ type Deployer struct {
 	DataDir string // path to herald data dir (e.g. /etc/herald); IaC repo lives at DataDir/repo
 	UI      ui.UI  // optional; nil defaults to ui.Nop()
 
-	appLocks sync.Map // string → *appLock
+	stackLocks sync.Map // string → *stackLock
 	wg       sync.WaitGroup
 }
 
@@ -42,20 +42,20 @@ func (d *Deployer) ui() ui.UI {
 	return ui.Nop()
 }
 
-type appLock struct {
+type stackLock struct {
 	mu    sync.Mutex
 	count atomic.Int32 // goroutines running or waiting, max 2
 }
 
-func (d *Deployer) getAppLock(stackName string) *appLock {
-	v, _ := d.appLocks.LoadOrStore(stackName, &appLock{})
-	return v.(*appLock)
+func (d *Deployer) getStackLock(stackName string) *stackLock {
+	v, _ := d.stackLocks.LoadOrStore(stackName, &stackLock{})
+	return v.(*stackLock)
 }
 
 // DeployAsync dispatches a deploy in a goroutine with per-stack serialization.
 // At most one deploy may be queued per stack; additional calls are dropped.
 func (d *Deployer) DeployAsync(stackName, ref string) {
-	lock := d.getAppLock(stackName)
+	lock := d.getStackLock(stackName)
 	if lock.count.Add(1) > 2 {
 		lock.count.Add(-1)
 		d.Logger.Info("deploy already queued, dropping", "stack", stackName)
