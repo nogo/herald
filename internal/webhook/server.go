@@ -59,14 +59,14 @@ func (rl *rateLimiter) Allow() bool {
 
 // DeployRequest carries the information needed to trigger a deploy.
 type DeployRequest struct {
-	AppName  string
-	App      config.App
-	Repo     string
-	Branch   string // branch name for branch push; empty for tag push
-	Tag      string // tag name (without refs/tags/ prefix) for tag push; empty for branch push
-	Ref      string // full ref to deploy: branch name or "refs/tags/v1.2.3"
-	Commit   string
-	CloneURL string
+	StackName string
+	Stack     config.Stack
+	Repo      string
+	Branch    string // branch name for branch push; empty for tag push
+	Tag       string // tag name (without refs/tags/ prefix) for tag push; empty for branch push
+	Ref       string // full ref to deploy: branch name or "refs/tags/v1.2.3"
+	Commit    string
+	CloneURL  string
 }
 
 // Server is the webhook HTTP server.
@@ -186,8 +186,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var matchedNames []string
-	for name, app := range s.Config.Apps {
-		if app.Repo == repo && app.Branch == branch {
+	for name, stack := range s.Config.Stacks {
+		if stack.Repo == "" {
+			continue
+		}
+		if stack.Repo == repo && stack.Branch == branch {
 			matchedNames = append(matchedNames, name)
 		}
 	}
@@ -219,9 +222,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			"event", eventType,
 			"repo", repo,
 			"branch", branch,
-			"result", "ignored: no matching apps",
+			"result", "ignored: no matching stacks",
 		)
-		writeJSON(w, http.StatusOK, map[string]string{"message": "no matching apps"})
+		writeJSON(w, http.StatusOK, map[string]string{"message": "no matching stacks"})
 		return
 	}
 
@@ -235,33 +238,33 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	)
 
 	for _, name := range matchedNames {
-		app := s.Config.Apps[name]
+		stack := s.Config.Stacks[name]
 		req := DeployRequest{
-			AppName:  name,
-			App:      app,
-			Repo:     repo,
-			Branch:   branch,
-			Ref:      branch,
-			Commit:   commit,
-			CloneURL: cloneURL,
+			StackName: name,
+			Stack:     stack,
+			Repo:      repo,
+			Branch:    branch,
+			Ref:       branch,
+			Commit:    commit,
+			CloneURL:  cloneURL,
 		}
 		go s.OnDeploy(req)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"message": "accepted",
-		"apps":    matchedNames,
+		"stacks":  matchedNames,
 	})
 }
 
-// handleTagPush matches a tag name against each app's tag_pattern and dispatches deploys.
+// handleTagPush matches a tag name against each stack's tag_pattern and dispatches deploys.
 func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
 	var matched []string
-	for name, app := range s.Config.Apps {
-		if app.Repo != repo || app.TagPattern == "" {
+	for name, stack := range s.Config.Stacks {
+		if stack.Repo == "" || stack.Repo != repo || stack.TagPattern == "" {
 			continue
 		}
-		ok, err := path.Match(app.TagPattern, tag)
+		ok, err := path.Match(stack.TagPattern, tag)
 		if err != nil || !ok {
 			continue
 		}
@@ -275,15 +278,15 @@ func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
 	slog.Info("webhook", "event", "push", "tag", tag,
 		"result", fmt.Sprintf("accepted: %s", strings.Join(matched, ",")))
 	for _, name := range matched {
-		app := s.Config.Apps[name]
+		stack := s.Config.Stacks[name]
 		req := DeployRequest{
-			AppName:  name,
-			App:      app,
-			Repo:     repo,
-			Tag:      tag,
-			Ref:      "refs/tags/" + tag,
-			Commit:   commit,
-			CloneURL: cloneURL,
+			StackName: name,
+			Stack:     stack,
+			Repo:      repo,
+			Tag:       tag,
+			Ref:       "refs/tags/" + tag,
+			Commit:    commit,
+			CloneURL:  cloneURL,
 		}
 		go s.OnDeploy(req)
 	}
@@ -296,13 +299,13 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 		return false
 	}
 	triggered := false
-	for name, app := range s.Config.Apps {
-		if app.Preview == nil || !app.Preview.Enabled || app.Repo != repo {
+	for name, stack := range s.Config.Stacks {
+		if stack.Repo == "" || stack.Preview == nil || !stack.Preview.Enabled || stack.Repo != repo {
 			continue
 		}
 		switch eventType {
 		case "push":
-			if branch == app.Branch {
+			if branch == stack.Branch {
 				// Default branch push → production deploy, not a preview.
 				continue
 			}

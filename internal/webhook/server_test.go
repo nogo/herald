@@ -25,7 +25,7 @@ func newServer() *webhook.Server {
 				DeployDomain: "deploy.example.com",
 				ServicesDir:  "/opt/stacks",
 			},
-			Apps: map[string]config.App{
+			Stacks: map[string]config.Stack{
 				"budget":  {Repo: "nogo/budget-app", Branch: "main"},
 				"tracker": {Repo: "nogo/budget-app", Branch: "main"},
 				"other":   {Repo: "nogo/other-app", Branch: "main"},
@@ -110,9 +110,9 @@ func TestValidPushMatched(t *testing.T) {
 	if resp["message"] != "accepted" {
 		t.Errorf("expected message=accepted, got %v", resp["message"])
 	}
-	apps, ok := resp["apps"].([]any)
-	if !ok || len(apps) != 2 {
-		t.Errorf("expected 2 apps, got %v", resp["apps"])
+	stacks, ok := resp["stacks"].([]any)
+	if !ok || len(stacks) != 2 {
+		t.Errorf("expected 2 stacks, got %v", resp["stacks"])
 	}
 }
 
@@ -127,8 +127,8 @@ func TestValidPushNoMatch(t *testing.T) {
 	}
 	var resp map[string]string
 	json.NewDecoder(rec.Body).Decode(&resp) //nolint:errcheck
-	if resp["message"] != "no matching apps" {
-		t.Errorf("expected no matching apps, got %q", resp["message"])
+	if resp["message"] != "no matching stacks" {
+		t.Errorf("expected no matching stacks, got %q", resp["message"])
 	}
 }
 
@@ -229,10 +229,51 @@ func TestDeployCallbackFired(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		select {
 		case req := <-called:
-			seen[req.AppName] = true
+			seen[req.StackName] = true
 		}
 	}
 	if !seen["budget"] || !seen["tracker"] {
 		t.Errorf("expected deploy for budget and tracker, got %v", seen)
+	}
+}
+
+func TestPathStackNotMatchedByWebhook(t *testing.T) {
+	called := make(chan webhook.DeployRequest, 4)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{
+				// path stack: no Repo field
+				"myservice": {Path: "/opt/services/myservice", Branch: ""},
+				// repo stack on a different repo
+				"other": {Repo: "nogo/other-app", Branch: "main"},
+			},
+		},
+		Secret: testSecret,
+		OnDeploy: func(req webhook.DeployRequest) {
+			called <- req
+		},
+	}
+
+	// Push to a repo that matches nothing (path stacks have no Repo).
+	body := []byte(`{"ref":"refs/heads/main","after":"abc123","repository":{"full_name":"nogo/budget-app","clone_url":"https://github.com/nogo/budget-app.git"},"pusher":{"name":"test"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "push",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// No deploy should fire for path stacks.
+	select {
+	case req := <-called:
+		t.Errorf("unexpected deploy for stack %q (path stacks must not be matched by webhook)", req.StackName)
+	default:
+	}
+
+	var resp map[string]string
+	json.NewDecoder(rec.Body).Decode(&resp) //nolint:errcheck
+	if resp["message"] != "no matching stacks" {
+		t.Errorf("expected no matching stacks, got %q", resp["message"])
 	}
 }

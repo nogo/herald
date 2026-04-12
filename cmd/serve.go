@@ -19,7 +19,6 @@ import (
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
-	"github.com/nogo/herald/internal/services"
 	"github.com/nogo/herald/internal/status"
 	"github.com/nogo/herald/internal/web"
 	"github.com/nogo/herald/internal/webhook"
@@ -51,13 +50,6 @@ var serveCmd = &cobra.Command{
 			Secrets: store,
 			Logger:  slog.Default(),
 			DataDir: dataDir,
-		}
-
-		stackMgr := &services.ServiceManager{
-			Config:  Cfg,
-			Secrets: store,
-			DataDir: dataDir,
-			Logger:  slog.Default(),
 		}
 
 		previewMgr := &preview.PreviewManager{
@@ -96,10 +88,10 @@ var serveCmd = &cobra.Command{
 			Verbose: verbose,
 			Web:     webHandler,
 			OnDeploy: func(req webhook.DeployRequest) {
-				d.DeployAsync(req.AppName, req.Ref)
+				d.DeployAsync(req.StackName, req.Ref)
 			},
 			IaCRepo:   getIaCRepo(dataDir),
-			OnIaCPush: makeIaCPushHandler(stackMgr),
+			OnIaCPush: makeIaCPushHandler(d),
 			OnPreviewDeploy: func(appName, branch, commit string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer cancel()
@@ -184,8 +176,8 @@ func parseGitHubRepo(rawURL string) string {
 }
 
 // makeIaCPushHandler returns a function that pulls the IaC repo, reloads config,
-// and triggers auto-deploy for services with auto_deploy: true.
-func makeIaCPushHandler(mgr *services.ServiceManager) func() {
+// and triggers auto-deploy for path stacks with auto_deploy: true.
+func makeIaCPushHandler(d *deployer.Deployer) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
@@ -206,20 +198,19 @@ func makeIaCPushHandler(mgr *services.ServiceManager) func() {
 			return
 		}
 		Cfg = newCfg
-		mgr.Config = newCfg
+		d.Config = newCfg
 		slog.Info("IaC push: config reloaded")
 
-		// 3. Auto-deploy services.
-		for _, info := range mgr.List() {
-			if info.AutoDeploy {
-				slog.Info("IaC push: auto-deploying service", "service", info.Name)
-				if err := mgr.ComposeUp(ctx, info.Name); err != nil {
-					slog.Error("IaC push: auto-deploy failed", "service", info.Name, "error", err)
-				} else {
-					slog.Info("IaC push: auto-deploy complete", "service", info.Name)
-				}
+		// 3. Auto-deploy path stacks with auto_deploy: true.
+		for name, stack := range newCfg.Stacks {
+			if stack.Path == "" {
+				continue
+			}
+			if stack.AutoDeploy {
+				slog.Info("IaC push: auto-deploying stack", "stack", name)
+				d.DeployAsync(name, "")
 			} else {
-				slog.Info("IaC push: service updated in repo (no auto-deploy)", "service", info.Name)
+				slog.Info("IaC push: stack updated in repo (no auto-deploy)", "stack", name)
 			}
 		}
 	}
