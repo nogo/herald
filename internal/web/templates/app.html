@@ -8,20 +8,20 @@
 <h2>{{.AppName}}</h2>
 
 {{/* Status summary */}}
-{{if .AppStatus}}
+{{if .StackStatus}}
 <section>
   <h3>Status</h3>
   <dl class="info-grid">
     <dt>State</dt>
     <dd>
-      <span class="dot {{stateClass .AppStatus.State}}"></span>
-      {{.AppStatus.State}}
+      <span class="dot {{stateClass .StackStatus.State}}"></span>
+      {{.StackStatus.State}}
     </dd>
     <dt>Containers</dt>
-    <dd>{{containers .AppStatus.ContainersUp .AppStatus.ContainersTotal}}</dd>
-    {{if .AppStatus.LastCommit}}
+    <dd>{{containers .StackStatus.ContainersUp .StackStatus.ContainersTotal}}</dd>
+    {{if .StackStatus.LastCommit}}
     <dt>Commit</dt>
-    <dd><span class="commit">{{.AppStatus.LastCommit}}</span></dd>
+    <dd><span class="commit">{{.StackStatus.LastCommit}}</span></dd>
     {{end}}
   </dl>
 </section>
