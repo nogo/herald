@@ -2,6 +2,7 @@ package status
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,7 +129,7 @@ func TestCollectWebhookStatuses_MissingFile(t *testing.T) {
 			DeployDomain: "example.com",
 			ServicesDir:  dir,
 		},
-		Apps: map[string]config.App{
+		Stacks: map[string]config.Stack{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
@@ -166,7 +167,7 @@ func TestCollectWebhookStatuses_WithFile(t *testing.T) {
 			DeployDomain: "example.com",
 			ServicesDir:  dir,
 		},
-		Apps: map[string]config.App{
+		Stacks: map[string]config.Stack{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
@@ -204,7 +205,7 @@ func TestCollectWebhookStatuses_UnregisteredRepo(t *testing.T) {
 			DeployDomain: "example.com",
 			ServicesDir:  dir,
 		},
-		Apps: map[string]config.App{
+		Stacks: map[string]config.Stack{
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
@@ -219,6 +220,38 @@ func TestCollectWebhookStatuses_UnregisteredRepo(t *testing.T) {
 	}
 	if statuses[0].Unknown {
 		t.Error("expected Unknown=false when file exists but repo not in it")
+	}
+}
+
+func TestCollectStackStatus_Source(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Server: config.Server{
+			Name:         "test",
+			DeployDomain: "example.com",
+			ServicesDir:  dir,
+		},
+		Stacks: map[string]config.Stack{
+			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
+			"mysvc": {Path: "services/mysvc", Domain: "mysvc.example.com"},
+		},
+	}
+	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+
+	repoStatus := c.collectStackStatus(t.Context(), "myapp", cfg.Stacks["myapp"])
+	if repoStatus.Source != "repo" {
+		t.Errorf("repo stack Source = %q, want %q", repoStatus.Source, "repo")
+	}
+	if repoStatus.State != "not deployed" {
+		t.Errorf("repo stack State = %q, want \"not deployed\"", repoStatus.State)
+	}
+
+	pathStatus := c.collectStackStatus(t.Context(), "mysvc", cfg.Stacks["mysvc"])
+	if pathStatus.Source != "path" {
+		t.Errorf("path stack Source = %q, want %q", pathStatus.Source, "path")
+	}
+	if pathStatus.State != "not deployed" {
+		t.Errorf("path stack State = %q, want \"not deployed\"", pathStatus.State)
 	}
 }
 
