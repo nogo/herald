@@ -41,7 +41,7 @@ sources = ["**/*.go"]
 outputs = { auto = true }
 run = """
 UNFORMATTED=$(gofmt -l .)
-if [[ -n "$UNFORMATTED" ]]; then
+if [ -n "$UNFORMATTED" ]; then
     echo "FAIL: unformatted files:"
     echo "$UNFORMATTED"
     exit 1
@@ -52,7 +52,7 @@ fi
 description = "Check go.mod and go.sum are tidy"
 run = """
 go mod tidy
-if [[ -n "$(git diff --name-only go.mod go.sum 2>/dev/null)" ]]; then
+if [ -n "$(git diff --name-only go.mod go.sum 2>/dev/null)" ]; then
     echo "FAIL: go.mod/go.sum updated by tidy — commit the changes"
     exit 1
 fi
