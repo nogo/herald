@@ -469,6 +469,348 @@ func TestLoad_FileNotFound(t *testing.T) {
 	}
 }
 
+// --- Round-trip parsing ---
+
+func TestLoad_RepoStackWithTagPattern(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    tag_pattern: "v*"
+    domain: myapp.example.com
+    config: config/myapp.yml
+    override: |
+      services:
+        app:
+          environment:
+            EXTRA: value
+    env_file: .env.prod
+`)
+	cfg, err := config.Load(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Stacks["myapp"]
+	if s.Branch != "main" {
+		t.Errorf("branch = %q, want main", s.Branch)
+	}
+	if s.TagPattern != "v*" {
+		t.Errorf("tag_pattern = %q, want v*", s.TagPattern)
+	}
+	if s.ConfigFile != "config/myapp.yml" {
+		t.Errorf("config = %q, want config/myapp.yml", s.ConfigFile)
+	}
+	if s.EnvFile != ".env.prod" {
+		t.Errorf("env_file = %q, want .env.prod", s.EnvFile)
+	}
+	if !strings.Contains(s.Override, "EXTRA") {
+		t.Errorf("override missing expected content: %q", s.Override)
+	}
+}
+
+func TestLoad_RepoStackWithTag(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+stacks:
+  myapp:
+    repo: owner/repo
+    tag: v1.2.3
+    domain: myapp.example.com
+`)
+	cfg, err := config.Load(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Stacks["myapp"]
+	if s.Tag != "v1.2.3" {
+		t.Errorf("tag = %q, want v1.2.3", s.Tag)
+	}
+	// Tag stacks must not get a branch default.
+	if s.Branch != "" {
+		t.Errorf("tag stack should have no branch, got %q", s.Branch)
+	}
+}
+
+func TestLoad_PathStackFullRoundTrip(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+stacks:
+  myservice:
+    path: stacks/myservice
+    domain: myservice.example.com
+    auto_deploy: true
+    update: stacks/myservice/update.sh
+    env_file: .env.svc
+    config: config/myservice.yml
+    secrets:
+      - key: myservice/token
+        type: env
+        target: API_TOKEN
+      - key: myservice/cert
+        type: docker-secret
+        target: tls_cert
+`)
+	cfg, err := config.Load(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Stacks["myservice"]
+	if s.Path != "stacks/myservice" {
+		t.Errorf("path = %q", s.Path)
+	}
+	if s.EnvFile != ".env.svc" {
+		t.Errorf("env_file = %q", s.EnvFile)
+	}
+	if s.ConfigFile != "config/myservice.yml" {
+		t.Errorf("config = %q", s.ConfigFile)
+	}
+	if len(s.Secrets) != 2 {
+		t.Fatalf("want 2 secrets, got %d", len(s.Secrets))
+	}
+	if s.Secrets[0].Type != "env" || s.Secrets[0].Target != "API_TOKEN" {
+		t.Errorf("secrets[0] = %+v", s.Secrets[0])
+	}
+	if s.Secrets[1].Type != "docker-secret" || s.Secrets[1].Target != "tls_cert" {
+		t.Errorf("secrets[1] = %+v", s.Secrets[1])
+	}
+}
+
+// --- Edge cases ---
+
+func TestLoad_EmptyStacks(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+stacks: {}
+`)
+	cfg, err := config.Load(tmp)
+	if err != nil {
+		t.Fatalf("empty stacks should be valid: %v", err)
+	}
+	if len(cfg.Stacks) != 0 {
+		t.Errorf("want 0 stacks, got %d", len(cfg.Stacks))
+	}
+}
+
+func TestLoad_StackNameVariants(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+stacks:
+  my-app:
+    repo: owner/repo
+    domain: my-app.example.com
+  my_service:
+    path: stacks/my_service
+    domain: my-service.example.com
+`)
+	cfg, err := config.Load(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := cfg.Stacks["my-app"]; !ok {
+		t.Error("missing stack my-app")
+	}
+	if _, ok := cfg.Stacks["my_service"]; !ok {
+		t.Error("missing stack my_service")
+	}
+}
+
+// --- Table-driven validation errors ---
+
+func TestLoad_ValidationErrors(t *testing.T) {
+	serverBlock := `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt/deploy
+`
+	cases := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "missing deploy_domain",
+			yaml: `
+server:
+  name: test
+  services_dir: /opt/deploy
+`,
+			wantErr: "server.deploy_domain",
+		},
+		{
+			name: "missing services_dir",
+			yaml: `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+`,
+			wantErr: "server.services_dir",
+		},
+		{
+			name: "invalid repo format - no slash",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: invalid-no-slash
+    branch: main
+    domain: myapp.example.com
+`,
+			wantErr: "owner/name format",
+		},
+		{
+			name: "invalid repo format - too many slashes",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo/extra
+    branch: main
+    domain: myapp.example.com
+`,
+			wantErr: "owner/name format",
+		},
+		{
+			name: "invalid tag_pattern glob",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    tag_pattern: "v[invalid"
+    domain: myapp.example.com
+`,
+			wantErr: "not a valid glob",
+		},
+		{
+			name: "config with absolute path",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    domain: myapp.example.com
+    config: /etc/myapp/config.yml
+`,
+			wantErr: "relative path",
+		},
+		{
+			name: "config with dotdot traversal",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    domain: myapp.example.com
+    config: ../escape/config.yml
+`,
+			wantErr: "relative path",
+		},
+		{
+			name: "length without generate",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    domain: myapp.example.com
+    secrets:
+      - key: myapp/secret
+        type: env
+        target: MY_SECRET
+        length: 32
+`,
+			wantErr: "length requires generate",
+		},
+		{
+			name: "length below minimum",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    domain: myapp.example.com
+    secrets:
+      - key: myapp/secret
+        type: env
+        target: MY_SECRET
+        generate: base64
+        length: 8
+`,
+			wantErr: "between 16 and 512",
+		},
+		{
+			name: "length above maximum",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/repo
+    branch: main
+    domain: myapp.example.com
+    secrets:
+      - key: myapp/secret
+        type: env
+        target: MY_SECRET
+        generate: hex
+        length: 1024
+`,
+			wantErr: "between 16 and 512",
+		},
+		{
+			name: "path stack with tag_pattern",
+			yaml: serverBlock + `
+stacks:
+  svc:
+    path: stacks/svc
+    domain: svc.example.com
+    tag_pattern: "v*"
+`,
+			wantErr: "tag_pattern",
+		},
+		{
+			name: "path stack with override",
+			yaml: serverBlock + `
+stacks:
+  svc:
+    path: stacks/svc
+    domain: svc.example.com
+    override: |
+      services:
+        app:
+          environment:
+            X: y
+`,
+			wantErr: "override",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := writeTempConfig(t, tc.yaml)
+			_, err := config.Load(tmp)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			assertContains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 func assertContains(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
