@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nogo/herald/internal/config"
 )
 
 func TestPortFromAny(t *testing.T) {
@@ -318,4 +320,121 @@ func TestWriteEnvFileEmpty(t *testing.T) {
 	if len(data) != 0 {
 		t.Errorf("expected empty file, got %q", string(data))
 	}
+}
+
+func TestResolveStack(t *testing.T) {
+	t.Run("repo stack paths", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := &config.Config{
+			Server: config.Server{ServicesDir: dir},
+			Stacks: map[string]config.Stack{
+				"myapp": {
+					Repo:    "owner/myapp",
+					Branch:  "main",
+					Compose: "compose.yml",
+					Domain:  "myapp.example.com",
+				},
+			},
+		}
+
+		ctx, err := ResolveStack(cfg, "myapp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ctx.ProjectName != "herald-myapp" {
+			t.Errorf("ProjectName = %q, want %q", ctx.ProjectName, "herald-myapp")
+		}
+		wantDeployDir := filepath.Join(dir, "myapp")
+		wantWorkDir := filepath.Join(wantDeployDir, "repo")
+		if ctx.WorkDir != wantWorkDir {
+			t.Errorf("WorkDir = %q, want %q", ctx.WorkDir, wantWorkDir)
+		}
+		wantCompose := filepath.Join(wantDeployDir, "repo", "compose.yml")
+		if ctx.ComposeFile != wantCompose {
+			t.Errorf("ComposeFile = %q, want %q", ctx.ComposeFile, wantCompose)
+		}
+	})
+
+	t.Run("path stack finds compose file", func(t *testing.T) {
+		dir := t.TempDir()
+		// Set up the symlinked repo dir with a compose file.
+		repoDir := filepath.Join(dir, "myservice", "repo")
+		if err := os.MkdirAll(repoDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repoDir, "compose.yaml"), []byte("services: {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := &config.Config{
+			Server: config.Server{ServicesDir: dir},
+			Stacks: map[string]config.Stack{
+				"myservice": {
+					Path:   "svc/myservice",
+					Domain: "myservice.example.com",
+				},
+			},
+		}
+
+		ctx, err := ResolveStack(cfg, "myservice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ctx.ProjectName != "herald-myservice" {
+			t.Errorf("ProjectName = %q, want %q", ctx.ProjectName, "herald-myservice")
+		}
+		wantCompose := filepath.Join(repoDir, "compose.yaml")
+		if ctx.ComposeFile != wantCompose {
+			t.Errorf("ComposeFile = %q, want %q", ctx.ComposeFile, wantCompose)
+		}
+	})
+
+	t.Run("existing override and env files are resolved", func(t *testing.T) {
+		dir := t.TempDir()
+		deployDir := filepath.Join(dir, "myapp")
+		repoDir := filepath.Join(deployDir, "repo")
+		if err := os.MkdirAll(repoDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create override and env files so they're picked up.
+		os.WriteFile(filepath.Join(deployDir, "compose.override.yml"), []byte("{}"), 0644)
+		os.WriteFile(filepath.Join(deployDir, ".env"), []byte("K=v\n"), 0644)
+
+		cfg := &config.Config{
+			Server: config.Server{ServicesDir: dir},
+			Stacks: map[string]config.Stack{
+				"myapp": {
+					Repo:    "owner/myapp",
+					Branch:  "main",
+					Compose: "compose.yml",
+					Domain:  "myapp.example.com",
+				},
+			},
+		}
+
+		ctx, err := ResolveStack(cfg, "myapp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ctx.OverrideFile == "" {
+			t.Error("expected OverrideFile to be set")
+		}
+		if ctx.EnvFile == "" {
+			t.Error("expected EnvFile to be set")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		cfg := &config.Config{
+			Server: config.Server{ServicesDir: t.TempDir()},
+			Stacks: map[string]config.Stack{},
+		}
+		_, err := ResolveStack(cfg, "missing")
+		if err == nil {
+			t.Fatal("expected error for missing stack")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }

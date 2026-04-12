@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,7 +23,7 @@ import (
 	"github.com/nogo/herald/internal/ui"
 )
 
-// Deployer executes app deploys.
+// Deployer executes stack deploys.
 type Deployer struct {
 	Config  *config.Config
 	Secrets *secrets.Store
@@ -46,18 +47,18 @@ type appLock struct {
 	count atomic.Int32 // goroutines running or waiting, max 2
 }
 
-func (d *Deployer) getAppLock(appName string) *appLock {
-	v, _ := d.appLocks.LoadOrStore(appName, &appLock{})
+func (d *Deployer) getAppLock(stackName string) *appLock {
+	v, _ := d.appLocks.LoadOrStore(stackName, &appLock{})
 	return v.(*appLock)
 }
 
-// DeployAsync dispatches a deploy in a goroutine with per-app serialization.
-// At most one deploy may be queued per app; additional calls are dropped.
-func (d *Deployer) DeployAsync(appName, ref string) {
-	lock := d.getAppLock(appName)
+// DeployAsync dispatches a deploy in a goroutine with per-stack serialization.
+// At most one deploy may be queued per stack; additional calls are dropped.
+func (d *Deployer) DeployAsync(stackName, ref string) {
+	lock := d.getAppLock(stackName)
 	if lock.count.Add(1) > 2 {
 		lock.count.Add(-1)
-		d.Logger.Info("deploy already queued, dropping", "app", appName)
+		d.Logger.Info("deploy already queued, dropping", "stack", stackName)
 		return
 	}
 
@@ -69,8 +70,8 @@ func (d *Deployer) DeployAsync(appName, ref string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		if err := d.Deploy(ctx, appName, ref); err != nil {
-			d.Logger.Error("deploy failed", "app", appName, "error", err)
+		if err := d.Deploy(ctx, stackName, ref); err != nil {
+			d.Logger.Error("deploy failed", "stack", stackName, "error", err)
 		}
 	})
 }
@@ -81,32 +82,31 @@ func (d *Deployer) Wait() {
 }
 
 // effectiveRef returns the git ref to use for a deploy.
-// override takes precedence; otherwise app.Tag (as refs/tags/<tag>) or app.Branch.
-func effectiveRef(app config.App, override string) string {
+// override takes precedence; otherwise stack.Tag (as refs/tags/<tag>) or stack.Branch.
+func effectiveRef(stack config.Stack, override string) string {
 	if override != "" {
 		return override
 	}
-	if app.Tag != "" {
-		return "refs/tags/" + app.Tag
+	if stack.Tag != "" {
+		return "refs/tags/" + stack.Tag
 	}
-	return app.Branch
+	return stack.Branch
 }
 
-// Deploy executes a full deploy for the named app.
-func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
-	app, ok := d.Config.Apps[appName]
+// Deploy executes a full deploy for the named stack.
+func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
+	stack, ok := d.Config.Stacks[stackName]
 	if !ok {
-		return fmt.Errorf("app %q not found in config", appName)
+		return fmt.Errorf("stack %q not found in config", stackName)
 	}
 
 	u := d.ui()
 	start := time.Now()
 	var deployErr error
 	defer func() {
-		u.Done(appName, deployErr, time.Since(start))
+		u.Done(stackName, deployErr, time.Since(start))
 	}()
 
-	// step is a helper that wraps a step with UI calls.
 	step := func(name string, fn func() error) error {
 		u.Step(name)
 		if err := fn(); err != nil {
@@ -129,7 +129,7 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 
 	// Pre-flight: check for missing required secrets.
 	deployErr = step("Preflight", func() error {
-		missing, err := d.Secrets.MissingRequired(app.Secrets)
+		missing, err := d.Secrets.MissingRequired(stack.Secrets)
 		if err != nil {
 			return fmt.Errorf("checking secrets: %w", err)
 		}
@@ -143,71 +143,76 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 		return deployErr
 	}
 
-	appDir := filepath.Join(d.Config.Server.ServicesDir, "apps", appName)
-	d.Logger.Info("deploy started", "app", appName, "dir", appDir)
+	deployDir := filepath.Join(d.Config.Server.ServicesDir, stackName)
+	d.Logger.Info("deploy started", "stack", stackName, "dir", deployDir)
 
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		deployErr = fmt.Errorf("creating app dir: %w", err)
+	if err := os.MkdirAll(deployDir, 0755); err != nil {
+		deployErr = fmt.Errorf("creating deploy dir: %w", err)
 		return deployErr
 	}
 
-	// 1. Git clone or pull.
-	gitRef := effectiveRef(app, ref)
-	deployErr = step(fmt.Sprintf("Git sync (%s)", gitRef), func() error {
-		return d.gitSync(ctx, appDir, app, gitRef)
-	})
+	repoDir := filepath.Join(deployDir, "repo")
+
+	// Source resolution: git clone/fetch for repo stacks, symlink for path stacks.
+	if stack.Repo != "" {
+		gitRef := effectiveRef(stack, ref)
+		deployErr = step(fmt.Sprintf("Git sync (%s)", gitRef), func() error {
+			return d.gitSync(ctx, deployDir, stack, gitRef)
+		})
+	} else {
+		deployErr = step("Symlink source", func() error {
+			return d.symlinkSource(deployDir, stack)
+		})
+	}
 	if deployErr != nil {
 		return deployErr
 	}
 
-	// 2. Verify env_file exists if configured.
-	if app.EnvFile != "" {
-		if _, err := os.Stat(app.EnvFile); err != nil {
-			deployErr = fmt.Errorf("env_file %q not found", app.EnvFile)
+	// Verify env_file exists if configured.
+	if stack.EnvFile != "" {
+		if _, err := os.Stat(stack.EnvFile); err != nil {
+			deployErr = fmt.Errorf("env_file %q not found", stack.EnvFile)
 			return deployErr
 		}
 	}
 
-	// 3. Resolve secrets + write env + write docker secrets.
+	// Resolve secrets + write env + write docker secrets.
 	var dockerSecrets map[string]string
 	deployErr = stepDetail("Secrets", func() (string, error) {
-		envVars, ds, err := d.Secrets.Resolve(app.Secrets)
+		envVars, ds, err := d.Secrets.Resolve(stack.Secrets)
 		if err != nil {
 			return "", fmt.Errorf("resolving secrets: %w", err)
 		}
 		dockerSecrets = ds
 		if len(envVars)+len(dockerSecrets) > 0 {
 			d.Logger.Info("secrets resolved",
-				"app", appName,
+				"stack", stackName,
 				"env_keys", slices.Sorted(maps.Keys(envVars)),
 				"docker_secret_keys", slices.Sorted(maps.Keys(dockerSecrets)),
 			)
 		}
 
-		// Open root for scoped file writes.
-		appRoot, err := os.OpenRoot(appDir)
+		deployRoot, err := os.OpenRoot(deployDir)
 		if err != nil {
-			return "", fmt.Errorf("opening app root: %w", err)
+			return "", fmt.Errorf("opening deploy root: %w", err)
 		}
-		defer appRoot.Close()
+		defer deployRoot.Close()
 
-		// Write .env file (config file base merged with resolved secrets).
 		iacRepoDir := filepath.Join(d.DataDir, "repo")
-		merged, err := BuildEnvMap(app.ConfigFile, iacRepoDir, envVars, d.Logger)
+		merged, err := BuildEnvMap(stack.ConfigFile, iacRepoDir, envVars, d.Logger)
 		if err != nil {
 			return "", fmt.Errorf("building env map: %w", err)
 		}
-		if err := compose.WriteEnvFile(appRoot, merged); err != nil {
+		if err := compose.WriteEnvFile(deployRoot, merged); err != nil {
 			return "", fmt.Errorf("writing .env: %w", err)
 		}
 
-		// Write docker secrets.
 		if len(dockerSecrets) > 0 {
-			secretsDir := filepath.Join(appDir, "secrets")
+			secretsDir := filepath.Join(deployDir, "secrets")
 			if err := os.MkdirAll(secretsDir, 0700); err != nil {
 				return "", fmt.Errorf("creating secrets dir: %w", err)
 			}
-			secretsRoot, err := appRoot.OpenRoot("secrets")
+			secretsRoot, err := deployRoot.OpenRoot("secrets")
 			if err != nil {
 				return "", fmt.Errorf("opening secrets root: %w", err)
 			}
@@ -219,42 +224,57 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 			}
 		}
 
-		detail := fmt.Sprintf("%d env, %d docker", len(envVars), len(dockerSecrets))
-		return detail, nil
+		return fmt.Sprintf("%d env, %d docker", len(envVars), len(dockerSecrets)), nil
 	})
 	if deployErr != nil {
 		return deployErr
 	}
 
-	// 4. Generate compose override.
-	repoDir := filepath.Join(appDir, "repo")
-	composeFile := resolveComposePath(app.Compose, repoDir)
-	deployErr = step("Compose override", func() error {
-		appRoot, err := os.OpenRoot(appDir)
+	// Resolve compose file path.
+	var composeFile string
+	if stack.Repo != "" {
+		composeFile = resolveComposePath(stack.Compose, repoDir)
+	} else {
+		composeName, err := compose.FindComposeFile(repoDir)
 		if err != nil {
-			return fmt.Errorf("opening app root: %w", err)
+			deployErr = fmt.Errorf("finding compose file: %w", err)
+			return deployErr
 		}
-		defer appRoot.Close()
+		composeFile = filepath.Join(repoDir, composeName)
+	}
 
-		envFilePaths := []string{filepath.Join(appDir, ".env")}
-		if app.EnvFile != "" {
-			envFilePaths = append(envFilePaths, app.EnvFile)
+	defaultPort := "3000"
+	if stack.Path != "" {
+		defaultPort = "80"
+	}
+
+	// Generate compose override.
+	deployErr = step("Compose override", func() error {
+		deployRoot, err := os.OpenRoot(deployDir)
+		if err != nil {
+			return fmt.Errorf("opening deploy root: %w", err)
+		}
+		defer deployRoot.Close()
+
+		envFilePaths := []string{filepath.Join(deployDir, ".env")}
+		if stack.EnvFile != "" {
+			envFilePaths = append(envFilePaths, stack.EnvFile)
 		}
 		data, err := GenerateOverride(OverrideParams{
-			DeployDir:      appDir,
-			StackName:      appName,
-			Domain:         app.Domain,
+			DeployDir:      deployDir,
+			StackName:      stackName,
+			Domain:         stack.Domain,
 			ComposeFile:    composeFile,
 			EnvFilePaths:   envFilePaths,
 			DockerSecrets:  dockerSecrets,
-			DefaultPort:    "3000",
-			InternalNet:    "herald-" + appName + "-internal",
-			InlineOverride: app.Override,
+			DefaultPort:    defaultPort,
+			InternalNet:    "herald-" + stackName + "-internal",
+			InlineOverride: stack.Override,
 		})
 		if err != nil {
 			return err
 		}
-		f, err := appRoot.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		f, err := deployRoot.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			return err
 		}
@@ -266,27 +286,39 @@ func (d *Deployer) Deploy(ctx context.Context, appName, ref string) error {
 		return deployErr
 	}
 
-	// 5. Ensure the caddy network exists before compose up.
+	// Ensure the caddy network exists before compose up.
 	if err := caddy.EnsureNetwork(ctx, d.Logger); err != nil {
 		deployErr = fmt.Errorf("ensuring caddy network: %w", err)
 		return deployErr
 	}
 
-	// 6. Run docker compose up.
+	// Compose up.
 	deployErr = step("Compose up", func() error {
-		return d.runCompose(ctx, appDir, appName, composeFile)
+		return d.runCompose(ctx, deployDir, stackName, composeFile)
 	})
 	if deployErr != nil {
 		return deployErr
 	}
 
-	// Write deployed ref for status reporting.
-	deployRef := effectiveRef(app, ref)
-	if commit, err := readDeployedCommit(filepath.Join(appDir, "repo")); err == nil {
-		_ = os.WriteFile(filepath.Join(appDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
+	// Post-deploy hook.
+	if stack.UpdateScript != "" {
+		deployErr = step("Post-deploy hook", func() error {
+			return d.runPostDeployHook(ctx, stackName, stack, deployDir, composeFile)
+		})
+		if deployErr != nil {
+			return deployErr
+		}
 	}
 
-	d.Logger.Info("deploy complete", "app", appName, "duration", time.Since(start).Round(time.Millisecond))
+	// Write deployed ref for repo stacks only.
+	if stack.Repo != "" {
+		deployRef := effectiveRef(stack, ref)
+		if commit, err := readDeployedCommit(repoDir); err == nil {
+			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
+		}
+	}
+
+	d.Logger.Info("deploy complete", "stack", stackName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
@@ -302,10 +334,74 @@ func readDeployedCommit(repoDir string) (string, error) {
 }
 
 // gitSync clones the repo on first deploy or fetch+reset on subsequent ones.
-func (d *Deployer) gitSync(ctx context.Context, appDir string, app config.App, ref string) error {
-	repoDir := filepath.Join(appDir, "repo")
-	d.Logger.Info("git sync", "repo", app.Repo, "ref", ref)
-	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(app.Repo), ref)
+func (d *Deployer) gitSync(ctx context.Context, deployDir string, stack config.Stack, ref string) error {
+	repoDir := filepath.Join(deployDir, "repo")
+	d.Logger.Info("git sync", "repo", stack.Repo, "ref", ref)
+	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
+}
+
+// symlinkSource creates <deployDir>/repo as a symlink pointing to <iacRepoDir>/<stack.Path>.
+// If the symlink already exists and points to the right place, it is a no-op.
+// If it points elsewhere (stale), it is removed and recreated.
+func (d *Deployer) symlinkSource(deployDir string, stack config.Stack) error {
+	iacRepoDir := filepath.Join(d.DataDir, "repo")
+	target := filepath.Join(iacRepoDir, stack.Path)
+
+	if _, err := os.Stat(target); err != nil {
+		return fmt.Errorf("path %q not found in IaC repo", stack.Path)
+	}
+
+	repoLink := filepath.Join(deployDir, "repo")
+
+	// If symlink already points to the right place, skip.
+	if existing, err := os.Readlink(repoLink); err == nil {
+		if existing == target {
+			return nil
+		}
+		// Stale symlink: remove and recreate.
+		if err := os.Remove(repoLink); err != nil {
+			return fmt.Errorf("removing stale repo symlink: %w", err)
+		}
+	}
+
+	if err := os.Symlink(target, repoLink); err != nil {
+		return fmt.Errorf("creating repo symlink: %w", err)
+	}
+	d.Logger.Info("symlinked IaC path", "path", stack.Path, "target", target)
+	return nil
+}
+
+// runPostDeployHook runs stack.UpdateScript as a post-deploy hook after compose up.
+// The script path is resolved relative to the IaC repo root.
+func (d *Deployer) runPostDeployHook(ctx context.Context, stackName string, stack config.Stack, deployDir, composeFile string) error {
+	scriptPath := filepath.Join(d.DataDir, "repo", stack.UpdateScript)
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("update script %q not found in IaC repo", stack.UpdateScript)
+	}
+
+	env := append(os.Environ(),
+		"STACK_NAME="+stackName,
+		"STACK_DIR="+deployDir,
+		"STACK_DOMAIN="+stack.Domain,
+		"COMPOSE_FILE="+composeFile,
+		"COMPOSE_OVERRIDE_FILE="+filepath.Join(deployDir, "compose.override.yml"),
+	)
+
+	d.Logger.Info("running post-deploy hook", "stack", stackName, "script", scriptPath)
+
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-euo", "pipefail", scriptPath)
+	cmd.Dir = deployDir
+	cmd.Env = env
+
+	sw := d.ui().StreamWriter()
+	if sw != nil {
+		cmd.Stdout = sw
+		cmd.Stderr = sw
+		err := cmd.Run()
+		ui.FlushStreamWriter(d.ui())
+		return err
+	}
+	return runner.RunExecCmd(ctx, d.Logger, cmd)
 }
 
 // resolveComposePath returns an absolute path to the compose file.
@@ -318,17 +414,17 @@ func resolveComposePath(composeField, repoDir string) string {
 	return filepath.Join(repoDir, composeField)
 }
 
-// Down stops and removes the containers for the named app.
+// Down stops and removes the containers for the named stack.
 // If removeVolumes is true, named volumes are also removed.
-func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool) error {
+func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes bool) error {
 	u := d.ui()
 	start := time.Now()
 	var downErr error
 	defer func() {
-		u.Done(appName, downErr, time.Since(start))
+		u.Done(stackName, downErr, time.Since(start))
 	}()
 
-	cctx, err := compose.ResolveApp(d.Config, appName)
+	cctx, err := compose.ResolveStack(d.Config, stackName)
 	if err != nil {
 		downErr = err
 		return downErr
@@ -341,7 +437,7 @@ func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool)
 	}
 
 	u.Step("Compose down")
-	d.Logger.Info("compose down", "app", appName, "remove_volumes", removeVolumes)
+	d.Logger.Info("compose down", "stack", stackName, "remove_volumes", removeVolumes)
 	sw := u.StreamWriter()
 	downErr = runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
 	if downErr != nil {
@@ -355,16 +451,16 @@ func (d *Deployer) Down(ctx context.Context, appName string, removeVolumes bool)
 }
 
 // runCompose executes docker compose up -d --build --remove-orphans.
-func (d *Deployer) runCompose(ctx context.Context, appDir, appName, composeFile string) error {
+func (d *Deployer) runCompose(ctx context.Context, deployDir, stackName, composeFile string) error {
 	cctx := compose.Context{
-		ProjectName:  "herald-" + appName,
+		ProjectName:  "herald-" + stackName,
 		ComposeFile:  composeFile,
-		OverrideFile: filepath.Join(appDir, "compose.override.yml"),
-		EnvFile:      filepath.Join(appDir, ".env"),
-		WorkDir:      filepath.Join(appDir, "repo"),
+		OverrideFile: filepath.Join(deployDir, "compose.override.yml"),
+		EnvFile:      filepath.Join(deployDir, ".env"),
+		WorkDir:      filepath.Join(deployDir, "repo"),
 	}
 
-	d.Logger.Info("compose up", "app", appName, "project", cctx.ProjectName)
+	d.Logger.Info("compose up", "stack", stackName, "project", cctx.ProjectName)
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
 	sw := d.ui().StreamWriter()

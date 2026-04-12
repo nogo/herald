@@ -37,6 +37,49 @@ func (c Context) BaseArgs() []string {
 	return args
 }
 
+// ResolveStack builds a Context for the named stack.
+// Deploy dir: <servicesDir>/<stackName> (flat, no apps/ or services/ subdirectory).
+// Project name: herald-<stackName>.
+func ResolveStack(cfg *config.Config, stackName string) (*Context, error) {
+	stack, ok := cfg.Stacks[stackName]
+	if !ok {
+		return nil, fmt.Errorf("stack %q not found in config", stackName)
+	}
+
+	deployDir := filepath.Join(cfg.Server.ServicesDir, stackName)
+	repoDir := filepath.Join(deployDir, "repo")
+
+	var composeFile string
+	if stack.Repo != "" {
+		cf := stack.Compose
+		if !filepath.IsAbs(cf) {
+			cf = filepath.Join(repoDir, cf)
+		}
+		composeFile = cf
+	} else {
+		composeName, err := FindComposeFile(repoDir)
+		if err != nil {
+			return nil, err
+		}
+		composeFile = filepath.Join(repoDir, composeName)
+	}
+
+	ctx := &Context{
+		ProjectName: "herald-" + stackName,
+		ComposeFile: composeFile,
+		WorkDir:     repoDir,
+	}
+
+	if overrideFile := filepath.Join(deployDir, "compose.override.yml"); fileExists(overrideFile) {
+		ctx.OverrideFile = overrideFile
+	}
+	if envFile := filepath.Join(deployDir, ".env"); fileExists(envFile) {
+		ctx.EnvFile = envFile
+	}
+
+	return ctx, nil
+}
+
 // ResolveApp builds a Context for the named app.
 func ResolveApp(cfg *config.Config, appName string) (*Context, error) {
 	app, ok := cfg.Apps[appName]
@@ -155,16 +198,12 @@ func ResolvePreview(cfg *config.Config, dataDir, previewID string) (*Context, er
 	return nil, fmt.Errorf("preview %q not found", previewID)
 }
 
-// Resolve tries to find a Context for the given name, checking apps first,
-// then services, then previews. Returns the context and entity type.
+// Resolve tries to find a Context for the given name, checking stacks first,
+// then previews. Returns the context and entity type.
 func Resolve(cfg *config.Config, dataDir, name string) (*Context, string, error) {
-	if _, ok := cfg.Apps[name]; ok {
-		ctx, err := ResolveApp(cfg, name)
-		return ctx, "app", err
-	}
-	if _, ok := cfg.Services[name]; ok {
-		ctx, err := ResolveService(cfg, name)
-		return ctx, "service", err
+	if _, ok := cfg.Stacks[name]; ok {
+		ctx, err := ResolveStack(cfg, name)
+		return ctx, "stack", err
 	}
 
 	// Try as preview ID.
@@ -173,7 +212,7 @@ func Resolve(cfg *config.Config, dataDir, name string) (*Context, string, error)
 		return ctx, "preview", nil
 	}
 
-	return nil, "", fmt.Errorf("%q not found as app, service, or preview", name)
+	return nil, "", fmt.Errorf("%q not found as stack or preview", name)
 }
 
 // FindComposeFile returns the first compose filename found in dir.
