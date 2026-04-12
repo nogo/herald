@@ -64,19 +64,6 @@ func TestLoad_Valid(t *testing.T) {
 		t.Errorf("nextcloud.update = %q", nextcloud.UpdateScript)
 	}
 
-	// Verify computed backwards-compat fields.
-	if len(cfg.Apps) != 2 {
-		t.Fatalf("want 2 apps in computed field, got %d", len(cfg.Apps))
-	}
-	if len(cfg.Services) != 2 {
-		t.Fatalf("want 2 services in computed field, got %d", len(cfg.Services))
-	}
-	if _, ok := cfg.Apps["budget"]; !ok {
-		t.Error("cfg.Apps missing budget")
-	}
-	if _, ok := cfg.Services["nextcloud"]; !ok {
-		t.Error("cfg.Services missing nextcloud")
-	}
 }
 
 func TestLoad_DefaultBranchAndCompose(t *testing.T) {
@@ -101,10 +88,7 @@ stacks:
 	if stack.Compose != "compose.yml" {
 		t.Errorf("default compose = %q, want compose.yml", stack.Compose)
 	}
-	// Also accessible via computed Apps field.
-	if cfg.Apps["myapp"].Branch != "main" {
-		t.Errorf("cfg.Apps default branch = %q, want main", cfg.Apps["myapp"].Branch)
-	}
+
 }
 
 func TestLoad_PathStack(t *testing.T) {
@@ -141,9 +125,7 @@ stacks:
 	if stack.Compose != "" {
 		t.Errorf("path stack should have no compose, got %q", stack.Compose)
 	}
-	if _, ok := cfg.Services["myservice"]; !ok {
-		t.Error("cfg.Services missing myservice")
-	}
+
 }
 
 func TestLoad_DefaultPort(t *testing.T) {
