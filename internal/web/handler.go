@@ -155,7 +155,7 @@ type appData struct {
 	CollectedAt time.Time
 	AppName     string
 	AppConfig   config.Stack
-	AppStatus   *status.StackStatus
+	StackStatus *status.StackStatus
 }
 
 func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
 		CollectedAt:  time.Now(),
 		AppName:      name,
 		AppConfig:    stack,
-		AppStatus:    stackSt,
+		StackStatus:  stackSt,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.Templates.ExecuteTemplate(w, "app", data); err != nil {
