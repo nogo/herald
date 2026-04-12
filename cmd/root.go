@@ -113,10 +113,8 @@ func Execute() {
 func init() {
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "daemon", Title: "Daemon:"},
-		&cobra.Group{ID: "apps", Title: "Apps:"},
-		&cobra.Group{ID: "services", Title: "Services:"},
+		&cobra.Group{ID: "stacks", Title: "Stacks:"},
 		&cobra.Group{ID: "previews", Title: "Previews:"},
-		&cobra.Group{ID: "ops", Title: "Operations:"},
 		&cobra.Group{ID: "secrets", Title: "Secrets:"},
 		&cobra.Group{ID: "infra", Title: "Infrastructure:"},
 		&cobra.Group{ID: "auth", Title: "Auth:"},

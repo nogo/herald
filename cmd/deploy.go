@@ -17,8 +17,8 @@ import (
 var deployAll bool
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy [app]",
-	Short: "Force re-deploy an app",
+	Use:   "deploy [stack]",
+	Short: "Deploy a stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -32,9 +32,9 @@ var deployCmd = &cobra.Command{
 		}
 
 		if deployAll {
-			names := slices.Sorted(maps.Keys(Cfg.Apps))
+			names := slices.Sorted(maps.Keys(Cfg.Stacks))
 			if len(names) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No apps configured.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No stacks configured.")
 				return nil
 			}
 			var failed []string
@@ -47,32 +47,32 @@ var deployCmd = &cobra.Command{
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
 			if len(failed) > 0 {
-				return fmt.Errorf("%d app(s) failed to deploy: %s", len(failed), strings.Join(failed, ", "))
+				return fmt.Errorf("%d stack(s) failed to deploy: %s", len(failed), strings.Join(failed, ", "))
 			}
 			return nil
 		}
 
 		if len(args) == 0 {
-			names := slices.Sorted(maps.Keys(Cfg.Apps))
+			names := slices.Sorted(maps.Keys(Cfg.Stacks))
 			if len(names) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No apps configured.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No stacks configured.")
 				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Available apps:")
+			fmt.Fprintln(cmd.OutOrStdout(), "Available stacks:")
 			for _, name := range names {
 				fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", name)
 			}
 			return nil
 		}
 
-		appName := args[0]
-		if _, ok := Cfg.Apps[appName]; !ok {
-			names := slices.Sorted(maps.Keys(Cfg.Apps))
-			return fmt.Errorf("app %q not found. Available: %s", appName, strings.Join(names, ", "))
+		stackName := args[0]
+		if _, ok := Cfg.Stacks[stackName]; !ok {
+			names := slices.Sorted(maps.Keys(Cfg.Stacks))
+			return fmt.Errorf("stack %q not found. Available: %s", stackName, strings.Join(names, ", "))
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Deploying %s...\n", appName)
-		if err := d.Deploy(context.Background(), appName, ""); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Deploying %s...\n", stackName)
+		if err := d.Deploy(context.Background(), stackName, ""); err != nil {
 			return err
 		}
 
@@ -81,7 +81,7 @@ var deployCmd = &cobra.Command{
 }
 
 func init() {
-	deployCmd.GroupID = "apps"
+	deployCmd.GroupID = "stacks"
 	rootCmd.AddCommand(deployCmd)
-	deployCmd.Flags().BoolVar(&deployAll, "all", false, "Deploy all configured apps sequentially")
+	deployCmd.Flags().BoolVar(&deployAll, "all", false, "Deploy all configured stacks sequentially")
 }

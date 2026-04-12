@@ -14,21 +14,21 @@ import (
 var downVolumes bool
 
 var downCmd = &cobra.Command{
-	Use:   "down <app>",
-	Short: "Stop and remove an app's containers",
-	Long: `Stop and remove the containers for an app.
+	Use:   "down <stack>",
+	Short: "Stop and remove a stack's containers",
+	Long: `Stop and remove the containers for a stack.
 
 The deploy directory (repo, .env, secrets) is preserved.
-Run 'herald deploy <app>' to bring it back up.
+Run 'herald deploy <stack>' to bring it back up.
 
 Use --volumes to also remove named Docker volumes (databases, uploads).
 This is irreversible without a backup.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
-		appName := args[0]
-		if _, ok := Cfg.Apps[appName]; !ok {
-			return fmt.Errorf("app %q not found in config", appName)
+		stackName := args[0]
+		if _, ok := Cfg.Stacks[stackName]; !ok {
+			return fmt.Errorf("stack %q not found in config", stackName)
 		}
 
 		d := &deployer.Deployer{
@@ -39,8 +39,8 @@ This is irreversible without a backup.`,
 			UI:      ui.NewTTY(os.Stdout),
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Stopping %s...\n", appName)
-		if err := d.Down(context.Background(), appName, downVolumes); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Stopping %s...\n", stackName)
+		if err := d.Down(context.Background(), stackName, downVolumes); err != nil {
 			return err
 		}
 
@@ -49,7 +49,7 @@ This is irreversible without a backup.`,
 }
 
 func init() {
-	downCmd.GroupID = "apps"
+	downCmd.GroupID = "stacks"
 	rootCmd.AddCommand(downCmd)
 	downCmd.Flags().BoolVar(&downVolumes, "volumes", false, "Also remove named volumes (irreversible without a backup)")
 }
