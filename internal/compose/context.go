@@ -78,7 +78,7 @@ func ResolveService(cfg *config.Config, stackName string) (*Context, error) {
 	deployDir := filepath.Join(cfg.Server.ServicesDir, "services", stackName)
 	repoLink := filepath.Join(deployDir, "repo")
 
-	composeName, err := findComposeFile(repoLink)
+	composeName, err := FindComposeFile(repoLink)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +176,8 @@ func Resolve(cfg *config.Config, dataDir, name string) (*Context, string, error)
 	return nil, "", fmt.Errorf("%q not found as app, service, or preview", name)
 }
 
-// findComposeFile returns the first compose filename found in dir.
-func findComposeFile(dir string) (string, error) {
+// FindComposeFile returns the first compose filename found in dir.
+func FindComposeFile(dir string) (string, error) {
 	for _, name := range []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"} {
 		if fileExists(filepath.Join(dir, name)) {
 			return name, nil

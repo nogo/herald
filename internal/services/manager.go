@@ -13,13 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"io"
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/deployer"
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/ui"
@@ -115,7 +114,7 @@ func (m *ServiceManager) Setup(ctx context.Context, stackName string) error {
 		return fmt.Errorf("ensuring caddy network: %w", err)
 	}
 
-	composeName, err := findComposeFile(repoLink)
+	composeName, err := compose.FindComposeFile(repoLink)
 	if err != nil {
 		return err
 	}
@@ -134,34 +133,40 @@ func (m *ServiceManager) Setup(ctx context.Context, stackName string) error {
 	}
 
 	if stack.EnvFile != "" {
-		envMap, err := m.buildEnvMap(stack, envVars)
+		envMap, err := deployer.BuildEnvMap(stack.ConfigFile, m.repoDir(), envVars, m.Logger)
 		if err != nil {
 			return fmt.Errorf("building env map: %w", err)
 		}
-		if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
+		if err := deployer.WriteEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
 			return fmt.Errorf("writing env file: %w", err)
 		}
 	}
 
 	if len(dockerSecrets) > 0 {
-		secretsDir := filepath.Join(deployDir, "secrets")
-		if err := os.MkdirAll(secretsDir, 0700); err != nil {
-			return fmt.Errorf("creating secrets dir: %w", err)
-		}
-		secretsRoot, err := os.OpenRoot(secretsDir)
-		if err != nil {
-			return fmt.Errorf("opening secrets root: %w", err)
-		}
-		defer secretsRoot.Close()
-		for name, val := range dockerSecrets {
-			if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-				return fmt.Errorf("writing docker secret %q: %w", name, err)
-			}
+		if err := deployer.WriteDockerSecrets(filepath.Join(deployDir, "secrets"), dockerSecrets); err != nil {
+			return fmt.Errorf("writing docker secrets: %w", err)
 		}
 	}
 
-	if err := m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets); err != nil {
+	var envFilePaths []string
+	if stack.EnvFile != "" {
+		envFilePaths = []string{filepath.Join(deployDir, stack.EnvFile)}
+	}
+	data, err := deployer.GenerateOverride(deployer.OverrideParams{
+		DeployDir:     deployDir,
+		StackName:     stackName,
+		Domain:        stack.Domain,
+		ComposeFile:   composeFile,
+		EnvFilePaths:  envFilePaths,
+		DockerSecrets: dockerSecrets,
+		DefaultPort:   "80",
+		InternalNet:   "herald-svc-" + stackName + "-internal",
+	})
+	if err != nil {
 		return fmt.Errorf("generating compose override: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(deployDir, "compose.override.yml"), data, 0644); err != nil {
+		return fmt.Errorf("writing compose override: %w", err)
 	}
 
 	m.Logger.Info("service setup complete", "service", stackName, "deploy_dir", deployDir)
@@ -256,38 +261,45 @@ func (m *ServiceManager) Update(ctx context.Context, stackName string) error {
 		}
 
 		if stack.EnvFile != "" {
-			envMap, err := m.buildEnvMap(stack, envVars)
+			envMap, err := deployer.BuildEnvMap(stack.ConfigFile, m.repoDir(), envVars, m.Logger)
 			if err != nil {
 				return fmt.Errorf("building env map: %w", err)
 			}
-			if err := writeEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
+			if err := deployer.WriteEnvFile(filepath.Join(deployDir, stack.EnvFile), envMap); err != nil {
 				return fmt.Errorf("writing env file: %w", err)
 			}
 		}
 
 		if len(dockerSecrets) > 0 {
-			secretsDir := filepath.Join(deployDir, "secrets")
-			if err := os.MkdirAll(secretsDir, 0700); err != nil {
-				return fmt.Errorf("creating secrets dir: %w", err)
-			}
-			secretsRoot, err := os.OpenRoot(secretsDir)
-			if err != nil {
-				return fmt.Errorf("opening secrets root: %w", err)
-			}
-			defer secretsRoot.Close()
-			for name, val := range dockerSecrets {
-				if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-					return fmt.Errorf("writing docker secret %q: %w", name, err)
-				}
+			if err := deployer.WriteDockerSecrets(filepath.Join(deployDir, "secrets"), dockerSecrets); err != nil {
+				return fmt.Errorf("writing docker secrets: %w", err)
 			}
 		}
 
-		composeName, err := findComposeFile(repoLink)
+		composeName, err := compose.FindComposeFile(repoLink)
 		if err != nil {
 			return err
 		}
 		composeFile := filepath.Join(repoLink, composeName)
-		return m.generateOverride(deployDir, stackName, stack, composeFile, stack.EnvFile, dockerSecrets)
+
+		var envFilePaths []string
+		if stack.EnvFile != "" {
+			envFilePaths = []string{filepath.Join(deployDir, stack.EnvFile)}
+		}
+		data, err := deployer.GenerateOverride(deployer.OverrideParams{
+			DeployDir:     deployDir,
+			StackName:     stackName,
+			Domain:        stack.Domain,
+			ComposeFile:   composeFile,
+			EnvFilePaths:  envFilePaths,
+			DockerSecrets: dockerSecrets,
+			DefaultPort:   "80",
+			InternalNet:   "herald-svc-" + stackName + "-internal",
+		})
+		if err != nil {
+			return fmt.Errorf("generating compose override: %w", err)
+		}
+		return os.WriteFile(filepath.Join(deployDir, "compose.override.yml"), data, 0644)
 	})
 	if updateErr != nil {
 		return updateErr
@@ -342,7 +354,7 @@ func (m *ServiceManager) RunUpdateScript(ctx context.Context, stackName string) 
 	deployDir := m.stackDeployDir(stackName)
 	repoLink := filepath.Join(deployDir, "repo")
 
-	composeName, _ := findComposeFile(repoLink)
+	composeName, _ := compose.FindComposeFile(repoLink)
 	if composeName == "" {
 		composeName = "compose.yaml"
 	}
@@ -435,145 +447,6 @@ func (m *ServiceManager) gitPull(ctx context.Context) error {
 	}
 	m.Logger.Info("git pull", "output", output)
 	return nil
-}
-
-// findComposeFile returns the first compose filename found in dir.
-func findComposeFile(dir string) (string, error) {
-	for _, name := range []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("no compose file found in %s", dir)
-}
-
-// validateConfigFilePath returns an error if p is absolute or contains ".." components.
-func validateConfigFilePath(p string) error {
-	if filepath.IsAbs(p) {
-		return fmt.Errorf("config file path must be relative, got %q", p)
-	}
-	for _, part := range strings.Split(filepath.ToSlash(p), "/") {
-		if part == ".." {
-			return fmt.Errorf("config file path must not contain '..': %q", p)
-		}
-	}
-	return nil
-}
-
-// loadConfigFile parses a KEY=VALUE env file, skipping comments and blank lines.
-func (m *ServiceManager) loadConfigFile(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("config file %q not found in IaC repo", path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading config file %q: %w", path, err)
-	}
-	result := make(map[string]string)
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		idx := strings.IndexByte(trimmed, '=')
-		if idx < 0 {
-			m.Logger.Debug("config file: ignoring line without '='", "line", trimmed)
-			continue
-		}
-		result[strings.TrimSpace(trimmed[:idx])] = strings.TrimSpace(trimmed[idx+1:])
-	}
-	return result, nil
-}
-
-// buildEnvMap returns the merged env map: config file base overlaid with resolved secrets.
-func (m *ServiceManager) buildEnvMap(stack config.Service, envVars map[string]string) (map[string]string, error) {
-	if stack.ConfigFile == "" {
-		return envVars, nil
-	}
-	if err := validateConfigFilePath(stack.ConfigFile); err != nil {
-		return nil, err
-	}
-	base, err := m.loadConfigFile(filepath.Join(m.repoDir(), stack.ConfigFile))
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]string, len(base)+len(envVars))
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range envVars {
-		if _, exists := result[k]; exists {
-			m.Logger.Debug("config key overridden by secret", "key", k)
-		}
-		result[k] = v
-	}
-	return result, nil
-}
-
-// writeEnvFile writes sorted KEY=VALUE pairs to the given file path.
-func writeEnvFile(path string, envMap map[string]string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	for _, key := range slices.Sorted(maps.Keys(envMap)) {
-		if _, werr := fmt.Fprintf(f, "%s=%s\n", key, envMap[key]); werr != nil {
-			f.Close()
-			return werr
-		}
-	}
-	return f.Close()
-}
-
-func (m *ServiceManager) generateOverride(deployDir, stackName string, stack config.Service, composeFile string, envFile string, dockerSecrets map[string]string) error {
-	serviceName, port, err := compose.DetectServiceInfo(composeFile, stackName, "80")
-	if err != nil {
-		m.Logger.Warn("could not detect service info, using defaults", "service", stackName, "error", err)
-		serviceName = "app"
-		port = "80"
-	}
-
-	internalNet := "herald-svc-" + stackName + "-internal"
-	svc := compose.ServiceOverride{
-		Labels: map[string]string{
-			"caddy":               stack.Domain,
-			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
-		},
-		Networks: []string{"caddy", internalNet},
-	}
-
-	if envFile != "" {
-		svc.EnvFile = []string{filepath.Join(deployDir, envFile)}
-	}
-
-	secretNames := slices.Sorted(maps.Keys(dockerSecrets))
-	if len(secretNames) > 0 {
-		svc.Secrets = secretNames
-	}
-
-	override := compose.Override{
-		Services: map[string]compose.ServiceOverride{serviceName: svc},
-		Networks: map[string]compose.NetworkDef{
-			"caddy":     {External: true},
-			internalNet: {},
-		},
-	}
-
-	if len(secretNames) > 0 {
-		override.Secrets = make(map[string]compose.SecretFileDef, len(secretNames))
-		for _, name := range secretNames {
-			override.Secrets[name] = compose.SecretFileDef{
-				File: filepath.Join(deployDir, "secrets", name),
-			}
-		}
-	}
-
-	data, err := yaml.Marshal(override)
-	if err != nil {
-		return fmt.Errorf("marshaling compose override: %w", err)
-	}
-
-	return os.WriteFile(filepath.Join(deployDir, "compose.override.yml"), data, 0644)
 }
 
 // --- Streaming command runner ---
