@@ -16,10 +16,15 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print herald version",
 	Run: func(cmd *cobra.Command, args []string) {
-		if tag != "" {
+		switch {
+		case tag != "" && commit != "unknown":
 			fmt.Printf("herald %s (%s) built %s\n", tag, commit, date)
-		} else {
-			fmt.Printf("herald (%s) built %s\n", commit, date)
+		case tag != "":
+			fmt.Printf("herald %s built %s\n", tag, date)
+		case commit != "unknown":
+			fmt.Printf("herald dev (%s) built %s\n", commit, date)
+		default:
+			fmt.Printf("herald dev (unknown build)\n")
 		}
 	},
 }
