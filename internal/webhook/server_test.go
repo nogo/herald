@@ -228,10 +228,8 @@ func TestDeployCallbackFired(t *testing.T) {
 	// Collect the two deploy calls (budget + tracker).
 	seen := map[string]bool{}
 	for i := 0; i < 2; i++ {
-		select {
-		case req := <-called:
-			seen[req.StackName] = true
-		}
+		req := <-called
+		seen[req.StackName] = true
 	}
 	if !seen["budget"] || !seen["tracker"] {
 		t.Errorf("expected deploy for budget and tracker, got %v", seen)

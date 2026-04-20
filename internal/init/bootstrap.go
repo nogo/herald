@@ -39,7 +39,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	dockerVersion, err := checkDocker(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Docker:          ✗ not found\n")
-		return fmt.Errorf("Docker is not installed or not accessible. Install Docker and ensure the current user is in the 'docker' group.")
+		return fmt.Errorf("docker is not installed or not accessible; install Docker and ensure the current user is in the 'docker' group")
 	}
 	fmt.Fprintf(w, "  Docker:          ✓ %s\n", dockerVersion)
 
@@ -47,7 +47,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	composeVersion, err := checkDockerCompose(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Docker Compose:  ✗ not found\n")
-		return fmt.Errorf("Docker Compose plugin is not installed.")
+		return fmt.Errorf("docker Compose plugin is not installed")
 	}
 	fmt.Fprintf(w, "  Docker Compose:  ✓ %s\n", composeVersion)
 
@@ -55,7 +55,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	gitVersion, err := checkGit(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Git:             ✗ not found\n")
-		return fmt.Errorf("git is not installed.")
+		return fmt.Errorf("git is not installed")
 	}
 	fmt.Fprintf(w, "  Git:             ✓ %s\n", gitVersion)
 
@@ -63,7 +63,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	portsOK, err := checkPorts(ctx)
 	if err != nil || !portsOK {
 		fmt.Fprintf(w, "  Ports 80/443:    ✗ in use\n")
-		return fmt.Errorf("Ports 80/443 are in use. Stop the existing proxy before running init.")
+		return fmt.Errorf("ports 80/443 are in use; stop the existing proxy before running init")
 	}
 	fmt.Fprintf(w, "  Ports 80/443:    ✓ available\n")
 

@@ -254,14 +254,6 @@ func detectOrphans(ctx context.Context, cfg *config.Config) []string {
 	return orphans
 }
 
-// syncCmdOutput runs a command in dir and returns trimmed stdout.
-func syncCmdOutput(ctx context.Context, dir, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
-}
-
 func init() {
 	syncCmd.GroupID = "daemon"
 	rootCmd.AddCommand(syncCmd)

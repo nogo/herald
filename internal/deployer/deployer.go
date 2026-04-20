@@ -34,7 +34,7 @@ type Deployer struct {
 	UI      ui.UI  // optional; nil defaults to ui.Nop()
 
 	stackLocks sync.Map // string → *stackLock
-	wg       sync.WaitGroup
+	wg         sync.WaitGroup
 }
 
 func (d *Deployer) ui() ui.UI {
