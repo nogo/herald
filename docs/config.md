@@ -55,7 +55,7 @@ Each key under `stacks:` is the stack name used in CLI commands (`herald deploy 
 | `compose` | repo stacks | no | `compose.yml` | Path to the compose file. Relative paths resolve from the IaC repo root; absolute paths are used as-is. |
 | `config` | both | no | — | Path to a non-secret env file, relative to the IaC repo root. Values are loaded as a base layer; secrets overlay on top. |
 | `env_file` | both | no | — | Additional env file to include in the compose override, relative to the stack deploy directory. |
-| `override` | repo stacks | no | — | Inline YAML merged into the compose override. Use to add labels, extra env_file entries, or any compose key for services that herald doesn't manage directly. |
+| `override` | both | no | — | Inline YAML merged into the compose override. Use to add labels, extra env_file entries, or any compose key for services that herald doesn't manage directly. |
 | `auto_deploy` | path stacks | no | `false` | Whether to redeploy automatically when the IaC repo is updated via `herald sync`. |
 | `update` | path stacks | no | — | Path to a shell script run as a post-deploy hook, relative to the IaC repo root. Receives `STACK_NAME` and `STACK_DIR` as environment variables. |
 | `secrets` | both | no | — | List of secrets to inject. See [Secrets](#secrets). |
@@ -180,7 +180,7 @@ secrets:
     file: /opt/deploy/<name>/secrets/<target>
 ```
 
-Your compose file must reference the secret by name:
+Your compose file must reference the secret by name. Give it a placeholder `file:` so Docker Compose validates the base file; herald's override replaces the path at deploy time:
 
 ```yaml
 services:
@@ -189,7 +189,8 @@ services:
       - db_password
 
 secrets:
-  db_password:  # file: path is provided by herald's override — leave empty here
+  db_password:
+    file: ./secrets/db_password  # placeholder — herald overrides with the real path
 ```
 
 ### Auto-generation

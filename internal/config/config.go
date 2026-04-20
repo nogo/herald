@@ -243,8 +243,8 @@ func validate(cfg *Config) error {
 			if stack.Preview != nil {
 				return fmt.Errorf("stack %q: preview is not valid for path stacks", name)
 			}
-			if stack.Compose != "" || stack.Override != "" {
-				return fmt.Errorf("stack %q: compose and override are not valid for path stacks", name)
+			if stack.Compose != "" {
+				return fmt.Errorf("stack %q: compose is not valid for path stacks", name)
 			}
 		}
 	}

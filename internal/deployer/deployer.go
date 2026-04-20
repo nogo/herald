@@ -1,8 +1,10 @@
 package deployer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -463,8 +465,80 @@ func (d *Deployer) runCompose(ctx context.Context, deployDir, stackName, compose
 	d.Logger.Info("compose up", "stack", stackName, "project", cctx.ProjectName)
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
-	sw := d.ui().StreamWriter()
+	sw := &composeFilterWriter{w: d.ui().StreamWriter()}
 	err := runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
+	sw.Flush()
 	ui.FlushStreamWriter(d.ui())
 	return err
+}
+
+// composeFilterWriter drops per-layer pull chatter (`<hex> Pulling fs layer`,
+// Waiting, Downloading, Extracting, Pull complete, …) from docker compose's
+// `--progress plain` output. Image/Network/Volume/Container lines pass through.
+type composeFilterWriter struct {
+	w   io.Writer
+	buf []byte
+}
+
+func (f *composeFilterWriter) Write(p []byte) (int, error) {
+	f.buf = append(f.buf, p...)
+	for {
+		idx := bytes.IndexByte(f.buf, '\n')
+		if idx < 0 {
+			break
+		}
+		line := f.buf[:idx]
+		f.buf = f.buf[idx+1:]
+		if skipComposeLine(line) {
+			continue
+		}
+		if _, err := f.w.Write(append(append([]byte{}, line...), '\n')); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
+}
+
+func (f *composeFilterWriter) Flush() {
+	if len(f.buf) > 0 && !skipComposeLine(f.buf) {
+		f.w.Write(append(f.buf, '\n'))
+	}
+	f.buf = f.buf[:0]
+}
+
+func skipComposeLine(line []byte) bool {
+	s := bytes.TrimSpace(line)
+	if len(s) < 12 {
+		return false
+	}
+	// Layer progress lines start with a short hex id followed by a space.
+	i := 0
+	for i < len(s) && i < 16 && isHex(s[i]) {
+		i++
+	}
+	if i < 8 || i >= len(s) || s[i] != ' ' {
+		return false
+	}
+	rest := s[i+1:]
+	for _, prefix := range layerNoisePrefixes {
+		if bytes.HasPrefix(rest, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+var layerNoisePrefixes = [][]byte{
+	[]byte("Pulling fs layer"),
+	[]byte("Waiting"),
+	[]byte("Downloading"),
+	[]byte("Verifying Checksum"),
+	[]byte("Download complete"),
+	[]byte("Extracting"),
+	[]byte("Pull complete"),
+	[]byte("Already exists"),
+}
+
+func isHex(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
 }

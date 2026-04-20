@@ -764,21 +764,6 @@ stacks:
 `,
 			wantErr: "tag_pattern",
 		},
-		{
-			name: "path stack with override",
-			yaml: serverBlock + `
-stacks:
-  svc:
-    path: stacks/svc
-    domain: svc.example.com
-    override: |
-      services:
-        app:
-          environment:
-            X: y
-`,
-			wantErr: "override",
-		},
 	}
 
 	for _, tc := range cases {

@@ -23,7 +23,7 @@ type ServiceOverride struct {
 	Labels   map[string]string `yaml:"labels,omitempty"`
 	EnvFile  OverrideList      `yaml:"env_file,omitempty"`
 	Secrets  []string          `yaml:"secrets,omitempty"`
-	Networks []string          `yaml:"networks,omitempty"`
+	Networks OverrideList      `yaml:"networks,omitempty"`
 }
 
 // OverrideList is a string slice that marshals with the !override YAML tag.
@@ -71,34 +71,41 @@ type minimalCompose struct {
 // Prefers a service named "app", then appName, then the first alphabetically.
 // defaultPort is returned when no port is found (e.g. "3000" for apps, "80" for stacks).
 func DetectServiceInfo(filePath, appName, defaultPort string) (serviceName, port string, err error) {
+	serviceName, port, _, err = DetectServices(filePath, appName, defaultPort)
+	return
+}
+
+// DetectServices parses a compose file and returns the main service name, its
+// port, and all service names. Selection rules match DetectServiceInfo.
+func DetectServices(filePath, appName, defaultPort string) (mainName, port string, allNames []string, err error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	var mc minimalCompose
 	if err := yaml.Unmarshal(data, &mc); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	if len(mc.Services) == 0 {
-		return "app", defaultPort, nil
+		return "app", defaultPort, nil, nil
 	}
 
-	names := slices.Sorted(maps.Keys(mc.Services))
-	serviceName = names[0]
-	for _, n := range names {
+	allNames = slices.Sorted(maps.Keys(mc.Services))
+	mainName = allNames[0]
+	for _, n := range allNames {
 		if n == "app" || n == appName {
-			serviceName = n
+			mainName = n
 			break
 		}
 	}
 
-	port = extractFirstPort(mc.Services[serviceName])
+	port = extractFirstPort(mc.Services[mainName])
 	if port == "" {
 		port = defaultPort
 	}
-	return serviceName, port, nil
+	return mainName, port, allNames, nil
 }
 
 func extractFirstPort(svc minimalService) string {

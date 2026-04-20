@@ -78,10 +78,14 @@ type OverrideParams struct {
 // GenerateOverride creates a compose.override.yml for a stack.
 // Returns marshaled YAML bytes; the caller writes them to disk.
 func GenerateOverride(params OverrideParams) ([]byte, error) {
-	serviceName, port, err := compose.DetectServiceInfo(params.ComposeFile, params.StackName, params.DefaultPort)
+	mainName, port, allNames, err := compose.DetectServices(params.ComposeFile, params.StackName, params.DefaultPort)
 	if err != nil {
-		serviceName = "app"
+		mainName = "app"
 		port = params.DefaultPort
+		allNames = []string{mainName}
+	}
+	if len(allNames) == 0 {
+		allNames = []string{mainName}
 	}
 
 	svc := compose.ServiceOverride{
@@ -89,7 +93,7 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 			"caddy":               params.Domain,
 			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
 		},
-		Networks: []string{"caddy", params.InternalNet},
+		Networks: compose.OverrideList{"caddy", params.InternalNet},
 	}
 
 	if len(params.EnvFilePaths) > 0 {
@@ -101,8 +105,18 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 		svc.Secrets = secretNames
 	}
 
+	services := map[string]compose.ServiceOverride{mainName: svc}
+	for _, name := range allNames {
+		if name == mainName {
+			continue
+		}
+		services[name] = compose.ServiceOverride{
+			Networks: compose.OverrideList{params.InternalNet},
+		}
+	}
+
 	override := compose.Override{
-		Services: map[string]compose.ServiceOverride{serviceName: svc},
+		Services: services,
 		Networks: map[string]compose.NetworkDef{
 			"caddy":            {External: true},
 			params.InternalNet: {},
