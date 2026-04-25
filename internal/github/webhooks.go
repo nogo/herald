@@ -56,7 +56,6 @@ type Webhook struct {
 	Active bool     `json:"active"`
 	Config WHConfig `json:"config"`
 	Events []string `json:"events"`
-	URL    string   // extracted from Config.URL
 }
 
 // WHConfig is the webhook configuration object from the GitHub API.
@@ -82,12 +81,20 @@ type SyncResult struct {
 	Error  error
 }
 
+func errResult(repo string, err error) SyncResult {
+	return SyncResult{Repo: repo, Action: "error", Error: err}
+}
+
 // WebhookStatus is returned by ListWebhookStatuses.
+// Error is set when the status could not be determined (invalid repo,
+// API failure, missing token scope, etc.) — distinct from "no webhook
+// is registered," which is Found=false with Error=nil.
 type WebhookStatus struct {
 	Repo   string
 	URL    string
 	Active bool
 	Found  bool
+	Error  error
 }
 
 func (c *GitHubClient) doRequest(ctx context.Context, method, url string, body any) (*http.Response, error) {
@@ -128,6 +135,26 @@ func (c *GitHubClient) doRequest(ctx context.Context, method, url string, body a
 	return resp, nil
 }
 
+// doRequestJSON sends a request, reads and closes the body, and returns a
+// GitHubError when the status code does not match wantStatus. The response
+// headers are returned so callers can inspect things like Link for pagination.
+func (c *GitHubClient) doRequestJSON(ctx context.Context, method, url string, body any, wantStatus int) ([]byte, http.Header, error) {
+	resp, err := c.doRequest(ctx, method, url, body)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading response body: %w", err)
+	}
+	if resp.StatusCode != wantStatus {
+		return nil, nil, &GitHubError{StatusCode: resp.StatusCode, Body: string(data)}
+	}
+	return data, resp.Header, nil
+}
+
 func parseUnixTimestamp(s string) string {
 	ts, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
@@ -139,57 +166,35 @@ func parseUnixTimestamp(s string) string {
 // ListWebhooks returns all webhooks for a repository, following pagination.
 func (c *GitHubClient) ListWebhooks(ctx context.Context, owner, repo string) ([]Webhook, error) {
 	var all []Webhook
-	page := 1
-
-	for {
+	for page := 1; ; page++ {
 		url := fmt.Sprintf("%s/repos/%s/%s/hooks?per_page=100&page=%d", c.BaseURL, owner, repo, page)
-		resp, err := c.doRequest(ctx, http.MethodGet, url, nil)
+		body, headers, err := c.doRequestJSON(ctx, http.MethodGet, url, nil, http.StatusOK)
 		if err != nil {
 			return nil, err
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("reading response body: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, &GitHubError{StatusCode: resp.StatusCode, Body: string(body)}
 		}
 
 		var hooks []Webhook
 		if err := json.Unmarshal(body, &hooks); err != nil {
 			return nil, fmt.Errorf("decoding webhooks response: %w", err)
 		}
-
-		for i := range hooks {
-			hooks[i].URL = hooks[i].Config.URL
-		}
-
 		all = append(all, hooks...)
 
-		if !strings.Contains(resp.Header.Get("Link"), `rel="next"`) {
-			break
+		if !strings.Contains(headers.Get("Link"), `rel="next"`) {
+			return all, nil
 		}
-		page++
 	}
-
-	return all, nil
 }
 
 // CreateWebhook creates a new webhook on the given repository.
 func (c *GitHubClient) CreateWebhook(ctx context.Context, owner, repo string, req CreateWebhookRequest) (*Webhook, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/hooks", c.BaseURL, owner, repo)
 
-	type createBody struct {
+	payload := struct {
 		Name   string   `json:"name"`
 		Active bool     `json:"active"`
 		Events []string `json:"events"`
 		Config WHConfig `json:"config"`
-	}
-
-	payload := createBody{
+	}{
 		Name:   "web",
 		Active: true,
 		Events: req.Events,
@@ -201,60 +206,39 @@ func (c *GitHubClient) CreateWebhook(ctx context.Context, owner, repo string, re
 		},
 	}
 
-	resp, err := c.doRequest(ctx, http.MethodPost, url, payload)
+	body, _, err := c.doRequestJSON(ctx, http.MethodPost, url, payload, http.StatusCreated)
 	if err != nil {
 		return nil, err
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return nil, &GitHubError{StatusCode: resp.StatusCode, Body: string(respBody)}
-	}
-
 	var hook Webhook
-	if err := json.Unmarshal(respBody, &hook); err != nil {
+	if err := json.Unmarshal(body, &hook); err != nil {
 		return nil, fmt.Errorf("decoding create webhook response: %w", err)
 	}
-	hook.URL = hook.Config.URL
-
 	return &hook, nil
 }
 
 // DeleteWebhook deletes a webhook by ID.
 func (c *GitHubClient) DeleteWebhook(ctx context.Context, owner, repo string, id int64) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/hooks/%d", c.BaseURL, owner, repo, id)
-
-	resp, err := c.doRequest(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return err
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return fmt.Errorf("reading response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusNoContent {
-		return &GitHubError{StatusCode: resp.StatusCode, Body: string(body)}
-	}
-	return nil
+	_, _, err := c.doRequestJSON(ctx, http.MethodDelete, url, nil, http.StatusNoContent)
+	return err
 }
 
-// uniqueRepos returns a sorted, deduplicated list of repos referenced by repo stacks.
-func uniqueRepos(cfg *config.Config) []string {
+// uniqueRepos returns a sorted, deduplicated list of repos referenced by repo
+// stacks. If iacRepo is non-empty it is included in the set so the server's
+// own IaC repo gets a webhook reconciled alongside stack repos.
+func uniqueRepos(cfg *config.Config, iacRepo string) []string {
 	repoSet := make(map[string]struct{})
 	for _, stack := range cfg.Stacks {
 		if stack.Repo != "" {
 			repoSet[stack.Repo] = struct{}{}
 		}
 	}
-	return slices.Collect(maps.Keys(repoSet))
+	if iacRepo != "" {
+		repoSet[iacRepo] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(repoSet))
 }
 
 // splitRepo splits "owner/repo" into its two components.
@@ -293,15 +277,16 @@ func formatAPIError(repo string, err error) error {
 
 // SyncWebhooks ensures herald webhooks are registered on all repos referenced in config.
 // When force is true, existing webhooks are deleted and recreated (use after changing the webhook secret).
-func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store, client *GitHubClient, force bool) ([]SyncResult, error) {
+// iacRepo, if non-empty, is included in the reconciliation set so the server's own IaC repo
+// is kept in sync alongside stack repos.
+func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store, client *GitHubClient, force bool, iacRepo string) ([]SyncResult, error) {
 	webhookSecret, err := store.Get("herald/webhook_secret")
 	if err != nil {
 		return nil, fmt.Errorf("getting webhook secret: %w", err)
 	}
 
 	targetURL := webhookURL(cfg)
-	repos := uniqueRepos(cfg)
-	slices.Sort(repos)
+	repos := uniqueRepos(cfg, iacRepo)
 
 	results := make([]SyncResult, 0, len(repos))
 	for _, repoFull := range repos {
@@ -312,20 +297,14 @@ func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store,
 }
 
 func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, repoFull, targetURL, webhookSecret string, force bool) SyncResult {
-	result := SyncResult{Repo: repoFull}
-
 	owner, repoName, err := splitRepo(repoFull)
 	if err != nil {
-		result.Action = "error"
-		result.Error = err
-		return result
+		return errResult(repoFull, err)
 	}
 
 	hooks, err := client.ListWebhooks(ctx, owner, repoName)
 	if err != nil {
-		result.Action = "error"
-		result.Error = formatAPIError(repoFull, err)
-		return result
+		return errResult(repoFull, formatAPIError(repoFull, err))
 	}
 
 	var heraldHook *Webhook
@@ -337,17 +316,13 @@ func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, rep
 	}
 
 	if heraldHook != nil && heraldHook.Active && !force {
-		result.Action = "exists"
-		result.ID = heraldHook.ID
-		return result
+		return SyncResult{Repo: repoFull, Action: "exists", ID: heraldHook.ID}
 	}
 
 	// Delete existing hook before recreating (inactive, or force mode).
 	if heraldHook != nil {
 		if err := client.DeleteWebhook(ctx, owner, repoName, heraldHook.ID); err != nil {
-			result.Action = "error"
-			result.Error = formatAPIError(repoFull, err)
-			return result
+			return errResult(repoFull, formatAPIError(repoFull, err))
 		}
 	}
 
@@ -357,21 +332,17 @@ func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, rep
 		Events: eventsForRepo(cfg, repoFull),
 	})
 	if err != nil {
-		result.Action = "error"
-		result.Error = formatAPIError(repoFull, err)
-		return result
+		return errResult(repoFull, formatAPIError(repoFull, err))
 	}
 
-	result.Action = "created"
-	result.ID = hook.ID
-	return result
+	return SyncResult{Repo: repoFull, Action: "created", ID: hook.ID}
 }
 
 // ListWebhookStatuses returns the webhook status for each unique repo in config.
-func ListWebhookStatuses(ctx context.Context, cfg *config.Config, client *GitHubClient) []WebhookStatus {
+// iacRepo, if non-empty, is included so the server's own IaC repo appears in the listing.
+func ListWebhookStatuses(ctx context.Context, cfg *config.Config, client *GitHubClient, iacRepo string) []WebhookStatus {
 	targetURL := webhookURL(cfg)
-	repos := uniqueRepos(cfg)
-	slices.Sort(repos)
+	repos := uniqueRepos(cfg, iacRepo)
 
 	statuses := make([]WebhookStatus, 0, len(repos))
 	for _, repoFull := range repos {
@@ -379,12 +350,14 @@ func ListWebhookStatuses(ctx context.Context, cfg *config.Config, client *GitHub
 
 		owner, repoName, err := splitRepo(repoFull)
 		if err != nil {
+			status.Error = err
 			statuses = append(statuses, status)
 			continue
 		}
 
 		hooks, err := client.ListWebhooks(ctx, owner, repoName)
 		if err != nil {
+			status.Error = formatAPIError(repoFull, err)
 			statuses = append(statuses, status)
 			continue
 		}

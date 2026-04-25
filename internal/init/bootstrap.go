@@ -270,14 +270,10 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if token != "" {
 		ghClient := github.NewGitHubClient(token, slog.Default())
 
-		results, err := github.SyncWebhooks(ctx, cfg, store, ghClient, false)
+		results, err := github.SyncWebhooks(ctx, cfg, store, ghClient, false, opts.ServerRepo)
 		if err != nil {
 			return fmt.Errorf("syncing webhooks: %w", err)
 		}
-
-		// Also register on the server IaC repo itself if not already covered.
-		serverResult := syncServerRepoWebhook(ctx, cfg, ghClient, store, opts.ServerRepo)
-		results = append(results, serverResult)
 
 		registered := 0
 		for _, r := range results {
@@ -362,66 +358,6 @@ func cloneOrPull(ctx context.Context, w io.Writer, repo, destDir, token string) 
 	}
 	fmt.Fprintln(w, "  ✓ Repository cloned")
 	return nil
-}
-
-// syncServerRepoWebhook registers a webhook on the server IaC repo if not already covered.
-func syncServerRepoWebhook(ctx context.Context, cfg *config.Config, client *github.GitHubClient, store *secrets.Store, serverRepo string) github.SyncResult {
-	result := github.SyncResult{Repo: serverRepo}
-
-	// Skip if the server repo is already a repo stack (handled by SyncWebhooks).
-	for _, stack := range cfg.Stacks {
-		if stack.Repo == serverRepo {
-			result.Action = "exists"
-			return result
-		}
-	}
-
-	webhookSecret, err := store.Get("herald/webhook_secret")
-	if err != nil {
-		result.Action = "error"
-		result.Error = fmt.Errorf("getting webhook secret: %w", err)
-		return result
-	}
-
-	parts := strings.SplitN(serverRepo, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		result.Action = "error"
-		result.Error = fmt.Errorf("invalid repo format %q, expected owner/repo", serverRepo)
-		return result
-	}
-	owner, repo := parts[0], parts[1]
-
-	targetURL := "https://" + cfg.Server.DeployDomain + "/webhook"
-
-	hooks, err := client.ListWebhooks(ctx, owner, repo)
-	if err != nil {
-		result.Action = "error"
-		result.Error = err
-		return result
-	}
-
-	for _, hook := range hooks {
-		if hook.Config.URL == targetURL && hook.Active {
-			result.Action = "exists"
-			result.ID = hook.ID
-			return result
-		}
-	}
-
-	hook, err := client.CreateWebhook(ctx, owner, repo, github.CreateWebhookRequest{
-		URL:    targetURL,
-		Secret: webhookSecret,
-		Events: []string{"push"},
-	})
-	if err != nil {
-		result.Action = "error"
-		result.Error = err
-		return result
-	}
-
-	result.Action = "created"
-	result.ID = hook.ID
-	return result
 }
 
 func generateSecret() (string, error) {

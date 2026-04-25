@@ -68,11 +68,11 @@ var syncCmd = &cobra.Command{
 		}
 
 		// 4. Sync webhooks.
-		webhookSynced, webhookCreated, webhookRemoved := 0, 0, 0
+		webhookSynced, webhookCreated := 0, 0
 		webhookEnabled := cfg.Server.GithubToken != ""
 		if webhookEnabled {
 			client := github.NewGitHubClient(cfg.Server.GithubToken, slog.Default())
-			results, syncErr := github.SyncWebhooks(ctx, cfg, store, client, false)
+			results, syncErr := github.SyncWebhooks(ctx, cfg, store, client, false, getIaCRepo(dataDir))
 			if syncErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: webhook sync failed: %v\n", syncErr)
 			} else {
@@ -88,8 +88,6 @@ var syncCmd = &cobra.Command{
 					case "created":
 						webhookCreated++
 						ws.Repos[r.Repo] = status.WebhookEntry{ID: r.ID, Registered: true}
-					case "removed":
-						webhookRemoved++
 					case "error":
 						fmt.Fprintf(os.Stderr, "  webhook error for %s: %v\n", r.Repo, r.Error)
 					}
@@ -166,8 +164,8 @@ var syncCmd = &cobra.Command{
 		fmt.Fprintln(out, "  Config reloaded")
 		fmt.Fprintf(out, "  Caddy: %s\n", caddyStatus)
 		if webhookEnabled {
-			fmt.Fprintf(out, "  Webhooks: %d synced, %d created, %d removed\n",
-				webhookSynced, webhookCreated, webhookRemoved)
+			fmt.Fprintf(out, "  Webhooks: %d synced, %d created\n",
+				webhookSynced, webhookCreated)
 		} else {
 			fmt.Fprintln(out, "  Webhooks: skipped (no GitHub token configured)")
 		}

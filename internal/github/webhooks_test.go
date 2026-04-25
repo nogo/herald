@@ -47,7 +47,7 @@ func TestListWebhooks(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d webhooks, want 2", len(got))
 	}
-	if got[0].ID != 1 || got[0].URL != "https://example.com/webhook" {
+	if got[0].ID != 1 || got[0].Config.URL != "https://example.com/webhook" {
 		t.Errorf("got[0] = %+v, unexpected", got[0])
 	}
 }
@@ -145,8 +145,8 @@ func TestCreateWebhook(t *testing.T) {
 	if hook.ID != 42 {
 		t.Errorf("got ID %d, want 42", hook.ID)
 	}
-	if hook.URL != "https://deploy.example.com/webhook" {
-		t.Errorf("got URL %q, want deploy URL", hook.URL)
+	if hook.Config.URL != "https://deploy.example.com/webhook" {
+		t.Errorf("got URL %q, want deploy URL", hook.Config.URL)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestUniqueRepos(t *testing.T) {
 		},
 	}
 
-	repos := uniqueRepos(cfg)
+	repos := uniqueRepos(cfg, "")
 	if len(repos) != 2 {
 		t.Errorf("got %d repos, want 2: %v", len(repos), repos)
 	}
@@ -214,6 +214,18 @@ func TestUniqueRepos(t *testing.T) {
 	}
 	if !found["nogo/budget-app"] || !found["nogo/sidenote"] {
 		t.Errorf("missing expected repos, got %v", repos)
+	}
+
+	// IaC repo distinct from any stack repo: included.
+	repos = uniqueRepos(cfg, "nogo/srv1")
+	if len(repos) != 3 {
+		t.Errorf("with iacRepo: got %d repos, want 3: %v", len(repos), repos)
+	}
+
+	// IaC repo overlapping a stack repo: deduped.
+	repos = uniqueRepos(cfg, "nogo/budget-app")
+	if len(repos) != 2 {
+		t.Errorf("overlapping iacRepo: got %d repos, want 2: %v", len(repos), repos)
 	}
 }
 

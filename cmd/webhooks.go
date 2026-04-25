@@ -36,7 +36,8 @@ var webhooksSyncCmd = &cobra.Command{
 		client := github.NewGitHubClient(Cfg.Server.GithubToken, slog.Default())
 
 		force, _ := cmd.Flags().GetBool("force")
-		results, err := github.SyncWebhooks(context.Background(), Cfg, store, client, force)
+		iacRepo := getIaCRepo(dataDir)
+		results, err := github.SyncWebhooks(context.Background(), Cfg, store, client, force, iacRepo)
 		if err != nil {
 			return err
 		}
@@ -48,17 +49,19 @@ var webhooksSyncCmd = &cobra.Command{
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "Webhooks synced:")
 		for _, r := range results {
+			suffix := ""
+			if iacRepo != "" && r.Repo == iacRepo {
+				suffix = " (IaC)"
+			}
 			switch r.Action {
 			case "exists":
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ✓ exists (id: %d)\n", r.Repo, r.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ✓ exists (id: %d)%s\n", r.Repo, r.ID, suffix)
 				ws.Repos[r.Repo] = status.WebhookEntry{ID: r.ID, Registered: true}
 			case "created":
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s + created (id: %d)\n", r.Repo, r.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s + created (id: %d)%s\n", r.Repo, r.ID, suffix)
 				ws.Repos[r.Repo] = status.WebhookEntry{ID: r.ID, Registered: true}
-			case "removed":
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s - removed (id: %d)\n", r.Repo, r.ID)
 			case "error":
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ! error: %v\n", r.Repo, r.Error)
+				fmt.Fprintf(cmd.OutOrStdout(), "  %-30s ! error: %v%s\n", r.Repo, r.Error, suffix)
 			}
 		}
 		wsPath := status.WebhookStatePath(dataDir)
@@ -81,23 +84,36 @@ var webhooksListCmd = &cobra.Command{
 		}
 
 		client := github.NewGitHubClient(Cfg.Server.GithubToken, slog.Default())
-		statuses := github.ListWebhookStatuses(context.Background(), Cfg, client)
+		iacRepo := getIaCRepo(dataDir)
+		statuses := github.ListWebhookStatuses(context.Background(), Cfg, client, iacRepo)
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
-		fmt.Fprintln(w, "Repo\tWebhook URL\tStatus")
+		fmt.Fprintln(w, "Repo\tWebhook URL\tStatus\tKind")
+		hasErrors := false
 		for _, s := range statuses {
-			if s.Found {
-				status := "active"
+			kind := "stack"
+			if iacRepo != "" && s.Repo == iacRepo {
+				kind = "IaC"
+			}
+			switch {
+			case s.Error != nil:
+				hasErrors = true
+				fmt.Fprintf(w, "%s\t%s\terror: %v\t%s\n", s.Repo, "-", s.Error, kind)
+			case s.Found:
+				state := "active"
 				if !s.Active {
-					status = "inactive"
+					state = "inactive"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Repo, s.URL, status)
-			} else {
-				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Repo, "-", "not registered")
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Repo, s.URL, state, kind)
+			default:
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Repo, "-", "not registered", kind)
 			}
 		}
 		w.Flush()
 
+		if hasErrors {
+			return fmt.Errorf("one or more repos could not be queried")
+		}
 		return nil
 	},
 }
