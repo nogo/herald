@@ -274,6 +274,14 @@ func (s *Store) Import(key, filePath string) error {
 	return s.Set(key, string(data))
 }
 
+// GenerateSecret produces a cryptographically random value using the given
+// encoding ("base64", "hex", or "alphanumeric"). n is the number of source
+// random bytes for base64/hex, or the output length for alphanumeric. n<=0
+// defaults to 32.
+func GenerateSecret(encoding string, n int) (string, error) {
+	return generateSecret(encoding, n)
+}
+
 // generateSecret produces a cryptographically random value using the given
 // encoding. n is the number of source random bytes (minimum 1).
 func generateSecret(encoding string, n int) (string, error) {

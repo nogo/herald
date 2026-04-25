@@ -32,11 +32,53 @@ Preferred usage (interactive prompt, input hidden):
 
 Pipe from stdin:
   echo "my-secret" | herald secret set mykey
-  herald secret set mykey < /path/to/secret-file`,
+  herald secret set mykey < /path/to/secret-file
+
+Generate a random value (base64, hex, or alphanumeric):
+  herald secret set mykey --generate alphanumeric
+  herald secret set mykey --generate base64 --length 48
+Refuses to overwrite an existing key; pass --force to replace.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		key := args[0]
+		generate, _ := cmd.Flags().GetString("generate")
+		length, _ := cmd.Flags().GetInt("length")
+		force, _ := cmd.Flags().GetBool("force")
+
+		store := secrets.NewStore(dataDir)
+		if err := store.Init(); err != nil {
+			return err
+		}
+
+		if generate != "" {
+			if len(args) == 2 {
+				return fmt.Errorf("--generate is mutually exclusive with a value argument")
+			}
+			if length < 16 || length > 512 {
+				return fmt.Errorf("--length must be between 16 and 512, got %d", length)
+			}
+			value, err := secrets.GenerateSecret(generate, length)
+			if err != nil {
+				return err
+			}
+			if force {
+				if err := store.Set(key, value); err != nil {
+					return err
+				}
+			} else {
+				written, err := store.SetIfAbsent(key, value)
+				if err != nil {
+					return err
+				}
+				if !written {
+					return fmt.Errorf("secret %q already exists; pass --force to overwrite", key)
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "secret '%s' generated (%s, %d)\n", key, generate, length)
+			return nil
+		}
+
 		var value string
 		if len(args) == 2 {
 			value = args[1]
@@ -62,10 +104,6 @@ Pipe from stdin:
 			if value == "" {
 				return fmt.Errorf("no value provided (pass as argument or pipe to stdin)")
 			}
-		}
-		store := secrets.NewStore(dataDir)
-		if err := store.Init(); err != nil {
-			return err
 		}
 		if err := store.Set(key, value); err != nil {
 			return err
@@ -151,6 +189,9 @@ var secretDeleteCmd = &cobra.Command{
 }
 
 func init() {
+	secretSetCmd.Flags().String("generate", "", "Generate a random value: base64, hex, or alphanumeric")
+	secretSetCmd.Flags().Int("length", 32, "Length for --generate (16–512)")
+	secretSetCmd.Flags().Bool("force", false, "Overwrite the key if it already exists (with --generate)")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretListCmd, secretImportCmd, secretDeleteCmd)
 	secretCmd.GroupID = "secrets"
 	rootCmd.AddCommand(secretCmd)
