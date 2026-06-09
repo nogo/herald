@@ -178,8 +178,10 @@ single-flight `internal/maintenance` pass (validate-before-apply, per-context
    auto-removal.
 8. **⚠️ Orphans not in the status web UI** (D3/D4) — detected and written to
    `last-sync.json`, but the web UI does not yet read it.
-9. **⚠️ Repo-stack `auto_deploy` gate** — deferred; repo stacks still always deploy
-   on a matching push. Lives in the webhook handler, not the pass.
+9. **Repo-stack `auto_deploy` gate** — decided not to build; tags + preflight cover
+   the cases. Revisit only if a deploy-*freeze* need appears (likely as `herald
+   freeze`, not a config field). `auto_deploy` on a repo stack is currently a silent
+   no-op.
 10. **❓ Preview count limit** (PV6) — enforcement unverified.
 
 Next up per `next.md`: read-side fixes (status reads `last-sync.json`, renders path

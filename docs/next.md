@@ -255,25 +255,24 @@ stack only when `git diff <deployed_ref>..HEAD -- <path>` is non-empty. A missin
 record means deploy-once to establish the stamp. This also fixes forgotten failed
 deploys: detection is "since last successful deploy", not "since last pull".
 
-### Repo-Stack `auto_deploy` Gate
+### Repo-Stack `auto_deploy` Gate — decided: skip
 
-`auto_deploy` is currently a path-stack-only field. Repo stacks always deploy on a
-matching app-repo push. Consider making `auto_deploy` a gate on repo stacks too, so
-one semantic — "should a matching source event auto-deploy this stack?" — covers
-both source types.
+Considered making `auto_deploy` gate repo stacks too (default `true`), so one
+semantic covers both source types. **Decision: do not build it.** Its two use cases
+are already served:
 
-Constraints:
+- Release gating → tag-based stacks (`tag_pattern:`). Push to the branch freely;
+  deploy by pushing a tag. This is the git-native release gate.
+- "Deploy when ready" → preflight already fails a deploy with a missing required
+  secret and changes nothing (`deployer.go`), so a not-ready stack can't half-deploy.
 
-- Default must stay `true` for repo stacks, or git-to-production breaks and existing
-  configs change behavior silently.
-- Default stays `false` for path stacks (an IaC push is a config change, not
-  necessarily intent to redeploy that stack).
-- The gate lives in the webhook push handler, not the maintenance pass — the pass
-  never deploys repo stacks. So this is a separable change from the sync extraction.
-- Open question: should a `tag_pattern` match bypass the gate? A tag push is already
-  an explicit release signal, so gating it behind `auto_deploy` may be redundant.
-  Leaning: `auto_deploy` gates branch pushes; tag matches and manual `herald deploy`
-  always deploy.
+The only case the alternatives don't cover is a **temporary deploy freeze** on a
+branch-tracked stack (pause auto-deploy during an incident or while staging a
+breaking change). Revisit *only* when that need is real — and likely as an
+imperative toggle (e.g. `herald freeze <stack>`) rather than a config field.
+
+Known minor wart: `auto_deploy` on a repo stack is currently accepted and silently
+ignored. If touched later, either honor it or reject it in config validation.
 
 ### Deferred: First Deploy And Destroy
 
@@ -683,10 +682,9 @@ If a command only saves typing `docker compose -p herald-<name> ...`, it should 
 9. Persist `last-sync.json` or an equivalent maintenance report.
 10. Build `herald doctor` from the maintenance report plus deeper read-only checks.
 11. Keep app repo webhooks, preview webhooks, and the existing IaC repo webhook reconciled during init/sync.
-12. Consider a repo-stack `auto_deploy` gate (default true) in the webhook push handler.
-13. Add `herald init --install`.
-14. Defer first-deploy automation (`herald init --deploy`) and `herald destroy` until secret setup and teardown semantics are designed; keep both manual for now.
-15. Consider optional polling fallback only if webhook delivery proves insufficient or non-GitHub support becomes a goal.
+12. Add `herald init --install`.
+13. Defer first-deploy automation (`herald init --deploy`) and `herald destroy` until secret setup and teardown semantics are designed; keep both manual for now.
+14. Consider optional polling fallback only if webhook delivery proves insufficient or non-GitHub support becomes a goal.
 
 ## Success Criteria
 
