@@ -27,6 +27,9 @@ type Server struct {
 	GithubToken  string `yaml:"github_token"   json:"github_token,omitempty"`
 	AcmeEmail    string `yaml:"acme_email"     json:"acme_email,omitempty"`
 	Port         int    `yaml:"port,omitempty" json:"port,omitzero"`
+	// Bind is the listen address. Empty means all interfaces (":port"). Set to
+	// "127.0.0.1" to bind loopback-only when Caddy runs on the same host.
+	Bind string `yaml:"bind,omitempty" json:"bind,omitzero"`
 }
 
 type Stack struct {
@@ -152,6 +155,22 @@ func validateSecretRefGenerate(kind, name string, i int, sec SecretRef) error {
 	return nil
 }
 
+var stackNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// validateRelativePath rejects absolute paths and any ".." traversal segment,
+// confining a path to the IaC repo. Used for stack config and path sources.
+func validateRelativePath(stackName, field, p string) error {
+	if filepath.IsAbs(p) {
+		return fmt.Errorf("stack %q: %s must be a relative path within the IaC repo, got %q", stackName, field, p)
+	}
+	for _, part := range strings.Split(filepath.ToSlash(p), "/") {
+		if part == ".." {
+			return fmt.Errorf("stack %q: %s must be a relative path within the IaC repo, got %q", stackName, field, p)
+		}
+	}
+	return nil
+}
+
 func validate(cfg *Config) error {
 	if cfg.Server.Name == "" {
 		return errors.New("server.name is required")
@@ -170,6 +189,12 @@ func validate(cfg *Config) error {
 
 	for _, name := range slices.Sorted(maps.Keys(cfg.Stacks)) {
 		stack := cfg.Stacks[name]
+
+		// Stack names become filesystem directories and docker compose project
+		// names, so restrict them to a safe lowercase set.
+		if !stackNameRe.MatchString(name) {
+			return fmt.Errorf("stack %q: name must match %s (lowercase alphanumeric, '-', '_')", name, stackNameRe.String())
+		}
 
 		// Exactly one source must be set.
 		if stack.Repo == "" && stack.Path == "" {
@@ -217,13 +242,8 @@ func validate(cfg *Config) error {
 				}
 			}
 			if stack.ConfigFile != "" {
-				if filepath.IsAbs(stack.ConfigFile) {
-					return fmt.Errorf("stack %q: config must be a relative path within the IaC repo, got %q", name, stack.ConfigFile)
-				}
-				for _, part := range strings.Split(filepath.ToSlash(stack.ConfigFile), "/") {
-					if part == ".." {
-						return fmt.Errorf("stack %q: config must be a relative path within the IaC repo, got %q", name, stack.ConfigFile)
-					}
+				if err := validateRelativePath(name, "config", stack.ConfigFile); err != nil {
+					return err
 				}
 			}
 			if stack.Preview != nil && stack.Preview.Enabled {
@@ -237,6 +257,9 @@ func validate(cfg *Config) error {
 		}
 
 		if stack.Path != "" {
+			if err := validateRelativePath(name, "path", stack.Path); err != nil {
+				return err
+			}
 			if stack.Branch != "" || stack.Tag != "" || stack.TagPattern != "" {
 				return fmt.Errorf("stack %q: branch, tag, and tag_pattern are not valid for path stacks", name)
 			}

@@ -2,6 +2,8 @@ package preview
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -41,9 +43,16 @@ func SubdomainFromBranch(branch, previewDomain string) string {
 	return strings.Replace(previewDomain, "*", branchSlug(branch), 1)
 }
 
-// branchSlug converts a branch name into a DNS-safe label (max 63 chars).
+// branchSlug converts a branch name into a DNS-safe label (max 63 chars). A short
+// hash of the raw branch is appended so two branches that normalise to the same
+// label (e.g. "feature/x" and "feature-x") still get distinct, stable slugs and
+// cannot collide into the same preview directory, subdomain, or compose project.
 func branchSlug(branch string) string {
 	branch = strings.TrimPrefix(branch, "refs/heads/")
+
+	// Stable per-branch suffix to guarantee uniqueness across normalisation.
+	sum := sha256.Sum256([]byte(branch))
+	suffix := hex.EncodeToString(sum[:])[:8]
 
 	// Join path segments with "-" using iterator pattern.
 	var parts []string
@@ -52,11 +61,11 @@ func branchSlug(branch string) string {
 			parts = append(parts, part)
 		}
 	}
-	branch = strings.Join(parts, "-")
+	joined := strings.Join(parts, "-")
 
 	// Replace non-alphanumeric (except "-") with "-".
 	var b strings.Builder
-	for _, r := range branch {
+	for _, r := range joined {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
 			b.WriteRune(r)
@@ -65,11 +74,17 @@ func branchSlug(branch string) string {
 		}
 	}
 
-	slug := strings.ToLower(b.String())
-	if len(slug) > 63 {
-		slug = slug[:63]
+	label := strings.Trim(strings.ToLower(b.String()), "-")
+
+	// Reserve room for "-" + 8 hex chars within the 63-char DNS label limit.
+	const maxBase = 63 - 9
+	if len(label) > maxBase {
+		label = strings.Trim(label[:maxBase], "-")
 	}
-	return strings.Trim(slug, "-")
+	if label == "" {
+		return suffix
+	}
+	return label + "-" + suffix
 }
 
 // makeID generates a preview ID from the app name and branch.
@@ -128,19 +143,14 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		return fmt.Errorf("git: %w", err)
 	}
 
-	envVars, dockerSecrets, err := m.Secrets.Resolve(app.Secrets)
-	if err != nil {
-		return fmt.Errorf("resolving secrets: %w", err)
-	}
-
-	if err := deployer.WriteEnvFile(filepath.Join(previewDir, ".env"), envVars); err != nil {
+	// Previews intentionally receive NO secrets. A preview can be triggered by an
+	// untrusted pull request, so production secrets must never be resolved into a
+	// preview environment. Only the non-secret env_file (app.EnvFile) flows in, via
+	// envFilePaths below. We still write an empty .env so the override's env_file
+	// reference resolves.
+	var dockerSecrets map[string]string
+	if err := deployer.WriteEnvFile(filepath.Join(previewDir, ".env"), map[string]string{}); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
-	}
-
-	if len(dockerSecrets) > 0 {
-		if err := deployer.WriteDockerSecrets(filepath.Join(previewDir, "secrets"), dockerSecrets); err != nil {
-			return fmt.Errorf("writing docker secrets: %w", err)
-		}
 	}
 
 	repoDir := filepath.Join(previewDir, "repo")
@@ -353,6 +363,9 @@ func (m *PreviewManager) previewDir(id string) string {
 
 // branchExists checks whether the branch exists on the remote.
 func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, branch string) (bool, error) {
+	if err := git.ValidateRef(branch); err != nil {
+		return false, err
+	}
 	cmd := git.CmdWithAuth(ctx, m.Config.Server.GithubToken, "", "ls-remote", "--heads", git.RepoURL(app.Repo), branch)
 	out, err := cmd.Output()
 	if err != nil {

@@ -15,44 +15,54 @@ import (
 )
 
 func TestSubdomainFromBranch(t *testing.T) {
+	// The subdomain is "<normalized-label>-<8 hex>.<domain>". We assert the stable
+	// prefix and the domain suffix; the hash segment guarantees uniqueness.
 	tests := []struct {
-		branch string
-		domain string
-		want   string
+		branch     string
+		domain     string
+		wantPrefix string
 	}{
-		{
-			"feature/checkout-redesign",
-			"*.preview.basalt.solutions",
-			"feature-checkout-redesign.preview.basalt.solutions",
-		},
-		{
-			"fix/BUG-123",
-			"*.preview.basalt.solutions",
-			"fix-bug-123.preview.basalt.solutions",
-		},
-		{
-			"refs/heads/main",
-			"*.preview.basalt.solutions",
-			"main.preview.basalt.solutions",
-		},
-		{
-			"main",
-			"*.preview.basalt.solutions",
-			"main.preview.basalt.solutions",
-		},
-		{
-			"feature/my_special.branch",
-			"*.preview.basalt.solutions",
-			"feature-my-special-branch.preview.basalt.solutions",
-		},
+		{"feature/checkout-redesign", "*.preview.basalt.solutions", "feature-checkout-redesign-"},
+		{"fix/BUG-123", "*.preview.basalt.solutions", "fix-bug-123-"},
+		{"refs/heads/main", "*.preview.basalt.solutions", "main-"},
+		{"main", "*.preview.basalt.solutions", "main-"},
+		{"feature/my_special.branch", "*.preview.basalt.solutions", "feature-my-special-branch-"},
 	}
 
 	for _, tt := range tests {
 		got := SubdomainFromBranch(tt.branch, tt.domain)
-		if got != tt.want {
-			t.Errorf("SubdomainFromBranch(%q, %q) = %q, want %q",
-				tt.branch, tt.domain, got, tt.want)
+		wantSuffix := ".preview.basalt.solutions"
+		label, ok := strings.CutSuffix(got, wantSuffix)
+		if !ok {
+			t.Errorf("SubdomainFromBranch(%q) = %q, want suffix %q", tt.branch, got, wantSuffix)
+			continue
 		}
+		if !strings.HasPrefix(label, tt.wantPrefix) {
+			t.Errorf("SubdomainFromBranch(%q) label = %q, want prefix %q", tt.branch, label, tt.wantPrefix)
+		}
+		// The segment after the prefix must be an 8-char lowercase hex hash.
+		hash := strings.TrimPrefix(label, tt.wantPrefix)
+		if len(hash) != 8 {
+			t.Errorf("SubdomainFromBranch(%q): hash segment = %q, want 8 hex chars", tt.branch, hash)
+		}
+	}
+
+	// refs/heads/main and main are the same ref → identical slug (idempotent).
+	if SubdomainFromBranch("refs/heads/main", "*.x.com") != SubdomainFromBranch("main", "*.x.com") {
+		t.Error("refs/heads/main and main should produce the same subdomain")
+	}
+}
+
+func TestBranchSlugUniqueness(t *testing.T) {
+	// Distinct branches that normalise to the same label must not collide.
+	a := branchSlug("feature/x")
+	b := branchSlug("feature-x")
+	if a == b {
+		t.Errorf("colliding slugs for distinct branches: %q == %q", a, b)
+	}
+	// Same branch must be stable.
+	if branchSlug("feature/x") != a {
+		t.Error("branchSlug is not stable for the same branch")
 	}
 }
 
@@ -66,8 +76,8 @@ func TestBranchSlugTruncation(t *testing.T) {
 
 func TestBranchSlugLowercase(t *testing.T) {
 	slug := branchSlug("Fix/BUG-123")
-	if slug != "fix-bug-123" {
-		t.Errorf("got %q, want %q", slug, "fix-bug-123")
+	if !strings.HasPrefix(slug, "fix-bug-123-") {
+		t.Errorf("got %q, want prefix %q", slug, "fix-bug-123-")
 	}
 }
 
@@ -80,8 +90,8 @@ func TestBranchSlugNoLeadingTrailingHyphens(t *testing.T) {
 
 func TestMakeID(t *testing.T) {
 	id := makeID("basalt-app", "feature/checkout")
-	if id != "basalt-app-feature-checkout" {
-		t.Errorf("got %q, want %q", id, "basalt-app-feature-checkout")
+	if !strings.HasPrefix(id, "basalt-app-feature-checkout-") {
+		t.Errorf("got %q, want prefix %q", id, "basalt-app-feature-checkout-")
 	}
 }
 

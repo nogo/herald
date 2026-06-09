@@ -45,10 +45,36 @@ func RepoURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
 }
 
+// ValidateRef rejects git refs that could be misinterpreted as command-line
+// options (argument injection, e.g. "--upload-pack=...") or that contain unsafe
+// characters. It allows branch names, tag names, and full refspecs such as
+// "refs/tags/v1.2.3". Refs reaching git from webhooks (preview branches) are
+// partly attacker-influenced, so they are validated before use.
+func ValidateRef(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("empty git ref")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("invalid git ref %q: must not begin with '-'", ref)
+	}
+	for _, r := range ref {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-' || r == '/' || r == '+':
+		default:
+			return fmt.Errorf("invalid git ref %q: contains unsupported character %q", ref, string(r))
+		}
+	}
+	return nil
+}
+
 // CloneOrFetch clones the repo if dir does not exist, or fetches and hard-resets to
 // FETCH_HEAD if it does. ref may be a branch name ("main") or full tag refspec
 // ("refs/tags/v1.2.3"). Uses token-based auth.
 func CloneOrFetch(ctx context.Context, token, dir, url, ref string) error {
+	if err := ValidateRef(ref); err != nil {
+		return err
+	}
 	_, err := os.Stat(dir)
 	if os.IsNotExist(err) {
 		// git clone --branch accepts branch names and tag names, not full refspecs.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"path"
 	"slices"
@@ -57,6 +58,58 @@ func (rl *rateLimiter) Allow() bool {
 	return true
 }
 
+func (rl *rateLimiter) idleBefore(cutoff time.Time) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.last.Before(cutoff)
+}
+
+// keyedRateLimiter maintains one token-bucket limiter per key (client IP), so a
+// flood from one source cannot starve others. Idle buckets are evicted to bound
+// memory. It satisfies web.AuthFailRateLimiter.
+type keyedRateLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*rateLimiter
+	rate    float64
+	burst   int
+	ttl     time.Duration
+}
+
+func newKeyedRateLimiter(ratePerSec float64, burst int) *keyedRateLimiter {
+	return &keyedRateLimiter{
+		buckets: make(map[string]*rateLimiter),
+		rate:    ratePerSec,
+		burst:   burst,
+		ttl:     10 * time.Minute,
+	}
+}
+
+func (k *keyedRateLimiter) Allow(key string) bool {
+	k.mu.Lock()
+	rl, ok := k.buckets[key]
+	if !ok {
+		// Opportunistically evict idle buckets before adding a new one.
+		cutoff := time.Now().Add(-k.ttl)
+		for kk, b := range k.buckets {
+			if b.idleBefore(cutoff) {
+				delete(k.buckets, kk)
+			}
+		}
+		rl = newRateLimiter(k.rate, k.burst)
+		k.buckets[key] = rl
+	}
+	k.mu.Unlock()
+	return rl.Allow()
+}
+
+// clientIP returns the host portion of RemoteAddr for rate-limit keying.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 // DeployRequest carries the information needed to trigger a deploy.
 type DeployRequest struct {
 	StackName string
@@ -80,17 +133,41 @@ type Server struct {
 	OnIaCPush         func()                               // called when a push to IaCRepo is received; may be nil
 	OnPreviewDeploy   func(appName, branch, commit string) // called for preview-enabled apps on non-default branches
 	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
+
+	sem chan struct{} // bounds concurrent deploy callbacks; initialized in Handler
+}
+
+// maxConcurrentDeploys bounds how many deploy/preview callbacks run at once so a
+// burst of matched stacks cannot spawn unbounded concurrent compose/git runs.
+const maxConcurrentDeploys = 4
+
+// dispatch runs fn in a goroutine, bounded by the deploy semaphore. The goroutine
+// is spawned immediately (so the HTTP handler returns) but blocks on a slot before
+// running fn, capping concurrent deploys.
+func (s *Server) dispatch(fn func()) {
+	go func() {
+		if s.sem != nil {
+			s.sem <- struct{}{}
+			defer func() { <-s.sem }()
+		}
+		fn()
+	}()
 }
 
 // Handler returns the configured ServeMux with rate limiting.
 func (s *Server) Handler() http.Handler {
-	// Rate limit: 30 requests/minute for webhooks, 10/minute for auth failures.
-	webhookRL := newRateLimiter(0.5, 10) // 0.5/sec = 30/min, burst of 10
-	authFailRL := newRateLimiter(0.1, 5) // 0.1/sec = 6/min, burst of 5
+	// Per-IP rate limits: 30 requests/minute for webhooks, 6/minute for auth
+	// failures. Keying by client IP prevents one source from starving others.
+	webhookRL := newKeyedRateLimiter(0.5, 10) // 0.5/sec = 30/min, burst of 10
+	authFailRL := newKeyedRateLimiter(0.1, 5) // 0.1/sec = 6/min, burst of 5
+
+	if s.sem == nil {
+		s.sem = make(chan struct{}, maxConcurrentDeploys)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /webhook", func(w http.ResponseWriter, r *http.Request) {
-		if !webhookRL.Allow() {
+		if !webhookRL.Allow(clientIP(r)) {
 			slog.Warn("webhook rate limited", "remote", r.RemoteAddr)
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
 			return
@@ -136,8 +213,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var repo, branch, commit, cloneURL string
-	var isDelete bool   // true when a push event deletes a branch
-	var prAction string // pull_request action: "opened", "closed", "synchronize"
+	var isDelete bool     // true when a push event deletes a branch
+	var prAction string   // pull_request action: "opened", "closed", "synchronize"
+	var prHeadRepo string // pull_request head repo full name; differs from base on fork PRs
 
 	switch eventType {
 	case "push":
@@ -174,6 +252,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		commit = p.PullRequest.Head.SHA
 		cloneURL = p.Repository.CloneURL
 		prAction = p.Action
+		if p.PullRequest.Head.Repo != nil {
+			prHeadRepo = p.PullRequest.Head.Repo.FullName
+		}
 
 	default:
 		slog.Info("webhook", "event", eventType, "result", "event ignored")
@@ -190,24 +271,36 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if stack.Repo == "" {
 			continue
 		}
-		if stack.Repo == repo && stack.Branch == branch {
+		if strings.EqualFold(stack.Repo, repo) && stack.Branch == branch {
 			matchedNames = append(matchedNames, name)
 		}
 	}
 
 	// Check for IaC repo push (stacks auto-deploy).
-	iacPush := s.IaCRepo != "" && repo == s.IaCRepo && s.OnIaCPush != nil
+	iacPush := s.IaCRepo != "" && strings.EqualFold(repo, s.IaCRepo) && s.OnIaCPush != nil
 	if eventType == "push" && iacPush {
 		slog.Info("webhook",
 			"event", eventType,
 			"repo", repo,
 			"result", "accepted: IaC repo push",
 		)
-		go s.OnIaCPush()
+		s.dispatch(s.OnIaCPush)
 	}
 
-	// Trigger preview deploy/teardown for preview-enabled apps.
-	previewTriggered := s.handlePreviewEvent(repo, branch, commit, eventType, isDelete, prAction)
+	// Trigger preview deploy/teardown for preview-enabled apps. For pull_request
+	// events, only same-repo PRs are eligible: a fork PR's head ref/commit is
+	// attacker-controlled, so it must not spin up an environment.
+	previewTriggered := false
+	if eventType == "pull_request" && !strings.EqualFold(prHeadRepo, repo) {
+		slog.Info("webhook",
+			"event", eventType,
+			"repo", repo,
+			"head_repo", prHeadRepo,
+			"result", "ignored: preview skipped for fork PR",
+		)
+	} else {
+		previewTriggered = s.handlePreviewEvent(repo, branch, commit, eventType, isDelete, prAction)
+	}
 
 	if len(matchedNames) == 0 {
 		if iacPush {
@@ -248,7 +341,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			Commit:    commit,
 			CloneURL:  cloneURL,
 		}
-		go s.OnDeploy(req)
+		s.dispatch(func() { s.OnDeploy(req) })
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -261,7 +354,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
 	var matched []string
 	for name, stack := range s.Config.Stacks {
-		if stack.Repo == "" || stack.Repo != repo || stack.TagPattern == "" {
+		if stack.Repo == "" || !strings.EqualFold(stack.Repo, repo) || stack.TagPattern == "" {
 			continue
 		}
 		ok, err := path.Match(stack.TagPattern, tag)
@@ -288,7 +381,7 @@ func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
 			Commit:    commit,
 			CloneURL:  cloneURL,
 		}
-		go s.OnDeploy(req)
+		s.dispatch(func() { s.OnDeploy(req) })
 	}
 }
 
@@ -300,7 +393,7 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 	}
 	triggered := false
 	for name, stack := range s.Config.Stacks {
-		if stack.Repo == "" || stack.Preview == nil || !stack.Preview.Enabled || stack.Repo != repo {
+		if stack.Repo == "" || stack.Preview == nil || !stack.Preview.Enabled || !strings.EqualFold(stack.Repo, repo) {
 			continue
 		}
 		switch eventType {
@@ -312,12 +405,14 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 			if isDelete {
 				if s.OnPreviewTeardown != nil {
 					triggered = true
-					go s.OnPreviewTeardown(name, branch)
+					nm := name
+					s.dispatch(func() { s.OnPreviewTeardown(nm, branch) })
 				}
 			} else {
 				if s.OnPreviewDeploy != nil {
 					triggered = true
-					go s.OnPreviewDeploy(name, branch, commit)
+					nm := name
+					s.dispatch(func() { s.OnPreviewDeploy(nm, branch, commit) })
 				}
 			}
 		case "pull_request":
@@ -325,12 +420,14 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 			case "opened", "synchronize":
 				if s.OnPreviewDeploy != nil {
 					triggered = true
-					go s.OnPreviewDeploy(name, branch, commit)
+					nm := name
+					s.dispatch(func() { s.OnPreviewDeploy(nm, branch, commit) })
 				}
 			case "closed":
 				if s.OnPreviewTeardown != nil {
 					triggered = true
-					go s.OnPreviewTeardown(name, branch)
+					nm := name
+					s.dispatch(func() { s.OnPreviewTeardown(nm, branch) })
 				}
 			}
 		}

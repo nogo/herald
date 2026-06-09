@@ -73,6 +73,50 @@ func TestBasicAuth_Rejects(t *testing.T) {
 	}
 }
 
+// recordingLimiter records the keys passed to Allow and can be set to deny.
+type recordingLimiter struct {
+	calls []string
+	deny  bool
+}
+
+func (r *recordingLimiter) Allow(key string) bool {
+	r.calls = append(r.calls, key)
+	return !r.deny
+}
+
+func TestBasicAuth_RateLimitOnlyOnFailure(t *testing.T) {
+	h := testHandler(t, "correct")
+	rl := &recordingLimiter{}
+	mux := http.NewServeMux()
+	h.RegisterRoutesWithRateLimit(mux, rl)
+
+	// Successful auth must NOT consume a rate-limit token.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.SetBasicAuth("herald", "correct")
+	mux.ServeHTTP(httptest.NewRecorder(), req)
+	if len(rl.calls) != 0 {
+		t.Errorf("successful auth consumed limiter: %v", rl.calls)
+	}
+
+	// Failed auth consumes a token.
+	bad := httptest.NewRequest("GET", "/", nil)
+	bad.SetBasicAuth("herald", "wrong")
+	mux.ServeHTTP(httptest.NewRecorder(), bad)
+	if len(rl.calls) != 1 {
+		t.Errorf("failed auth should consume exactly one token, got %d", len(rl.calls))
+	}
+
+	// When the limiter denies, a failed attempt returns 429.
+	rl.deny = true
+	bad2 := httptest.NewRequest("GET", "/", nil)
+	bad2.SetBasicAuth("herald", "wrong")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, bad2)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("denied attempt = %d, want 429", w.Code)
+	}
+}
+
 func TestHandleStatus_OK(t *testing.T) {
 	h := testHandler(t, "secret")
 	mux := http.NewServeMux()

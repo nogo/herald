@@ -4,6 +4,29 @@ import (
 	"testing"
 )
 
+func TestValidateRef(t *testing.T) {
+	valid := []string{"main", "feature/foo-bar", "refs/tags/v1.2.3", "v1.2.3-rc.1+build", "release_2024"}
+	for _, ref := range valid {
+		if err := ValidateRef(ref); err != nil {
+			t.Errorf("ValidateRef(%q) = %v, want nil", ref, err)
+		}
+	}
+
+	invalid := []string{
+		"",                      // empty
+		"--upload-pack=/bin/sh", // option injection
+		"-x",                    // leading dash
+		"feature foo",           // space
+		"foo;rm -rf",            // shell metachar
+		"foo$bar",               // expansion char
+	}
+	for _, ref := range invalid {
+		if err := ValidateRef(ref); err == nil {
+			t.Errorf("ValidateRef(%q) = nil, want error", ref)
+		}
+	}
+}
+
 func TestRepoURL(t *testing.T) {
 	tests := []struct {
 		repo, want string

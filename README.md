@@ -160,10 +160,11 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 
 - Secrets encrypted at rest with [age](https://age-encryption.org/)
 - GitHub tokens never in URLs, process args, or logs
-- Git hooks disabled on all operations
-- Webhook HMAC-SHA256 + rate limiting
+- Git hooks disabled on all operations; webhook git refs validated
+- Webhook HMAC-SHA256 + per-IP rate limiting
 - Status page uses constant-time auth comparison
-- Systemd hardening (NoNewPrivileges, ProtectSystem, PrivateTmp)
+- Preview environments receive no secrets; fork PRs cannot trigger them
+- Systemd hardening (NoNewPrivileges, ProtectSystem, kernel/namespace restrictions)
 - Per-app Docker network isolation (only the front service joins Caddy)
 
 ## Comparison

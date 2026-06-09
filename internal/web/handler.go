@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -94,9 +95,20 @@ func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, passwo
 	}
 }
 
-// AuthFailRateLimiter is called to rate-limit authentication attempts.
+// AuthFailRateLimiter rate-limits authentication failures, keyed by client IP.
+// Allow reports whether another failed attempt is permitted for the given key.
 type AuthFailRateLimiter interface {
-	Allow() bool
+	Allow(key string) bool
+}
+
+// clientIP returns the client IP (host portion of RemoteAddr) for rate-limit
+// keying. Herald sits behind a reverse proxy; this keys on the proxy address
+// unless a trusted X-Forwarded-For story is added.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // RegisterRoutes adds the status page routes to mux (no rate limiting).
@@ -119,18 +131,18 @@ func (h *WebHandler) RegisterRoutesWithRateLimit(mux *http.ServeMux, rl AuthFail
 
 func (h *WebHandler) basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check rate limit before processing auth (prevents brute force).
-		if h.authRL != nil && !h.authRL.Allow() {
-			slog.Warn("auth rate limited", "remote", r.RemoteAddr)
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-			return
-		}
-
 		user, pass, ok := r.BasicAuth()
 		// Constant-time comparison prevents timing attacks on credentials.
 		userOK := subtle.ConstantTimeCompare([]byte(user), []byte("herald")) == 1
 		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(h.Password)) == 1
 		if !ok || !userOK || !passOK {
+			// Rate-limit failed attempts per client IP so successful page loads
+			// (and the auto-refresh) never trip the limit while brute force does.
+			if h.authRL != nil && !h.authRL.Allow(clientIP(r)) {
+				slog.Warn("auth rate limited", "remote", r.RemoteAddr)
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
 			w.Header().Set("WWW-Authenticate", `Basic realm="Herald"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

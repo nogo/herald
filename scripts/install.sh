@@ -73,11 +73,32 @@ esac
 
 info "Downloading herald for ${OS}/${ARCH}..."
 
-RELEASE_URL="https://github.com/${REPO}/releases/latest/download/herald_${OS}_${ARCH}.tar.gz"
+ARCHIVE="herald_${OS}_${ARCH}.tar.gz"
+RELEASE_URL="https://github.com/${REPO}/releases/latest/download/${ARCHIVE}"
+CHECKSUMS_URL="https://github.com/${REPO}/releases/latest/download/checksums.txt"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 $DL "$TMP/herald.tar.gz" "$RELEASE_URL" || die "Download failed. Check https://github.com/${REPO}/releases"
+
+# Verify the download against the published checksums before trusting it.
+if command -v sha256sum >/dev/null 2>&1; then
+    SHA_CMD="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    SHA_CMD="shasum -a 256"
+else
+    die "sha256sum or shasum is required to verify the download"
+fi
+
+$DL "$TMP/checksums.txt" "$CHECKSUMS_URL" || die "Could not download checksums.txt for verification"
+EXPECTED=$(grep -F "$ARCHIVE" "$TMP/checksums.txt" | head -1 | awk '{print $1}')
+[ -n "$EXPECTED" ] || die "No checksum found for $ARCHIVE in checksums.txt"
+ACTUAL=$($SHA_CMD "$TMP/herald.tar.gz" | awk '{print $1}')
+if [ "$EXPECTED" != "$ACTUAL" ]; then
+    die "Checksum mismatch for $ARCHIVE (expected $EXPECTED, got $ACTUAL) — refusing to install"
+fi
+ok "Checksum verified"
+
 tar -xzf "$TMP/herald.tar.gz" -C "$TMP"
 
 # Find the binary (GoReleaser puts it inside the archive)

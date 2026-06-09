@@ -24,6 +24,7 @@ stacks:    # optional — everything herald deploys
 | `deploy_domain` | yes | — | Domain where herald's webhook listener is reachable (e.g. `deploy.example.com`). |
 | `services_dir` | yes | — | Base directory for all deployments (e.g. `/opt/deploy`). All stacks land directly under `<name>/` (flat, no subdirectories). |
 | `port` | no | `9483` | Port herald listens on. |
+| `bind` | no | all interfaces | Listen address. Empty binds all interfaces (`:port`). Set `127.0.0.1` to bind loopback-only when Caddy runs on the same host. |
 | `acme_email` | no | `webmaster@<deploy_domain>` | Email for ACME/Let's Encrypt TLS certificate registration via Caddy. |
 | `github_token` | no | — | GitHub personal access token. Supports `${ENV_VAR}` expansion. Prefer `herald auth login` instead. |
 
@@ -286,11 +287,17 @@ Caddy provisions TLS per subdomain automatically.
 | Event | Action |
 |---|---|
 | Push to any branch other than `branch` | Deploy preview for that branch |
-| Pull request `opened` or `synchronize` | Deploy preview for PR head branch |
+| Pull request `opened` or `synchronize` (same-repo only) | Deploy preview for PR head branch |
 | Push with branch deletion | Tear down preview |
 | Pull request `closed` | Tear down preview |
 
-Branch names are slugified into DNS labels: `feature/auth-v2` → `feature-auth-v2.preview.myapp.example.com`.
+Pull requests from **forks do not trigger previews** — only same-repo branches and PRs do.
+Preview environments also receive **no secrets**: only the non-secret `config`/`env_file`
+values are injected, never resolved `secrets`. An app that requires secrets at runtime may
+not come up fully in a preview.
+
+Branch names are slugified into DNS labels with a short hash suffix for uniqueness:
+`feature/auth-v2` → `feature-auth-v2-1a2b3c4d.preview.myapp.example.com`.
 
 ### Managing previews
 

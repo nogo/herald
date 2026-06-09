@@ -177,6 +177,42 @@ func TestLoad_DuplicateDomain(t *testing.T) {
 	assertContains(t, err.Error(), "shared.example.com")
 }
 
+func TestLoad_PathTraversalRejected(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt
+stacks:
+  myapp:
+    path: ../../etc/secrets
+    domain: myapp.example.com
+`)
+	_, err := config.Load(tmp)
+	if err == nil {
+		t.Fatal("expected error for path with .. traversal")
+	}
+	assertContains(t, err.Error(), "relative path within the IaC repo")
+}
+
+func TestLoad_InvalidStackName(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt
+stacks:
+  "../evil":
+    path: stacks/x
+    domain: myapp.example.com
+`)
+	_, err := config.Load(tmp)
+	if err == nil {
+		t.Fatal("expected error for invalid stack name")
+	}
+	assertContains(t, err.Error(), "name must match")
+}
+
 func TestLoad_MissingSource(t *testing.T) {
 	tmp := writeTempConfig(t, `
 server:

@@ -82,6 +82,9 @@ Refuses to overwrite an existing key; pass --force to replace.`,
 		var value string
 		if len(args) == 2 {
 			value = args[1]
+			if value == "" {
+				return fmt.Errorf("no value provided")
+			}
 		} else if term.IsTerminal(int(os.Stdin.Fd())) {
 			// Interactive: prompt with hidden input
 			fmt.Fprintf(cmd.OutOrStdout(), "Enter value for '%s': ", key)

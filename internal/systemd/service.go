@@ -47,13 +47,28 @@ TimeoutStartSec=30
 TimeoutStopSec=30
 
 # Environment — secrets go in the environment file, never in the unit file
-EnvironmentFile=-/etc/herald/environment
+EnvironmentFile=-{{.DataDir}}/environment
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths={{.DataDir}} {{.ServicesDir}} /var/run/docker.sock {{.HomeDir}}
 PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+SystemCallArchitectures=native
+# Note: docker socket access is root-equivalent; these directives harden the
+# herald process surface but do not contain a compromised docker socket.
 
 # Logging
 StandardOutput=journal

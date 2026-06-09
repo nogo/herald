@@ -259,7 +259,7 @@ func webhookURL(cfg *config.Config) string {
 // Subscribes to pull_request if any stack referencing the repo has preview enabled.
 func eventsForRepo(cfg *config.Config, repo string) []string {
 	for _, stack := range cfg.Stacks {
-		if stack.Repo == repo && stack.Preview != nil && stack.Preview.Enabled {
+		if strings.EqualFold(stack.Repo, repo) && stack.Preview != nil && stack.Preview.Enabled {
 			return []string{"push", "pull_request"}
 		}
 	}

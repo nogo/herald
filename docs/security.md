@@ -61,20 +61,30 @@ A compromised app repo can run arbitrary code **inside its container** but canno
 | Docker secret files | 0600 | Individual secret values |
 | Compose overrides | 0644 | Caddy labels, network config (no secrets) |
 
+**Deploy directories hold cleartext secrets.** To run containers, herald writes
+resolved secret values to per-stack `.env` and Docker secret files (mode 0600)
+under `services_dir`. These are unencrypted on disk. Protect `services_dir` and
+**exclude it from backups**, or encrypt those backups — anyone who can read a
+deploy directory can read that stack's secrets.
+
 ## Network Security
 
 ### Webhook endpoint
 
 - **HMAC-SHA256 signature verification** on every request (constant-time comparison via `hmac.Equal`)
 - **10 MB body size limit** prevents memory exhaustion
-- **Rate limited**: 30 requests/minute with burst of 10
-- Payload repo names are matched against config — unknown repos are ignored
+- **Rate limited per client IP**: 30 requests/minute with burst of 10 (one source cannot starve others)
+- Payload repo names are matched against config (case-insensitive) — unknown repos are ignored
 - Webhook payloads cannot trigger arbitrary commands; only configured apps/stacks are deployable
+- Git refs from webhooks are validated (no leading `-`, restricted charset) to prevent argument injection
+- **Preview environments receive no secrets**, and previews are only triggered by same-repo
+  pushes/PRs — a pull request from a fork cannot spin up a preview
 
 ### Status page
 
-- **HTTP Basic Auth** with constant-time password comparison (`crypto/subtle`)
-- **Rate limited**: 6 auth attempts/minute with burst of 5
+- **HTTP Basic Auth** with constant-time comparison of both username and password (`crypto/subtle`)
+- An empty/unset status password disables the page entirely (no blank-password bypass)
+- **Rate limited per client IP**, counted only on failed attempts: 6 failures/minute with burst of 5
 - Error responses never expose Docker internals
 - Behind Caddy TLS — credentials encrypted in transit
 - **Recommendation**: Use a strong, random password (`openssl rand -base64 32`)

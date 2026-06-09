@@ -25,6 +25,38 @@ func initedStore(t *testing.T) *Store {
 	return s
 }
 
+// TestResolve_RejectsNewlineInEnvValue verifies that a secret value containing a
+// newline is rejected for env targets (a .env file cannot represent it safely),
+// but accepted for docker-secret targets (written to a standalone file).
+func TestResolve_RejectsNewlineInEnvValue(t *testing.T) {
+	s := initedStore(t)
+	if err := s.Set("app/multiline", "line1\nINJECTED=true"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// env target → rejected.
+	_, _, err := s.Resolve([]config.SecretRef{
+		{Key: "app/multiline", Type: "env", Target: "PASSWORD"},
+	})
+	if err == nil {
+		t.Fatal("expected error for newline in env secret value, got nil")
+	}
+	if !strings.Contains(err.Error(), "newline") {
+		t.Errorf("error = %q, want it to mention 'newline'", err.Error())
+	}
+
+	// docker-secret target → accepted (file-based, arbitrary bytes are fine).
+	_, dockerSecrets, err := s.Resolve([]config.SecretRef{
+		{Key: "app/multiline", Type: "docker-secret", Target: "ssl_key"},
+	})
+	if err != nil {
+		t.Fatalf("docker-secret with newline should be allowed: %v", err)
+	}
+	if dockerSecrets["ssl_key"] != "line1\nINJECTED=true" {
+		t.Errorf("docker secret value not preserved: %q", dockerSecrets["ssl_key"])
+	}
+}
+
 // TestInit_GeneratesKey verifies that Init creates the key file with 0600 perms.
 func TestInit_GeneratesKey(t *testing.T) {
 	s := newTestStore(t)

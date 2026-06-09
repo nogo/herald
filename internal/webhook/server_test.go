@@ -193,6 +193,69 @@ func TestPullRequestEvent(t *testing.T) {
 	}
 }
 
+func TestPreviewPullRequestSameRepo(t *testing.T) {
+	type previewEvent struct{ name, branch string }
+	called := make(chan previewEvent, 1)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{
+				"myapp": {Repo: "nogo/myapp", Branch: "main", Preview: &config.PreviewConfig{Enabled: true}},
+			},
+		},
+		Secret:          testSecret,
+		OnDeploy:        func(webhook.DeployRequest) {},
+		OnPreviewDeploy: func(name, branch, commit string) { called <- previewEvent{name, branch} },
+	}
+
+	// PR opened from a branch in the SAME repo (head.repo.full_name == base) → preview fires.
+	body := []byte(`{"action":"opened","number":2,"pull_request":{"head":{"ref":"feature-pr","sha":"def456","repo":{"full_name":"nogo/myapp"}},"base":{"ref":"main"}},"repository":{"full_name":"nogo/myapp","clone_url":"https://github.com/nogo/myapp.git"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "pull_request",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	select {
+	case ev := <-called:
+		if ev.name != "myapp" || ev.branch != "feature-pr" {
+			t.Errorf("preview event = %+v, want {myapp feature-pr}", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout: same-repo PR should trigger a preview deploy")
+	}
+}
+
+func TestPreviewPullRequestForkIgnored(t *testing.T) {
+	called := make(chan struct{}, 1)
+	srv := &webhook.Server{
+		Config: &config.Config{
+			Stacks: map[string]config.Stack{
+				"myapp": {Repo: "nogo/myapp", Branch: "main", Preview: &config.PreviewConfig{Enabled: true}},
+			},
+		},
+		Secret:          testSecret,
+		OnDeploy:        func(webhook.DeployRequest) {},
+		OnPreviewDeploy: func(name, branch, commit string) { called <- struct{}{} },
+	}
+
+	// PR opened from a FORK (head.repo.full_name != base) → preview must NOT fire.
+	body := []byte(`{"action":"opened","number":3,"pull_request":{"head":{"ref":"evil","sha":"def456","repo":{"full_name":"attacker/myapp"}},"base":{"ref":"main"}},"repository":{"full_name":"nogo/myapp","clone_url":"https://github.com/nogo/myapp.git"}}`)
+	rec := post(srv.Handler(), "/webhook", body, map[string]string{
+		"X-GitHub-Event":      "pull_request",
+		"X-Hub-Signature-256": sign(body),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	select {
+	case <-called:
+		t.Fatal("fork PR must not trigger a preview deploy")
+	case <-time.After(100 * time.Millisecond):
+		// expected: no callback
+	}
+}
+
 func TestHMACConstantTimeComparison(t *testing.T) {
 	// Verify that a signature computed with a different secret is rejected.
 	body := []byte(`{"ref":"refs/heads/main","after":"abc123","repository":{"full_name":"nogo/budget-app"},"pusher":{"name":"test"}}`)

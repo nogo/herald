@@ -61,7 +61,7 @@ var serveCmd = &cobra.Command{
 
 		// Set up status page if password is configured.
 		var webHandler *web.WebHandler
-		if statusPass, err := store.Get("herald/status_password"); err == nil {
+		if statusPass, err := store.Get("herald/status_password"); err == nil && statusPass != "" {
 			caddyMgr := &caddy.CaddyManager{
 				Config:     Cfg,
 				Logger:     slog.Default(),
@@ -108,7 +108,7 @@ var serveCmd = &cobra.Command{
 			},
 		}
 
-		addr := fmt.Sprintf(":%d", listenPort)
+		addr := fmt.Sprintf("%s:%d", Cfg.Server.Bind, listenPort)
 		httpSrv := &http.Server{
 			Addr:    addr,
 			Handler: srv.Handler(),

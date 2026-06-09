@@ -39,6 +39,7 @@ type PullRequest struct {
 
 // PRRef is a branch ref within a pull request.
 type PRRef struct {
-	Ref string `json:"ref"` // branch name
-	SHA string `json:"sha"`
+	Ref  string      `json:"ref"` // branch name
+	SHA  string      `json:"sha"`
+	Repo *Repository `json:"repo"` // head/base repo; head.repo differs from base on fork PRs (may be null if deleted)
 }

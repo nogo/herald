@@ -123,6 +123,29 @@ func TestGenerateUnitFile_customServicesDir(t *testing.T) {
 	}
 }
 
+func TestGenerateUnitFile_environmentFileFromDataDir(t *testing.T) {
+	cfg := ServiceConfig{
+		BinaryPath:  "/usr/local/bin/herald",
+		ConfigPath:  "/srv/herald/config.yml",
+		DataDir:     "/srv/herald",
+		User:        "herald",
+		Group:       "herald",
+		ServicesDir: "/opt/deploy",
+	}
+	got := GenerateUnitFile(cfg)
+
+	// EnvironmentFile must track the configured DataDir, not a hardcoded path.
+	if !strings.Contains(got, "EnvironmentFile=-/srv/herald/environment") {
+		t.Errorf("EnvironmentFile not derived from DataDir, got:\n%s", got)
+	}
+	// Hardening directives present.
+	for _, want := range []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "ProtectKernelModules=true", "LockPersonality=true"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("unit file missing hardening directive %q", want)
+		}
+	}
+}
+
 func TestIsInstalled_false(t *testing.T) {
 	// In a test environment the unit file should not be present.
 	// This test verifies the function returns false when the file is absent.

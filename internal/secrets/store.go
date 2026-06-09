@@ -285,8 +285,11 @@ func GenerateSecret(encoding string, n int) (string, error) {
 // generateSecret produces a cryptographically random value using the given
 // encoding. n is the number of source random bytes (minimum 1).
 func generateSecret(encoding string, n int) (string, error) {
+	const minGeneratedLen = 16 // defense-in-depth floor; config validation also enforces >=16
 	if n <= 0 {
 		n = 32
+	} else if n < minGeneratedLen {
+		n = minGeneratedLen
 	}
 	switch encoding {
 	case "base64":
@@ -369,6 +372,11 @@ func (s *Store) Resolve(refs []config.SecretRef) (envVars map[string]string, doc
 		}
 		switch ref.Type {
 		case "env":
+			// A .env file is line-oriented with no escaping; a newline in a value
+			// would inject additional KEY=VALUE entries into the container env.
+			if strings.ContainsAny(val, "\r\n") {
+				return nil, nil, fmt.Errorf("secret %q: value for env target %q contains a newline, which cannot be represented in a .env file", ref.Key, ref.Target)
+			}
 			envVars[ref.Target] = val
 		case "docker-secret":
 			dockerSecrets[ref.Target] = val

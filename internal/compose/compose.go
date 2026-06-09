@@ -213,6 +213,9 @@ func WriteEnvFile(root *os.Root, envVars map[string]string) error {
 	}
 	defer f.Close()
 	for _, key := range slices.Sorted(maps.Keys(envVars)) {
+		if strings.ContainsAny(envVars[key], "\r\n") {
+			return fmt.Errorf("env value for %q contains a newline, which cannot be represented in a .env file", key)
+		}
 		if _, err := fmt.Fprintf(f, "%s=%s\n", key, envVars[key]); err != nil {
 			return err
 		}
