@@ -117,14 +117,15 @@ This is not implemented yet.
 When `herald serve` starts, it should perform a startup maintenance pass:
 
 - pull the server IaC repo
-- reload config
+- reload and validate config (apply only if valid; a broken push must not take down wiring)
 - ensure Caddy is running
-- sync GitHub webhooks
+- reconcile GitHub webhooks (create missing, delete stale)
 - write webhook status for `herald status`
 - check required secrets
 - detect orphaned Herald compose projects
 - optionally clean stale previews
-- deploy path stacks with `auto_deploy: true` if their source changed
+- redeploy path stacks with `auto_deploy: true` whose source changed
+- report undeployed stacks (first deploy stays manual; see "Deferred" below)
 
 This makes reboots and service restarts self-healing.
 
@@ -144,12 +145,12 @@ The next step is not adding the first IaC webhook. The next step is extracting t
 When the server IaC repo receives a push webhook, Herald should run the same maintenance path immediately:
 
 - pull the server repo with fast-forward only
-- reload config
-- sync webhooks, because the set of repos may have changed
+- reload and validate config
+- reconcile webhooks: create for new repos, delete stale hooks for repos removed or whose `repo:` changed
 - ensure Caddy is running
 - write an operational report
-- auto-deploy changed path stacks with `auto_deploy: true`
-- report stacks blocked by missing secrets
+- redeploy changed path stacks with `auto_deploy: true`
+- report undeployed stacks and stacks blocked by missing secrets (first deploy stays manual)
 
 This is the core automation path. If the admin changes `config.yml` and pushes, Herald should react without SSH.
 
@@ -197,18 +198,27 @@ internal/maintenance
   Report contains caddy, webhooks, stacks, secrets, orphans, previews, errors
 ```
 
-The package should not depend on Cobra or stdout. Commands and daemon handlers should render/log the returned report.
+Requirements:
+
+- The package must not depend on Cobra or stdout. Commands and daemon handlers
+  render/log the returned report.
+- The pass is single-flight: concurrent triggers (overlapping IaC pushes) coalesce
+  into one run.
+- Config is validated before it is applied; an invalid config blocks deploys but
+  leaves existing wiring untouched.
+- `Options` carry per-context behavior: pull on/off, webhook reconcile full/delta,
+  redeploy policy, and block-on-deploys for the CLI.
 
 ### Safe Automated Actions
 
 Automated maintenance may do Herald-owned wiring:
 
 - pull the server repo with fast-forward only on IaC webhook, startup recovery, manual sync, or optional polling
-- reload valid config
+- reload config only when it validates
 - ensure Caddy container/network exists
-- sync GitHub webhooks
+- reconcile GitHub webhooks (create missing, delete stale, including when a stack's `repo:` changes)
 - update Herald status/report files
-- auto-deploy changed path stacks with `auto_deploy: true`
+- redeploy changed path stacks with `auto_deploy: true`
 - clean previews when their branch is deleted, if enabled/configured
 
 Automated maintenance should not:
@@ -216,9 +226,65 @@ Automated maintenance should not:
 - remove unknown containers automatically
 - delete volumes
 - deploy every repo stack just because a remote commit exists
+- first-deploy undeployed stacks (first deploy is manual, pending secret setup)
+- destroy stacks or remove deploy directories
 - mutate config files
 - rotate secrets
 - hide failed checks
+
+### Deploy Decisions In The Pass
+
+The pass surveys every stack and acts by this matrix. The only automated deploy is
+a changed `auto_deploy` path stack; everything else is reported, not actioned.
+
+| Stack state | Action |
+|---|---|
+| Missing required secret | report + fix command, never deploy |
+| Undeployed (no deploy dir) | report only — first deploy is manual |
+| Path, `auto_deploy`, subtree changed since deploy record, secrets ok | redeploy |
+| Repo, deployed, remote ahead | report only — deploys via its own app-repo webhook (gated by `auto_deploy`, see below) |
+| Deployed but stopped | report only — Docker owns runtime |
+| In Docker, not in config (orphan) | report only — surface fix command |
+
+### Per-Stack Deploy Record And Change Detection
+
+Source of truth stays git + Docker. To decide whether a path stack changed,
+Herald records the IaC commit it was last deployed at (extend the existing
+repo-stack `deployed_ref` stamp to path stacks). On a pass it redeploys a path
+stack only when `git diff <deployed_ref>..HEAD -- <path>` is non-empty. A missing
+record means deploy-once to establish the stamp. This also fixes forgotten failed
+deploys: detection is "since last successful deploy", not "since last pull".
+
+### Repo-Stack `auto_deploy` Gate
+
+`auto_deploy` is currently a path-stack-only field. Repo stacks always deploy on a
+matching app-repo push. Consider making `auto_deploy` a gate on repo stacks too, so
+one semantic — "should a matching source event auto-deploy this stack?" — covers
+both source types.
+
+Constraints:
+
+- Default must stay `true` for repo stacks, or git-to-production breaks and existing
+  configs change behavior silently.
+- Default stays `false` for path stacks (an IaC push is a config change, not
+  necessarily intent to redeploy that stack).
+- The gate lives in the webhook push handler, not the maintenance pass — the pass
+  never deploys repo stacks. So this is a separable change from the sync extraction.
+- Open question: should a `tag_pattern` match bypass the gate? A tag push is already
+  an explicit release signal, so gating it behind `auto_deploy` may be redundant.
+  Leaning: `auto_deploy` gates branch pushes; tag matches and manual `herald deploy`
+  always deploy.
+
+### Deferred: First Deploy And Destroy
+
+First deploy stays a manual `herald deploy <stack>` step. Bringing up a new stack
+needs secret preparation and other setup the daemon should not guess at, so the
+pass reports undeployed stacks instead of deploying them.
+
+Teardown is also manual. Today only `herald down` exists (stops containers, keeps
+deploy dir and volumes). A future explicit `herald destroy <stack>` (down + remove
+deploy dir, `--volumes` opt-in) is the right fix command for an orphan, but it is
+out of scope for now and never invoked automatically.
 
 ## Priority 2: `herald doctor`
 
@@ -606,18 +672,21 @@ If a command only saves typing `docker compose -p herald-<name> ...`, it should 
 
 ## Recommended Implementation Order
 
-1. Extract current `cmd/sync.go` behavior into an internal maintenance package.
+1. Extract current `cmd/sync.go` behavior into an internal maintenance package (single-flight, validate-before-apply).
 2. Make `herald sync` call that package and print a human summary.
-3. Update IaC push handling to call the same maintenance path.
-4. Run maintenance once at `herald serve` startup.
-5. Fix status read-side gaps: include the IaC repo webhook and render path stacks correctly.
-6. Add a public-safe availability badge endpoint separate from the private status page.
-7. Persist `last-sync.json` or an equivalent maintenance report.
-8. Build `herald doctor` from the maintenance report plus deeper read-only checks.
-9. Keep app repo webhooks, preview webhooks, and the existing IaC repo webhook reconciled during init/sync.
-10. Add `herald init --install`.
-11. Add `herald init --deploy` once doctor output can clearly explain blocked stacks.
-12. Consider optional polling fallback only if webhook delivery proves insufficient or non-GitHub support becomes a goal.
+3. Add pruning webhook reconciliation (delete stale hooks when a repo is removed or its `repo:` changes).
+4. Add a per-stack deploy record for path stacks and subtree change detection so only changed `auto_deploy` path stacks redeploy.
+5. Update IaC push handling to call the same maintenance path.
+6. Run maintenance once at `herald serve` startup.
+7. Fix status read-side gaps: include the IaC repo webhook and render path stacks correctly.
+8. Add a public-safe availability badge endpoint separate from the private status page.
+9. Persist `last-sync.json` or an equivalent maintenance report.
+10. Build `herald doctor` from the maintenance report plus deeper read-only checks.
+11. Keep app repo webhooks, preview webhooks, and the existing IaC repo webhook reconciled during init/sync.
+12. Consider a repo-stack `auto_deploy` gate (default true) in the webhook push handler.
+13. Add `herald init --install`.
+14. Defer first-deploy automation (`herald init --deploy`) and `herald destroy` until secret setup and teardown semantics are designed; keep both manual for now.
+15. Consider optional polling fallback only if webhook delivery proves insufficient or non-GitHub support becomes a goal.
 
 ## Success Criteria
 

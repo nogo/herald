@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/caddy"
@@ -27,6 +28,19 @@ type StatusCollector struct {
 	Logger  *slog.Logger
 	Caddy   *caddy.CaddyManager
 	Preview *preview.PreviewManager
+
+	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
+	LiveConfig *atomic.Pointer[config.Config]
+}
+
+// cfg returns the live config snapshot, preferring LiveConfig when set.
+func (c *StatusCollector) cfg() *config.Config {
+	if c.LiveConfig != nil {
+		if cf := c.LiveConfig.Load(); cf != nil {
+			return cf
+		}
+	}
+	return c.Config
 }
 
 // ServerStatus holds a complete snapshot of the server's runtime state.
@@ -94,6 +108,26 @@ func WebhookStatePath(dataDir string) string {
 	return filepath.Join(dataDir, "webhooks.json")
 }
 
+// LoadWebhookState reads webhooks.json. Returns an empty state (not an error) if
+// the file does not exist, so callers can treat "never synced" as "no known hooks".
+func LoadWebhookState(path string) (*WebhookState, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return &WebhookState{Repos: map[string]WebhookEntry{}}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading webhook state: %w", err)
+	}
+	var state WebhookState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("parsing webhook state: %w", err)
+	}
+	if state.Repos == nil {
+		state.Repos = map[string]WebhookEntry{}
+	}
+	return &state, nil
+}
+
 // SaveWebhookState writes the webhook state to disk atomically.
 func SaveWebhookState(path string, state *WebhookState) error {
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -114,8 +148,9 @@ func SaveWebhookState(path string, state *WebhookState) error {
 // Collect gathers live status from all sources concurrently.
 // It completes within 10 seconds even with many services.
 func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
+	cfg := c.cfg()
 	s := &ServerStatus{
-		ServerName: c.Config.Server.Name,
+		ServerName: cfg.Server.Name,
 	}
 
 	// Caddy status.
@@ -134,12 +169,12 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 	}
 
 	// Stack statuses (concurrent).
-	stackNames := slices.Sorted(maps.Keys(c.Config.Stacks))
+	stackNames := slices.Sorted(maps.Keys(cfg.Stacks))
 	stackStatuses := make([]StackStatus, len(stackNames))
 	var wg sync.WaitGroup
 	for i, name := range stackNames {
 		wg.Go(func() {
-			stackStatuses[i] = c.collectStackStatus(ctx, name, c.Config.Stacks[name])
+			stackStatuses[i] = c.collectStackStatus(ctx, name, cfg.Stacks[name])
 		})
 	}
 	wg.Wait()
@@ -182,7 +217,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 		s.Source = "repo"
 	}
 
-	deployDir := filepath.Join(c.Config.Server.ServicesDir, name)
+	deployDir := filepath.Join(c.cfg().Server.ServicesDir, name)
 	if _, err := os.Stat(deployDir); os.IsNotExist(err) {
 		s.State = "not deployed"
 		return s
@@ -211,7 +246,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 }
 
 func (c *StatusCollector) collectWebhookStatuses() ([]WebhookStatus, time.Time) {
-	repos := uniqueRepos(c.Config)
+	repos := uniqueRepos(c.cfg())
 	wsPath := WebhookStatePath(c.DataDir)
 
 	data, err := os.ReadFile(wsPath)

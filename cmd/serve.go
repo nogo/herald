@@ -11,12 +11,15 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	githelper "github.com/nogo/herald/internal/git"
+	"github.com/nogo/herald/internal/maintenance"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/status"
@@ -45,18 +48,25 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("webhook secret not configured. Run: herald secret set herald/webhook_secret")
 		}
 
+		// live is the authoritative config shared by every daemon component. The
+		// maintenance pass publishes reloads here so handlers never race a swap.
+		live := &atomic.Pointer[config.Config]{}
+		live.Store(Cfg)
+
 		d := &deployer.Deployer{
-			Config:  Cfg,
-			Secrets: store,
-			Logger:  slog.Default(),
-			DataDir: dataDir,
+			Config:     Cfg,
+			LiveConfig: live,
+			Secrets:    store,
+			Logger:     slog.Default(),
+			DataDir:    dataDir,
 		}
 
 		previewMgr := &preview.PreviewManager{
-			Config:  Cfg,
-			Secrets: store,
-			DataDir: dataDir,
-			Logger:  slog.Default(),
+			Config:     Cfg,
+			LiveConfig: live,
+			Secrets:    store,
+			DataDir:    dataDir,
+			Logger:     slog.Default(),
 		}
 
 		// Set up status page if password is configured.
@@ -68,11 +78,12 @@ var serveCmd = &cobra.Command{
 				HeraldPort: listenPort,
 			}
 			collector := &status.StatusCollector{
-				Config:  Cfg,
-				DataDir: dataDir,
-				Logger:  slog.Default(),
-				Caddy:   caddyMgr,
-				Preview: previewMgr,
+				Config:     Cfg,
+				LiveConfig: live,
+				DataDir:    dataDir,
+				Logger:     slog.Default(),
+				Caddy:      caddyMgr,
+				Preview:    previewMgr,
 			}
 			webHandler = web.NewWebHandler(collector, Cfg, statusPass, slog.Default())
 			if webHandler != nil {
@@ -82,16 +93,40 @@ var serveCmd = &cobra.Command{
 			slog.Info("status page disabled: run 'herald secret set herald/status_password <password>' to enable")
 		}
 
+		runner := &maintenance.Runner{
+			DataDir:    dataDir,
+			Logger:     slog.Default(),
+			Secrets:    store,
+			Deployer:   d,
+			Live:       live,
+			Reload:     func() (*config.Config, error) { return LoadConfigWithToken(cfgFile, dataDir) },
+			IaCRepo:    getIaCRepo(dataDir),
+			HeraldPort: listenPort,
+		}
+
 		srv := &webhook.Server{
-			Config:  Cfg,
-			Secret:  secret,
-			Verbose: verbose,
-			Web:     webHandler,
+			Config:     Cfg,
+			LiveConfig: live,
+			Secret:     secret,
+			Verbose:    verbose,
+			Web:        webHandler,
 			OnDeploy: func(req webhook.DeployRequest) {
 				d.DeployAsync(req.StackName, req.Ref)
 			},
-			IaCRepo:   getIaCRepo(dataDir),
-			OnIaCPush: makeIaCPushHandler(d),
+			IaCRepo: getIaCRepo(dataDir),
+			OnIaCPush: func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer cancel()
+				rep := runner.Run(ctx, maintenance.Options{
+					Pull:            true,
+					Webhooks:        maintenance.ReconcileDelta,
+					RedeployChanged: true,
+				})
+				slog.Info("IaC push: maintenance pass complete",
+					"webhooks_created", rep.Webhooks.Created,
+					"webhooks_pruned", rep.Webhooks.Pruned,
+					"orphans", len(rep.Orphans))
+			},
 			OnPreviewDeploy: func(appName, branch, commit string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer cancel()
@@ -128,6 +163,25 @@ var serveCmd = &cobra.Command{
 				slog.Error("server error", "error", err)
 				stop()
 			}
+		}()
+
+		// Startup maintenance pass: recover any server-repo changes missed while
+		// the daemon was offline. Runs in the background so the webhook endpoint is
+		// immediately responsive.
+		go func() {
+			mctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+			defer cancel()
+			rep := runner.Run(mctx, maintenance.Options{
+				Pull:            true,
+				Webhooks:        maintenance.ReconcileFull,
+				RedeployChanged: true,
+			})
+			slog.Info("startup maintenance complete",
+				"caddy", rep.Caddy,
+				"webhooks_synced", rep.Webhooks.Synced,
+				"webhooks_created", rep.Webhooks.Created,
+				"webhooks_pruned", rep.Webhooks.Pruned,
+				"orphans", len(rep.Orphans))
 		}()
 
 		<-ctx.Done()
@@ -175,45 +229,13 @@ func parseGitHubRepo(rawURL string) string {
 	return ""
 }
 
-// makeIaCPushHandler returns a function that pulls the IaC repo, reloads config,
-// and triggers auto-deploy for path stacks with auto_deploy: true.
-func makeIaCPushHandler(d *deployer.Deployer) func() {
-	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		// 1. Pull the latest IaC repo.
-		repoDir := filepath.Join(dataDir, "repo")
-		slog.Info("IaC push: pulling latest config")
-		token := resolveToken()
-		if output, err := githelper.PullFFOnly(ctx, token, repoDir); err != nil {
-			slog.Error("IaC push: git pull failed", "error", err, "output", output)
-			return
-		}
-
-		// 2. Reload config.
-		newCfg, err := LoadConfigWithToken(cfgFile, dataDir)
-		if err != nil {
-			slog.Error("IaC push: config reload failed", "error", err)
-			return
-		}
-		Cfg = newCfg
-		d.Config = newCfg
-		slog.Info("IaC push: config reloaded")
-
-		// 3. Auto-deploy path stacks with auto_deploy: true.
-		for name, stack := range newCfg.Stacks {
-			if stack.Path == "" {
-				continue
-			}
-			if stack.AutoDeploy {
-				slog.Info("IaC push: auto-deploying stack", "stack", name)
-				d.DeployAsync(name, "")
-			} else {
-				slog.Info("IaC push: stack updated in repo (no auto-deploy)", "stack", name)
-			}
-		}
+// effectivePort returns the port Herald listens on: the configured port, or the
+// default if unset. Used to generate Caddy's herald upstream when ensuring Caddy.
+func effectivePort() int {
+	if Cfg != nil && Cfg.Server.Port != 0 {
+		return Cfg.Server.Port
 	}
+	return 9483
 }
 
 func init() {

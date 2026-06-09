@@ -33,8 +33,23 @@ type Deployer struct {
 	DataDir string // path to herald data dir (e.g. /etc/herald); IaC repo lives at DataDir/repo
 	UI      ui.UI  // optional; nil defaults to ui.Nop()
 
+	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
+	// The daemon shares one pointer across components and publishes reloads to it,
+	// so reads are race-free under concurrent config swaps. CLI callers leave it nil.
+	LiveConfig *atomic.Pointer[config.Config]
+
 	stackLocks sync.Map // string → *stackLock
 	wg         sync.WaitGroup
+}
+
+// cfg returns the live config snapshot, preferring LiveConfig when set.
+func (d *Deployer) cfg() *config.Config {
+	if d.LiveConfig != nil {
+		if c := d.LiveConfig.Load(); c != nil {
+			return c
+		}
+	}
+	return d.Config
 }
 
 func (d *Deployer) ui() ui.UI {
@@ -97,7 +112,8 @@ func effectiveRef(stack config.Stack, override string) string {
 
 // Deploy executes a full deploy for the named stack.
 func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
-	stack, ok := d.Config.Stacks[stackName]
+	cfg := d.cfg()
+	stack, ok := cfg.Stacks[stackName]
 	if !ok {
 		return fmt.Errorf("stack %q not found in config", stackName)
 	}
@@ -145,7 +161,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		return deployErr
 	}
 
-	deployDir := filepath.Join(d.Config.Server.ServicesDir, stackName)
+	deployDir := filepath.Join(cfg.Server.ServicesDir, stackName)
 	d.Logger.Info("deploy started", "stack", stackName, "dir", deployDir)
 
 	if err := os.MkdirAll(deployDir, 0755); err != nil {
@@ -312,16 +328,37 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		}
 	}
 
-	// Write deployed ref for repo stacks only.
+	// Write deployed ref. Repo stacks record their own HEAD; path stacks record
+	// the IaC repo commit they were deployed from, so a later pass can detect
+	// whether the stack's subtree changed.
 	if stack.Repo != "" {
 		deployRef := effectiveRef(stack, ref)
 		if commit, err := readDeployedCommit(repoDir); err == nil {
 			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
 		}
+	} else {
+		iacRepoDir := filepath.Join(d.DataDir, "repo")
+		if commit, err := readDeployedCommit(iacRepoDir); err == nil {
+			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte("path@"+commit), 0644)
+		}
 	}
 
 	d.Logger.Info("deploy complete", "stack", stackName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
+}
+
+// ReadDeployedIaCCommit returns the IaC commit a path stack was last deployed
+// from, read from <deployDir>/deployed_ref (format "path@<commit>"). Returns ""
+// if the stack has no record or is not a path stack.
+func ReadDeployedIaCCommit(deployDir string) string {
+	data, err := os.ReadFile(filepath.Join(deployDir, "deployed_ref"))
+	if err != nil {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "path@"); ok {
+		return rest
+	}
+	return ""
 }
 
 // readDeployedCommit returns the short HEAD commit hash of the given repo dir.
@@ -339,7 +376,7 @@ func readDeployedCommit(repoDir string) (string, error) {
 func (d *Deployer) gitSync(ctx context.Context, deployDir string, stack config.Stack, ref string) error {
 	repoDir := filepath.Join(deployDir, "repo")
 	d.Logger.Info("git sync", "repo", stack.Repo, "ref", ref)
-	return git.CloneOrFetch(ctx, d.Config.Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
+	return git.CloneOrFetch(ctx, d.cfg().Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
 }
 
 // symlinkSource creates <deployDir>/repo as a symlink pointing to <iacRepoDir>/<stack.Path>.
@@ -426,7 +463,7 @@ func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes boo
 		u.Done(stackName, downErr, time.Since(start))
 	}()
 
-	cctx, err := compose.ResolveStack(d.Config, stackName)
+	cctx, err := compose.ResolveStack(d.cfg(), stackName)
 	if err != nil {
 		downErr = err
 		return downErr

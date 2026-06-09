@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/config"
@@ -134,7 +135,21 @@ type Server struct {
 	OnPreviewDeploy   func(appName, branch, commit string) // called for preview-enabled apps on non-default branches
 	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
 
+	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
+	// Lets the daemon publish reloaded config without racing in-flight handlers.
+	LiveConfig *atomic.Pointer[config.Config]
+
 	sem chan struct{} // bounds concurrent deploy callbacks; initialized in Handler
+}
+
+// conf returns the live config snapshot, preferring LiveConfig when set.
+func (s *Server) conf() *config.Config {
+	if s.LiveConfig != nil {
+		if c := s.LiveConfig.Load(); c != nil {
+			return c
+		}
+	}
+	return s.Config
 }
 
 // maxConcurrentDeploys bounds how many deploy/preview callbacks run at once so a
@@ -266,8 +281,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("webhook payload", "event", eventType, "repo", repo, "branch", branch, "bodyLen", len(body))
 	}
 
+	cfg := s.conf()
+
 	var matchedNames []string
-	for name, stack := range s.Config.Stacks {
+	for name, stack := range cfg.Stacks {
 		if stack.Repo == "" {
 			continue
 		}
@@ -331,7 +348,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	)
 
 	for _, name := range matchedNames {
-		stack := s.Config.Stacks[name]
+		stack := cfg.Stacks[name]
 		req := DeployRequest{
 			StackName: name,
 			Stack:     stack,
@@ -352,8 +369,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 // handleTagPush matches a tag name against each stack's tag_pattern and dispatches deploys.
 func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
+	cfg := s.conf()
 	var matched []string
-	for name, stack := range s.Config.Stacks {
+	for name, stack := range cfg.Stacks {
 		if stack.Repo == "" || !strings.EqualFold(stack.Repo, repo) || stack.TagPattern == "" {
 			continue
 		}
@@ -371,7 +389,7 @@ func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
 	slog.Info("webhook", "event", "push", "tag", tag,
 		"result", fmt.Sprintf("accepted: %s", strings.Join(matched, ",")))
 	for _, name := range matched {
-		stack := s.Config.Stacks[name]
+		stack := cfg.Stacks[name]
 		req := DeployRequest{
 			StackName: name,
 			Stack:     stack,
@@ -392,7 +410,7 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 		return false
 	}
 	triggered := false
-	for name, stack := range s.Config.Stacks {
+	for name, stack := range s.conf().Stacks {
 		if stack.Repo == "" || stack.Preview == nil || !stack.Preview.Enabled || !strings.EqualFold(stack.Repo, repo) {
 			continue
 		}

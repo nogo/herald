@@ -344,3 +344,28 @@ func TestDown_StackNotFound(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestReadDeployedIaCCommit(t *testing.T) {
+	dir := t.TempDir()
+
+	// No file → empty.
+	if got := ReadDeployedIaCCommit(dir); got != "" {
+		t.Errorf("no record: got %q, want \"\"", got)
+	}
+
+	// Path-stack record: "path@<commit>".
+	if err := os.WriteFile(filepath.Join(dir, "deployed_ref"), []byte("path@abc1234\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadDeployedIaCCommit(dir); got != "abc1234" {
+		t.Errorf("path record: got %q, want \"abc1234\"", got)
+	}
+
+	// Repo-stack record ("ref@commit") is not an IaC commit → empty.
+	if err := os.WriteFile(filepath.Join(dir, "deployed_ref"), []byte("main@def5678"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadDeployedIaCCommit(dir); got != "" {
+		t.Errorf("repo record: got %q, want \"\"", got)
+	}
+}

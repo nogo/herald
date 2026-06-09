@@ -15,6 +15,11 @@ Legend:
 - ⚠️ partial / by-design-but-rough / needs operator action
 - 🐛 latent bug
 - ❌ not implemented
+- 🔧 resolved by the maintenance-pass work (commit `security-hardening`)
+
+> **Update:** the `internal/maintenance` pass now backs `herald sync`, daemon
+> startup, and the IaC push handler. Items marked 🔧 below were closed by it. See
+> the gap summary for what remains.
 
 ---
 
@@ -42,8 +47,8 @@ Every stack has exactly one source. The two are mutually exclusive
 - `override:`, `env_file`, `config`, `secrets`, `domain`.
 - **Not allowed:** `branch`/`tag`/`tag_pattern`, `preview`, `compose`
   (`config.go:263-271`).
-- **No `deployed_ref` is written** — path stacks leave no record of which IaC
-  commit deployed them. ❌
+- Writes `<deployDir>/deployed_ref` = `path@<iacCommit>` recording the IaC commit
+  it was deployed from, so a later pass can detect subtree changes. 🔧
 
 ---
 
@@ -85,17 +90,15 @@ What can cause Herald to act on a stack:
 | # | Scenario | Today | Status |
 |---|----------|-------|--------|
 | P1 | First deploy | T4 (if `auto_deploy`) or T5 → symlink + compose up | ✅ |
-| P2 | Version/config bump (edit files in subtree) — **the Nextcloud case** | T4 redeploys **every** `auto_deploy` stack regardless of whether its subtree changed | 🐛 over-deploys |
-| P3 | `auto_deploy: false` stack, IaC push | Logs "updated (no auto-deploy)", never deploys | ✅ by design |
+| P2 | Version/config bump (edit files in subtree) — **the Nextcloud case** | Pass redeploys an `auto_deploy` stack only when its `path:` subtree changed since `deployed_ref` (`git diff <recorded>..HEAD -- <path>`) | 🔧 |
+| P3 | `auto_deploy: false` stack, IaC push | Reported as updated, never auto-deploys | ✅ by design |
 | P4 | `update:` migration hook | Runs after `compose up` | ✅ |
-| P5 | Which IaC commit is this stack on? | No record written for path stacks | ❌ |
-| P6 | Failed deploy, then unrelated IaC push | Failed stack's subtree unchanged → never retried (forgotten) | ⚠️ |
+| P5 | Which IaC commit is this stack on? | `deployed_ref` now records `path@<iacCommit>` | 🔧 |
+| P6 | Failed deploy, then unrelated IaC push | Detection is "since last *successful* deploy" (the recorded commit), so a failed stack stays flagged as changed until it deploys | 🔧 |
 
-> P2 + P5 together are the change-detection gap. The intended behavior: on IaC
-> push, redeploy a path stack only if its `path:` subtree changed between the
-> deployed commit and the new HEAD. With source-of-truth = git, "deployed commit"
-> should come from a per-stack `deployed_ref` (extend the existing repo-stack
-> stamp to path stacks) — not a central state file.
+> Change detection is keyed off the per-stack `deployed_ref` (git as source of
+> truth), not a central state file. A missing record means deploy-once to
+> establish the stamp.
 
 ---
 
@@ -104,11 +107,11 @@ What can cause Herald to act on a stack:
 | # | Change | Today | Status |
 |---|--------|-------|--------|
 | M1 | Domain changed | Redeploy regenerates Caddy labels; cert follows | ✅ on redeploy |
-| M2 | Image version bump (path) | See P2 | 🐛 |
+| M2 | Image version bump (path) | See P2 | 🔧 |
 | M3 | Secret value changed | Secrets live outside git; no trigger. Takes effect only on next redeploy. Preflight blocks deploy if a **required** secret is missing (`deployer.go:132`) | ⚠️ no auto-redeploy |
-| M4 | **Rename** stack key (`nextcloud` → `cloud`) | New `cloud` deploys fresh; old `herald-nextcloud` keeps running as an **orphan**; its **volumes are stranded** (apparent data loss). `detectOrphans` reports it (`sync.go:160`); no auto-remove by design | ⚠️ footgun |
+| M4 | **Rename** stack key (`nextcloud` → `cloud`) | New `cloud` deploys fresh; old `herald-nextcloud` keeps running as an **orphan**; its **volumes are stranded** (apparent data loss). The maintenance pass reports it as an orphan; no auto-remove by design | ⚠️ footgun |
 | M5 | **Flip source type** (repo ↔ path) | `symlinkSource` only handles a stale *symlink* (`deployer.go:359`); if `deployDir/repo` is a real git clone, `os.Symlink` fails. Reverse (clone into existing symlink) undefined | 🐛 dirty deploy dir |
-| M6 | Add stack to config | Deploys on its trigger — **but** IaC push does not re-sync webhooks, so a new repo stack's app webhook is never registered → its pushes are ignored until manual `herald sync` | 🐛 webhook drift |
+| M6 | Add stack to config | IaC push now runs the maintenance pass, which reconciles webhooks (registers the new repo's hook) and refreshes the live config the webhook matcher reads. First deploy still manual | 🔧 |
 | M7 | Remove stack from config | Containers keep running as an orphan; needs manual `herald down` | ⚠️ |
 
 ---
@@ -120,7 +123,7 @@ What can cause Herald to act on a stack:
 | D1 | `herald down <stack>` | Stops containers; preserves deploy dir + volumes | ✅ |
 | D2 | `herald down --volumes` | Also removes named volumes (irreversible) | ✅ |
 | D3 | Removed from config, still running | Orphan; no automatic action (next.md forbids auto-remove) | ⚠️ |
-| D4 | Orphan reporting | `detectOrphans` in `sync.go`; not surfaced by the daemon or status | ⚠️ sync-only |
+| D4 | Orphan reporting | `detectOrphans` now lives in the maintenance pass and is written to `last-sync.json` by `sync`, startup, and IaC push. Status web UI does not yet read it | ⚠️ partial |
 
 ---
 
@@ -142,35 +145,42 @@ What can cause Herald to act on a stack:
 | # | Scenario | Today | Status |
 |---|----------|-------|--------|
 | F1 | Deploy fails on missing required secret | Preflight error, stack not deployed, logged | ✅ fails safe |
-| F2 | Daemon offline during pushes | On restart, **no startup maintenance pass** → missed changes not reconciled until next event or manual sync | ❌ |
-| F3 | IaC pull is not fast-forward (force-push) | `PullFFOnly` fails, logged, config **not** reloaded | ⚠️ manual fix |
-| F4 | Caddy not running on IaC push | `herald sync` ensures Caddy; the IaC push handler does **not** | ⚠️ |
-| F5 | Repo set changed but webhooks not reconciled | IaC push handler skips webhook sync → drift | 🐛 (= M6) |
+| F2 | Daemon offline during pushes | `herald serve` runs a startup maintenance pass (pull, reconcile, redeploy changed path stacks) → self-healing restarts | 🔧 |
+| F3 | IaC pull is not fast-forward (force-push) | `PullFFOnly` fails; pass records the error, keeps last-good config, continues reconciling | ⚠️ manual fix |
+| F4 | Caddy not running on IaC push | IaC push runs the full pass, which ensures Caddy | 🔧 |
+| F5 | Repo set changed but webhooks not reconciled | IaC push reconciles webhooks (create + prune); a stack whose `repo:` changed has its old hook deleted | 🔧 (= M6) |
 
 ---
 
-## 9. Gap summary (priority order)
+## 9. Gap summary
 
-The daemon's IaC push handler (`serve.go:180`) does only 3 of the 8 steps
-`herald sync` does. Everything below flows from that drift plus missing change
-detection.
+### Resolved by the maintenance pass
 
-1. **🐛 Webhook drift on IaC push** (M6/F5) — new repo stacks get no webhook; the
-   core "push config, it deploys" promise silently breaks.
-2. **🐛 Path-stack over-deploy** (P2) — every IaC push rebuilds every
-   `auto_deploy` stack. Fix with subtree change detection keyed off a per-stack
-   `deployed_ref`.
-3. **❌ No path-stack deploy record** (P5) — needed for change detection,
-   failed-deploy retry, and restart recovery.
-4. **❌ No startup maintenance pass** (F2/T9) — restarts are not self-healing.
-5. **⚠️ Failed deploys are forgotten** (P6) — no retry until the subtree changes
-   again.
-6. **🐛 Source-type flip leaves a dirty deploy dir** (M5).
-7. **⚠️ Rename strands volumes** (M4) — needs clear doctor output, not
+`herald sync`, daemon startup, and the IaC push handler now share one
+single-flight `internal/maintenance` pass (validate-before-apply, per-context
+`Options`). The config swap is race-free via a shared `atomic.Pointer`.
+
+1. **🔧 Webhook drift on IaC push** (M6/F5) — the pass reconciles webhooks:
+   creates for new repos and **prunes** stale hooks when a stack is removed or its
+   `repo:` changes.
+2. **🔧 Path-stack over-deploy** (P2) — subtree change detection keyed off the
+   per-stack `deployed_ref`; only changed `auto_deploy` path stacks redeploy.
+3. **🔧 Path-stack deploy record** (P5) — `deployed_ref` now records `path@<commit>`.
+4. **🔧 Startup maintenance pass** (F2) — restarts recover missed pushes.
+5. **🔧 Failed deploys retried** (P6) — detection is "since last *successful*
+   deploy", so a failed stack stays flagged until it deploys.
+
+### Remaining
+
+6. **🐛 Source-type flip leaves a dirty deploy dir** (M5) — untouched; separate
+   deployer correctness bug.
+7. **⚠️ Rename strands volumes** (M4) — needs clear `doctor` output, not
    auto-removal.
-8. **⚠️ Orphans only surfaced by manual sync** (D3/D4) — daemon and status should
-   report them.
+8. **⚠️ Orphans not in the status web UI** (D3/D4) — detected and written to
+   `last-sync.json`, but the web UI does not yet read it.
+9. **⚠️ Repo-stack `auto_deploy` gate** — deferred; repo stacks still always deploy
+   on a matching push. Lives in the webhook handler, not the pass.
+10. **❓ Preview count limit** (PV6) — enforcement unverified.
 
-Items 1–4 are Priority 1 in `next.md`. The clean fix for 1–2 is the same move:
-extract the `herald sync` body into a reusable maintenance path and route the IaC
-push handler (and startup) through it, with change detection scoped per stack.
+Next up per `next.md`: read-side fixes (status reads `last-sync.json`, renders path
+stacks), the public availability badge, and `herald doctor` built on the report.

@@ -296,6 +296,53 @@ func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store,
 	return results, nil
 }
 
+// ReconcileWebhooks syncs webhooks for every repo in config (create or repair)
+// and prunes Herald hooks on repos that are no longer desired. `known` maps repo
+// full name → hook ID from the previous reconcile (read from webhooks.json); any
+// entry not in the current config — e.g. a stack removed or its `repo:` changed —
+// has its hook deleted. Returns per-repo results (including "pruned") and the new
+// repo → hook ID map for the caller to persist.
+func ReconcileWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store, client *GitHubClient, force bool, iacRepo string, known map[string]int64) ([]SyncResult, map[string]int64, error) {
+	webhookSecret, err := store.Get("herald/webhook_secret")
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting webhook secret: %w", err)
+	}
+
+	targetURL := webhookURL(cfg)
+	desired := uniqueRepos(cfg, iacRepo)
+	desiredSet := make(map[string]bool, len(desired))
+
+	results := make([]SyncResult, 0, len(desired))
+	current := make(map[string]int64, len(desired))
+	for _, repoFull := range desired {
+		desiredSet[repoFull] = true
+		r := syncRepo(ctx, cfg, client, repoFull, targetURL, webhookSecret, force)
+		results = append(results, r)
+		if r.ID != 0 {
+			current[repoFull] = r.ID
+		}
+	}
+
+	// Prune Herald hooks on repos no longer in config.
+	for repoFull, id := range known {
+		if desiredSet[repoFull] {
+			continue
+		}
+		owner, repoName, splitErr := splitRepo(repoFull)
+		if splitErr != nil {
+			results = append(results, errResult(repoFull, splitErr))
+			continue
+		}
+		if err := client.DeleteWebhook(ctx, owner, repoName, id); err != nil {
+			results = append(results, errResult(repoFull, formatAPIError(repoFull, err)))
+			continue
+		}
+		results = append(results, SyncResult{Repo: repoFull, Action: "pruned", ID: id})
+	}
+
+	return results, current, nil
+}
+
 func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, repoFull, targetURL, webhookSecret string, force bool) SyncResult {
 	owner, repoName, err := splitRepo(repoFull)
 	if err != nil {
