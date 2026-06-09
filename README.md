@@ -1,8 +1,10 @@
 # Herald
 
-Config-driven deploy daemon for self-hosted infrastructure. No database, single binary.
+One VPS. One server repo. GitHub pushes make it live.
 
-Push to GitHub, your app deploys. Config is a YAML file per server. Secrets are age-encrypted. Caddy handles TLS automatically.
+Herald is a single-binary deployment daemon for one Docker Compose server. It reacts to GitHub webhooks, deploys stacks, wires Caddy TLS, resolves encrypted secrets, and keeps the server reproducible from a git repo.
+
+No database. No control panel. No SSH deploy scripts.
 
 ## Install
 
@@ -41,6 +43,14 @@ herald deploy myapp
 
 # 5. Start daemon + install as service
 sudo herald install --user herald
+```
+
+After setup, the intended workflow is git-driven:
+
+```text
+push app repo      -> Herald deploys matching stack
+push server repo   -> Herald reloads config and auto-deploys opted-in path stacks
+push feature branch -> Herald creates/updates preview, if enabled
 ```
 
 ## Config
@@ -89,10 +99,13 @@ See [docs/config.md](docs/config.md) for the full configuration reference.
 ## How it works
 
 ```
-GitHub push → webhook → herald → git pull → docker compose up → Caddy TLS → live
+GitHub app push    → webhook → herald → git pull/build → docker compose up → live
+GitHub config push → webhook → herald → reload config → path stacks update
 ```
 
-Herald registers webhooks on your repos via the GitHub API. When you push, GitHub notifies herald, which pulls, builds, and deploys. Caddy provisions TLS certificates automatically.
+Herald registers webhooks on your app repos and on the server repo via the GitHub API. When you push app code, Herald pulls, builds, and deploys the matching stack. When you push server config, Herald pulls the server repo, reloads config, and auto-deploys path-sourced stacks with `auto_deploy: true`. Caddy provisions TLS certificates automatically.
+
+Everything Herald manages is a stack: a Docker Compose project with a domain, secrets, and a source.
 
 ## Commands
 
@@ -167,6 +180,8 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 - Systemd hardening (NoNewPrivileges, ProtectSystem, kernel/namespace restrictions)
 - Per-app Docker network isolation (only the front service joins Caddy)
 
+The authenticated status page is for operational detail. Public availability badges/status pages are planned as a separate, minimal surface that exposes only opted-in service availability.
+
 ## Comparison
 
 | | Herald | Coolify | Dokploy | Dokku | Kamal |
@@ -180,9 +195,19 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 | Same repo, N deploys | Yes | No | No | No | Partial |
 | RAM | ~10 MB | ~500 MB | ~400 MB | ~20 MB | 0 |
 
-**Why Herald?** Config-as-code (not a database). One repo can deploy N times. No PostgreSQL/Redis tax. Full server bootstrap with one command.
+**Why Herald?** GitHub-native deploy automation for one VPS. One server repo drives wiring. One app repo can deploy N times. No PostgreSQL/Redis tax.
 
-**Trade-offs:** No web UI for config. No app marketplace. New project.
+**Trade-offs:** GitHub only. One server only. No web UI for config. No app marketplace. New project.
+
+## Roadmap
+
+Near-term direction:
+
+- make the daemon run the full `herald sync` maintenance path on server repo pushes and startup
+- add `herald doctor` for actionable private diagnosis
+- add public-safe availability badges/status pages backed by append-only JSONL files, no database
+
+The public availability surface should show only `up`, `degraded`, `down`, or `unknown` for opted-in services. Detailed status stays private.
 
 ## Architecture
 
