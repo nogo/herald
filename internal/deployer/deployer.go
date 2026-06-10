@@ -518,6 +518,11 @@ type composeFilterWriter struct {
 }
 
 func (f *composeFilterWriter) Write(p []byte) (int, error) {
+	// In daemon context the UI is ui.Nop(), whose StreamWriter() returns nil; there
+	// is no stream to forward to, so discard. Never deref a nil w (was a SIGSEGV).
+	if f.w == nil {
+		return len(p), nil
+	}
 	f.buf = append(f.buf, p...)
 	for {
 		idx := bytes.IndexByte(f.buf, '\n')
@@ -537,7 +542,7 @@ func (f *composeFilterWriter) Write(p []byte) (int, error) {
 }
 
 func (f *composeFilterWriter) Flush() {
-	if len(f.buf) > 0 && !skipComposeLine(f.buf) {
+	if f.w != nil && len(f.buf) > 0 && !skipComposeLine(f.buf) {
 		f.w.Write(append(f.buf, '\n'))
 	}
 	f.buf = f.buf[:0]
