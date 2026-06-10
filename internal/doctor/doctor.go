@@ -1,7 +1,7 @@
 // Package doctor runs Herald's operator-facing diagnosis. It answers one question
-// — "why is this server not deploying itself correctly?" — with actionable,
-// severity-grouped output plus the operational inventory that the public status
-// page must not expose.
+// — "why is this server not deploying itself correctly?" — with actionable output
+// grouped by category, plus the operational inventory that the public status page
+// must not expose.
 //
 // Unlike the maintenance pass, doctor gathers everything live (including live
 // GitHub token/webhook verification). It is run rarely and deliberately, so the
@@ -19,15 +19,27 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/nogo/herald/internal/caddy"
 	bootstrap "github.com/nogo/herald/internal/init"
 
+	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/maintenance"
 	"github.com/nogo/herald/internal/secrets"
 )
+
+// Check categories, in display order.
+const (
+	catSystem   = "System"
+	catRepo     = "Repo & config"
+	catGitHub   = "GitHub"
+	catWebhooks = "Webhooks"
+	catCaddy    = "Caddy"
+	catStacks   = "Stacks"
+)
+
+var categoryOrder = []string{catSystem, catRepo, catGitHub, catWebhooks, catCaddy, catStacks}
 
 // Severity orders checks from healthy to broken.
 type Severity int
@@ -38,12 +50,14 @@ const (
 	SeverityWarning                   // suspicious but not necessarily wrong
 )
 
-// Check is a single diagnosis result.
+// Check is a single diagnosis result. Label is a short name used both in the
+// grouped healthy view and the problem list; Detail/Fix appear only for problems.
 type Check struct {
-	Name     string
+	Category string
+	Label    string
 	Severity Severity
-	Detail   string // shown under the name; empty for OK checks
-	Fix      string // exact command / file / explanation; empty for OK checks
+	Detail   string
+	Fix      string
 }
 
 // StackInventory is the operational record for one stack (admin-only data).
@@ -65,11 +79,12 @@ type WebhookInventory struct {
 
 // Diagnosis is the full doctor result: checks plus operational inventory.
 type Diagnosis struct {
-	Server   string
-	Checks   []Check
-	Stacks   []StackInventory
-	Webhooks []WebhookInventory
-	LastPass *maintenance.Report
+	Server    string
+	StatusURL string // public status page URL, or "" if no deploy domain
+	Checks    []Check
+	Stacks    []StackInventory
+	Webhooks  []WebhookInventory
+	LastPass  *maintenance.Report
 }
 
 // Deps are the inputs doctor needs. Config may be nil when the config failed to
@@ -94,9 +109,7 @@ func Run(ctx context.Context, d Deps) *Diagnosis {
 	}
 
 	di.checkEnvironment(ctx, d)
-	di.checkSecrets(d)
-	di.checkConfig(d)
-	di.checkServerRepo(ctx, d)
+	di.checkConfigAndRepo(ctx, d)
 	di.checkGitHub(ctx, d)
 	di.checkCaddy(ctx, d)
 	di.checkStacks(ctx, d)
@@ -107,94 +120,89 @@ func Run(ctx context.Context, d Deps) *Diagnosis {
 	return di
 }
 
-func (di *Diagnosis) add(name string, sev Severity, detail, fix string) {
-	di.Checks = append(di.Checks, Check{Name: name, Severity: sev, Detail: detail, Fix: fix})
+func (di *Diagnosis) pass(category, label string) {
+	di.Checks = append(di.Checks, Check{Category: category, Label: label, Severity: SeverityOK})
 }
 
-func (di *Diagnosis) ok(name string) { di.add(name, SeverityOK, "", "") }
+func (di *Diagnosis) fail(category, label, detail, fix string) {
+	di.Checks = append(di.Checks, Check{Category: category, Label: label, Severity: SeverityAttention, Detail: detail, Fix: fix})
+}
+
+func (di *Diagnosis) warn(category, label, detail, fix string) {
+	di.Checks = append(di.Checks, Check{Category: category, Label: label, Severity: SeverityWarning, Detail: detail, Fix: fix})
+}
 
 func (di *Diagnosis) checkEnvironment(ctx context.Context, d Deps) {
 	if v, err := bootstrap.CheckDocker(ctx); err != nil {
-		di.add("docker accessible", SeverityAttention,
-			"docker info failed", "install Docker and ensure your user is in the 'docker' group")
+		di.fail(catSystem, "docker", "docker info failed",
+			"install Docker and ensure your user is in the 'docker' group")
 	} else {
-		di.ok("docker accessible (" + v + ")")
+		// CheckDocker returns "Docker 29.5.2"; trim the redundant prefix.
+		di.pass(catSystem, "docker "+strings.TrimPrefix(v, "Docker "))
 	}
 
 	if v, err := bootstrap.CheckDockerCompose(ctx); err != nil {
-		di.add("docker compose plugin", SeverityAttention,
-			"plugin not found", "install the Docker Compose plugin")
+		di.fail(catSystem, "compose", "plugin not found", "install the Docker Compose plugin")
 	} else {
-		di.ok("docker compose plugin (" + v + ")")
+		di.pass(catSystem, "compose "+v)
 	}
 
 	if v, err := bootstrap.CheckGit(ctx); err != nil {
-		di.add("git installed", SeverityAttention, "git not found", "install git")
+		di.fail(catSystem, "git", "git not found", "install git")
 	} else {
-		di.ok("git installed (" + v + ")")
+		di.pass(catSystem, "git "+v)
 	}
 
 	if err := bootstrap.CheckDataDir(d.DataDir); err != nil {
-		di.add("data dir writable", SeverityAttention, err.Error(), "")
+		di.fail(catSystem, "data dir", err.Error(), "")
 	} else {
-		di.ok("data dir writable (" + d.DataDir + ")")
+		di.pass(catSystem, "data dir")
 	}
-}
 
-func (di *Diagnosis) checkSecrets(d Deps) {
 	if err := d.Secrets.HealthCheck(); err != nil {
-		di.add("secrets store", SeverityAttention, err.Error(),
+		di.fail(catSystem, "secrets store", err.Error(),
 			"run herald init to create the age key, or restore the key that encrypted secrets.age")
 	} else {
-		di.ok("secrets store decrypts")
+		di.pass(catSystem, "secrets store")
 	}
 }
 
-func (di *Diagnosis) checkConfig(d Deps) {
-	if d.ConfigErr != nil {
-		di.add("config valid", SeverityAttention, d.ConfigErr.Error(),
-			"fix config.yml in the server repo and push")
-		return
-	}
-	di.ok("config valid")
-}
-
-func (di *Diagnosis) checkServerRepo(ctx context.Context, d Deps) {
+func (di *Diagnosis) checkConfigAndRepo(ctx context.Context, d Deps) {
 	repoDir := filepath.Join(d.DataDir, "repo")
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
-		di.add("server repo present", SeverityAttention,
-			"no git clone at "+repoDir, "herald init <server-repo>")
-		return
+		di.fail(catRepo, "server repo", "no git clone at "+repoDir, "herald init <server-repo>")
+	} else if err := githelper.CmdWithAuth(ctx, d.Token, repoDir, "ls-remote", "--quiet", "origin", "HEAD").Run(); err != nil {
+		di.warn(catRepo, "server repo", "git ls-remote failed: "+err.Error(),
+			"check network and credentials for the server repo")
+	} else {
+		di.pass(catRepo, "server repo")
 	}
-	if err := githelper.CmdWithAuth(ctx, d.Token, repoDir, "ls-remote", "--quiet", "origin", "HEAD").Run(); err != nil {
-		di.add("server repo reachable", SeverityWarning,
-			"git ls-remote failed: "+err.Error(), "check network and credentials for the server repo")
-		return
+
+	if d.ConfigErr != nil {
+		di.fail(catRepo, "config", d.ConfigErr.Error(), "fix config.yml in the server repo and push")
+	} else {
+		di.pass(catRepo, "config")
 	}
-	di.ok("server repo present and reachable")
 }
 
 func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
 	if d.Token == "" {
-		di.add("github token", SeverityAttention,
-			"no token in config or secrets store", "herald auth login")
+		di.fail(catGitHub, "token", "no token in config or secrets store", "herald auth login")
 		return
 	}
 	if login, err := github.GetUser(ctx, d.Token); err != nil {
-		di.add("github token valid", SeverityAttention, err.Error(), "herald auth login")
+		di.fail(catGitHub, "token", err.Error(), "herald auth login")
 	} else {
-		di.ok("github token valid (" + login + ")")
+		di.pass(catGitHub, "token ("+login+")")
 	}
 
 	if _, err := d.Secrets.Get("herald/webhook_secret"); err != nil {
-		di.add("webhook secret", SeverityAttention,
-			"missing from secrets store", "herald webhooks sync regenerates it")
+		di.fail(catGitHub, "webhook secret", "missing from secrets store", "herald webhooks sync regenerates it")
 	} else {
-		di.ok("webhook secret present")
+		di.pass(catGitHub, "webhook secret")
 	}
 
-	// Live webhook verification. Also fills the webhook inventory in one pass so we
-	// don't call the GitHub API twice.
+	// Live webhook verification, reused to fill the webhook inventory in one pass.
 	if d.Config == nil {
 		return
 	}
@@ -204,18 +212,16 @@ func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
 		switch {
 		case ws.Error != nil:
 			inv.State = "error: " + ws.Error.Error()
-			di.add("webhook "+ws.Repo, SeverityWarning, ws.Error.Error(), "")
+			di.warn(catWebhooks, ws.Repo, ws.Error.Error(), "")
 		case !ws.Found:
 			inv.State = "missing"
-			di.add("webhook "+ws.Repo, SeverityAttention,
-				"no Herald webhook registered on GitHub", "herald webhooks sync")
+			di.fail(catWebhooks, ws.Repo, "no Herald webhook registered on GitHub", "herald webhooks sync")
 		case !ws.Active:
 			inv.State = "inactive"
-			di.add("webhook "+ws.Repo, SeverityWarning,
-				"webhook present but inactive", "herald webhooks sync")
+			di.warn(catWebhooks, ws.Repo, "webhook present but inactive", "herald webhooks sync")
 		default:
 			inv.State = "active"
-			di.ok("webhook " + ws.Repo)
+			di.pass(catWebhooks, ws.Repo)
 		}
 		di.Webhooks = append(di.Webhooks, inv)
 	}
@@ -224,19 +230,18 @@ func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
 func (di *Diagnosis) checkCaddy(ctx context.Context, d Deps) {
 	mgr := &caddy.CaddyManager{Config: d.Config, Logger: d.Logger, HeraldPort: d.HeraldPort}
 	if running, err := mgr.IsRunning(ctx); err != nil {
-		di.add("caddy running", SeverityWarning, "could not query Docker: "+err.Error(), "")
+		di.warn(catCaddy, "running", "could not query Docker: "+err.Error(), "")
 	} else if !running {
-		di.add("caddy running", SeverityAttention,
-			"herald-caddy container is not running", "herald caddy start (or restart herald.service)")
+		di.fail(catCaddy, "running", "herald-caddy container is not running",
+			"herald caddy start (or restart herald.service)")
 	} else {
-		di.ok("caddy running")
+		di.pass(catCaddy, "running")
 	}
 
 	if !caddy.NetworkExists(ctx) {
-		di.add("caddy network", SeverityAttention,
-			"docker network 'caddy' does not exist", "herald caddy start creates it")
+		di.fail(catCaddy, "network", "docker network 'caddy' does not exist", "herald caddy start creates it")
 	} else {
-		di.ok("caddy network exists")
+		di.pass(catCaddy, "network")
 	}
 }
 
@@ -250,22 +255,22 @@ func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
 		// Required secrets — checked even when undeployed, so a stack blocked on
 		// secrets surfaces its fix before first deploy.
 		if missing, err := d.Secrets.MissingRequired(stack.Secrets); err != nil {
-			di.add(name+": secrets", SeverityWarning, "could not check: "+err.Error(), "")
+			di.warn(catStacks, name+": secrets", "could not check: "+err.Error(), "")
 		} else if len(missing) > 0 {
-			di.add(name+": missing required secret", SeverityAttention,
+			di.fail(catStacks, name+": missing required secret",
 				strings.Join(missing, ", "), "herald secret set "+missing[0])
 		}
 
 		deployDir := filepath.Join(d.Config.Server.ServicesDir, name)
 		if _, err := os.Stat(deployDir); os.IsNotExist(err) {
-			di.add(name+": not deployed", SeverityAttention,
+			di.fail(catStacks, name+": not deployed",
 				"no deploy directory — first deploy is manual", "herald deploy "+name)
 			continue
 		}
 		if maintenance.StackRunning(ctx, name) {
-			di.ok(name + ": running")
+			di.pass(catStacks, name)
 		} else {
-			di.add(name+": stopped", SeverityWarning,
+			di.warn(catStacks, name+": stopped",
 				"deploy directory exists but no containers are running",
 				"docker compose -p herald-"+name+" ps")
 		}
@@ -278,8 +283,7 @@ func (di *Diagnosis) checkOrphans(ctx context.Context, d Deps) {
 	}
 	for _, project := range maintenance.DetectOrphans(ctx, d.Config) {
 		name := strings.TrimPrefix(project, "herald-")
-		di.add(project+": orphan", SeverityWarning,
-			"running but not present in config",
+		di.warn(catStacks, project+": orphan", "running but not present in config",
 			"inspect: docker compose -p "+project+" ps  ·  remove: herald down "+name)
 	}
 }

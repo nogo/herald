@@ -51,6 +51,9 @@ var doctorCmd = &cobra.Command{
 			HeraldPort: heraldPort,
 			Logger:     quietLogger(),
 		})
+		if cfg != nil && cfg.Server.DeployDomain != "" {
+			diag.StatusURL = "https://" + cfg.Server.DeployDomain
+		}
 		diag.Render(cmd.OutOrStdout())
 		return nil
 	},

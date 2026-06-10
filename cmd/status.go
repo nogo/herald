@@ -9,12 +9,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"text/tabwriter"
-	"time"
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/status"
+	"github.com/nogo/herald/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +60,11 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		printStatus(cmd.OutOrStdout(), s, collectContainerStats(ctx))
+		statusURL := ""
+		if Cfg != nil && Cfg.Server.DeployDomain != "" {
+			statusURL = "https://" + Cfg.Server.DeployDomain
+		}
+		printStatus(cmd.OutOrStdout(), s, collectContainerStats(ctx), statusURL)
 		return nil
 	},
 }
@@ -169,52 +172,67 @@ func humanizeBytes(b int64) string {
 	}
 }
 
-func stateIcon(state string) string {
+// stackGlyph returns a monochrome state glyph (no color, by design).
+func stackGlyph(state string) string {
 	switch state {
 	case "running":
-		return "● running"
+		return "●"
 	case "degraded":
-		return "◐ degraded"
-	case "stopped":
-		return "○ stopped"
-	case "not deployed":
-		return "○ not deployed"
+		return "◐"
 	case "error":
-		return "✗ error"
-	default:
-		return "? " + state
+		return "✗"
+	default: // stopped, not deployed
+		return "○"
 	}
 }
 
-func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]containerStats) {
-	title := fmt.Sprintf("Herald Status — %s", s.ServerName)
-	sep := strings.Repeat("═", len([]rune(title))+4)
-	fmt.Fprintln(w, title)
-	fmt.Fprintln(w, sep)
-	fmt.Fprintln(w)
-
-	// Caddy.
-	caddyLine := "○ stopped"
-	if s.Caddy.Running {
-		caddyLine = "● running"
-		if s.Caddy.Uptime != "" {
-			caddyLine += " (up " + s.Caddy.Uptime + ")"
+// stackSummary is the one-line headline shown next to the server name.
+func stackSummary(s *status.ServerStatus) string {
+	if len(s.Stacks) == 0 {
+		return ""
+	}
+	running := 0
+	for _, st := range s.Stacks {
+		if st.State == "running" {
+			running++
 		}
 	}
-	fmt.Fprintf(w, "Caddy: %s\n", caddyLine)
-	if s.Caddy.Email != "" {
-		fmt.Fprintf(w, "  ACME: %s\n", s.Caddy.Email)
+	if running == len(s.Stacks) {
+		return fmt.Sprintf("  ·  %d stacks, all running", len(s.Stacks))
 	}
-	if s.Caddy.DomainCount > 0 {
-		fmt.Fprintf(w, "  Domains: %d active\n", s.Caddy.DomainCount)
+	return fmt.Sprintf("  ·  %d stacks, %d running", len(s.Stacks), running)
+}
+
+func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]containerStats, statusURL string) {
+	// Title + one-line headline.
+	fmt.Fprintf(w, "Herald — %s%s\n", s.ServerName, stackSummary(s))
+	if statusURL != "" {
+		fmt.Fprintf(w, "Status page: %s\n", statusURL)
 	}
+	fmt.Fprintln(w)
+
+	// Caddy on a single line.
+	caddy := "○ stopped"
+	if s.Caddy.Running {
+		parts := []string{"● running"}
+		if s.Caddy.Uptime != "" {
+			parts = append(parts, "up "+s.Caddy.Uptime)
+		}
+		if s.Caddy.DomainCount > 0 {
+			parts = append(parts, fmt.Sprintf("%d domains", s.Caddy.DomainCount))
+		}
+		if s.Caddy.Email != "" {
+			parts = append(parts, s.Caddy.Email)
+		}
+		caddy = strings.Join(parts, " · ")
+	}
+	fmt.Fprintf(w, "Caddy    %s\n", caddy)
 
 	// Stacks.
 	if len(s.Stacks) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Stacks:")
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tCPU\tMem\tSource\tRef")
+		fmt.Fprintf(w, "\nStacks\n")
+		tbl := ui.NewTable("  ", "NAME", "STATUS", "CONT", "CPU", "MEM", "DOMAIN", "SOURCE", "REF").
+			RightAlign(2, 3, 4)
 		for _, st := range s.Stacks {
 			ref := st.DeployedRef
 			if strings.HasPrefix(ref, "refs/tags/") {
@@ -223,59 +241,52 @@ func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]container
 			if ref == "" {
 				ref = "-"
 			}
-			containers, cpu, mem := "", "-", "-"
+			cont, cpu, mem := "-", "-", "-"
 			if st.State != "not deployed" {
-				containers = fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
+				cont = fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
 				if cs, ok := stats["herald-"+st.Name]; ok {
 					cpu = fmt.Sprintf("%.1f%%", cs.cpuPercent)
 					mem = humanizeBytes(cs.memBytes)
 				}
 			}
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				st.Name, st.Domain, stateIcon(st.State), containers, cpu, mem, st.Source, ref)
+			tbl.Row(st.Name, stackGlyph(st.State)+" "+st.State, cont, cpu, mem, st.Domain, st.Source, ref)
 		}
-		tw.Flush()
+		tbl.Render(w)
 	}
 
 	// Previews.
 	if len(s.Previews) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Previews:")
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  App\tDomain\tBranch\tAge")
+		fmt.Fprintf(w, "\nPreviews\n")
+		tbl := ui.NewTable("  ", "APP", "DOMAIN", "BRANCH", "AGE")
 		for _, p := range s.Previews {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", p.AppName, p.Domain, p.Branch, p.Age)
+			tbl.Row(p.AppName, p.Domain, p.Branch, p.Age)
 		}
-		tw.Flush()
+		tbl.Render(w)
 	}
 
 	// Webhooks.
 	if len(s.Webhooks) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Webhooks:")
+		header := "\nWebhooks"
 		if !s.WebhookSyncedAt.IsZero() {
-			fmt.Fprintf(w, "  (last synced: %s)\n", s.WebhookSyncedAt.Local().Format(time.RFC3339))
+			header += "   synced " + s.WebhookSyncedAt.Local().Format("2006-01-02 15:04")
 		}
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Repo\tStatus")
+		fmt.Fprintf(w, "%s\n", header)
+		tbl := ui.NewTable("  ", "REPO", "STATUS")
 		for _, wh := range s.Webhooks {
-			var whStatus string
+			whStatus := "✗ not registered"
 			switch {
 			case wh.Unknown:
 				whStatus = "? unknown"
 			case wh.Registered:
 				whStatus = "● registered"
-			default:
-				whStatus = "✗ not registered"
 			}
-			fmt.Fprintf(tw, "  %s\t%s\n", wh.Repo, whStatus)
+			tbl.Row(wh.Repo, whStatus)
 		}
-		tw.Flush()
+		tbl.Render(w)
 	}
 
 	if statusHasIssues(s) {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Issues detected — run 'herald doctor' to diagnose.")
+		fmt.Fprintln(w, "\nIssues detected — run 'herald doctor' to diagnose.")
 	}
 }
 
