@@ -36,7 +36,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	fmt.Fprintln(w, "Checking prerequisites...")
 
 	// 1. Docker
-	dockerVersion, err := checkDocker(ctx)
+	dockerVersion, err := CheckDocker(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Docker:          ✗ not found\n")
 		return fmt.Errorf("docker is not installed or not accessible; install Docker and ensure the current user is in the 'docker' group")
@@ -44,7 +44,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	fmt.Fprintf(w, "  Docker:          ✓ %s\n", dockerVersion)
 
 	// 2. Docker Compose
-	composeVersion, err := checkDockerCompose(ctx)
+	composeVersion, err := CheckDockerCompose(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Docker Compose:  ✗ not found\n")
 		return fmt.Errorf("docker Compose plugin is not installed")
@@ -52,7 +52,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	fmt.Fprintf(w, "  Docker Compose:  ✓ %s\n", composeVersion)
 
 	// 3. Git
-	gitVersion, err := checkGit(ctx)
+	gitVersion, err := CheckGit(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  Git:             ✗ not found\n")
 		return fmt.Errorf("git is not installed")
@@ -68,7 +68,7 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	fmt.Fprintf(w, "  Ports 80/443:    ✓ available\n")
 
 	// 5. Data dir
-	if err := checkDataDir(dataDir); err != nil {
+	if err := CheckDataDir(dataDir); err != nil {
 		fmt.Fprintf(w, "  Data directory:  ✗ %s\n", dataDir)
 		return err
 	}
@@ -77,7 +77,9 @@ func CheckPrerequisites(ctx context.Context, w io.Writer, dataDir string) error 
 	return nil
 }
 
-func checkDocker(ctx context.Context) (string, error) {
+// CheckDocker returns the Docker server version, or an error if the Docker
+// daemon is not installed or not accessible.
+func CheckDocker(ctx context.Context) (string, error) {
 	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "Docker {{.ServerVersion}}").Output()
 	if err != nil {
 		return "", err
@@ -85,7 +87,9 @@ func checkDocker(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func checkDockerCompose(ctx context.Context) (string, error) {
+// CheckDockerCompose returns the Docker Compose plugin version, or an error if
+// the plugin is not installed.
+func CheckDockerCompose(ctx context.Context) (string, error) {
 	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
 	if err != nil {
 		return "", err
@@ -97,7 +101,8 @@ func checkDockerCompose(ctx context.Context) (string, error) {
 	return v, nil
 }
 
-func checkGit(ctx context.Context) (string, error) {
+// CheckGit returns the installed git version, or an error if git is not installed.
+func CheckGit(ctx context.Context) (string, error) {
 	out, err := exec.CommandContext(ctx, "git", "--version").Output()
 	if err != nil {
 		return "", err
@@ -125,7 +130,9 @@ func checkPorts(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func checkDataDir(dataDir string) error {
+// CheckDataDir verifies the data directory exists (creating it if absent) and is
+// writable, returning an actionable error otherwise.
+func CheckDataDir(dataDir string) error {
 	info, err := os.Stat(dataDir)
 	if errors.Is(err, os.ErrNotExist) {
 		if mkErr := os.MkdirAll(dataDir, 0700); mkErr != nil {

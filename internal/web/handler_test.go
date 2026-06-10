@@ -1,34 +1,24 @@
 package web
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/status"
 )
 
-func testCollector(t *testing.T) *status.StatusCollector {
+func newTestHandler(t *testing.T, cfg *config.Config) *WebHandler {
 	t.Helper()
-	return &status.StatusCollector{
-		Config: &config.Config{
-			Server: config.Server{Name: "test-server"},
-			Stacks: map[string]config.Stack{},
-		},
+	collector := &status.StatusCollector{
+		Config:  cfg,
 		DataDir: t.TempDir(),
 		Logger:  slog.Default(),
 	}
-}
-
-func testHandler(t *testing.T, password string) *WebHandler {
-	t.Helper()
-	h := NewWebHandler(testCollector(t), &config.Config{
-		Server: config.Server{Name: "test-server"},
-		Stacks: map[string]config.Stack{},
-	}, password, slog.Default())
+	h := NewWebHandler(collector, cfg, slog.Default())
 	if h == nil {
 		t.Fatal("NewWebHandler returned nil")
 	}
@@ -36,188 +26,119 @@ func testHandler(t *testing.T, password string) *WebHandler {
 }
 
 func TestNewWebHandler_ParsesTemplates(t *testing.T) {
-	h := testHandler(t, "secret")
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{}})
 	if h.Templates == nil {
 		t.Fatal("Templates is nil")
 	}
 }
 
-func TestBasicAuth_Rejects(t *testing.T) {
-	h := testHandler(t, "correct")
+func TestHandleStatus_PublicNoAuth(t *testing.T) {
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{}})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	tests := []struct {
-		name string
-		user string
-		pass string
-		want int
-	}{
-		{"no auth", "", "", http.StatusUnauthorized},
-		{"wrong user", "wrong", "correct", http.StatusUnauthorized},
-		{"wrong pass", "herald", "wrong", http.StatusUnauthorized},
+	// No credentials — the page must be served publicly.
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	if w.Body.Len() == 0 {
+		t.Error("empty response body")
+	}
+}
+
+func TestOperationalEndpointsRemoved(t *testing.T) {
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{}})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	for _, path := range []string{"/app/myapp", "/api/status"} {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s served (%d); operational endpoints must not exist", path, w.Code)
+		}
+	}
+}
+
+func TestBuildPublic_OnlyOptInStacksAndSafeData(t *testing.T) {
+	cfg := &config.Config{Stacks: map[string]config.Stack{
+		"blog":    {Repo: "me/blog", Domain: "blog.example.com", Availability: &config.AvailabilityConfig{Public: true}},
+		"private": {Repo: "me/private", Domain: "secret.example.com"}, // not public
+	}}
+	h := newTestHandler(t, cfg)
+
+	s := &status.ServerStatus{Stacks: []status.StackStatus{
+		{Name: "blog", Domain: "blog.example.com", State: "running", DeployedRef: "main@abc123"},
+		{Name: "private", Domain: "secret.example.com", State: "running"},
+	}}
+	pub := h.buildPublic(s)
+
+	if len(pub.Services) != 1 || pub.Services[0].Name != "blog" {
+		t.Fatalf("expected only opt-in 'blog', got %+v", pub.Services)
+	}
+	if pub.Services[0].State != "up" {
+		t.Errorf("running stack should be 'up', got %q", pub.Services[0].State)
+	}
+	if pub.Overall != "operational" {
+		t.Errorf("overall = %q, want operational", pub.Overall)
 	}
 
-	for _, tc := range tests {
+	// Render must not leak the private stack, domains, or refs.
+	var sb strings.Builder
+	if err := h.Templates.ExecuteTemplate(&sb, "status", pub); err != nil {
+		t.Fatal(err)
+	}
+	out := sb.String()
+	for _, leak := range []string{"private", "secret.example.com", "blog.example.com", "abc123", "me/blog"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("public page leaked %q\n---\n%s", leak, out)
+		}
+	}
+}
+
+func TestBuildPublic_OverallStates(t *testing.T) {
+	cfg := &config.Config{Stacks: map[string]config.Stack{
+		"a": {Availability: &config.AvailabilityConfig{Public: true}},
+		"b": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	h := newTestHandler(t, cfg)
+
+	cases := []struct {
+		name    string
+		states  map[string]string
+		overall string
+	}{
+		{"all up", map[string]string{"a": "running", "b": "running"}, "operational"},
+		{"some down", map[string]string{"a": "running", "b": "stopped"}, "degraded"},
+		{"all down", map[string]string{"a": "stopped", "b": "error"}, "down"},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/", nil)
-			if tc.user != "" || tc.pass != "" {
-				req.SetBasicAuth(tc.user, tc.pass)
-			}
-			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, req)
-			if w.Code != tc.want {
-				t.Errorf("got %d, want %d", w.Code, tc.want)
+			s := &status.ServerStatus{Stacks: []status.StackStatus{
+				{Name: "a", State: tc.states["a"]},
+				{Name: "b", State: tc.states["b"]},
+			}}
+			if got := h.buildPublic(s).Overall; got != tc.overall {
+				t.Errorf("overall = %q, want %q", got, tc.overall)
 			}
 		})
 	}
 }
 
-// recordingLimiter records the keys passed to Allow and can be set to deny.
-type recordingLimiter struct {
-	calls []string
-	deny  bool
-}
-
-func (r *recordingLimiter) Allow(key string) bool {
-	r.calls = append(r.calls, key)
-	return !r.deny
-}
-
-func TestBasicAuth_RateLimitOnlyOnFailure(t *testing.T) {
-	h := testHandler(t, "correct")
-	rl := &recordingLimiter{}
-	mux := http.NewServeMux()
-	h.RegisterRoutesWithRateLimit(mux, rl)
-
-	// Successful auth must NOT consume a rate-limit token.
-	req := httptest.NewRequest("GET", "/", nil)
-	req.SetBasicAuth("herald", "correct")
-	mux.ServeHTTP(httptest.NewRecorder(), req)
-	if len(rl.calls) != 0 {
-		t.Errorf("successful auth consumed limiter: %v", rl.calls)
-	}
-
-	// Failed auth consumes a token.
-	bad := httptest.NewRequest("GET", "/", nil)
-	bad.SetBasicAuth("herald", "wrong")
-	mux.ServeHTTP(httptest.NewRecorder(), bad)
-	if len(rl.calls) != 1 {
-		t.Errorf("failed auth should consume exactly one token, got %d", len(rl.calls))
-	}
-
-	// When the limiter denies, a failed attempt returns 429.
-	rl.deny = true
-	bad2 := httptest.NewRequest("GET", "/", nil)
-	bad2.SetBasicAuth("herald", "wrong")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, bad2)
-	if w.Code != http.StatusTooManyRequests {
-		t.Errorf("denied attempt = %d, want 429", w.Code)
-	}
-}
-
-func TestHandleStatus_OK(t *testing.T) {
-	h := testHandler(t, "secret")
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.SetBasicAuth("herald", "secret")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", w.Code)
-	}
-	ct := w.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Errorf("Content-Type = %q, want text/html", ct)
-	}
-	body := w.Body.String()
-	if len(body) == 0 {
-		t.Error("empty response body")
-	}
-}
-
-func TestHandleApp_NotFound(t *testing.T) {
-	h := testHandler(t, "secret")
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/app/nonexistent", nil)
-	req.SetBasicAuth("herald", "secret")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
-}
-
-func TestHandleApp_OK(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.Server{Name: "test-server"},
-		Stacks: map[string]config.Stack{
-			"myapp": {Repo: "owner/repo", Branch: "main", Domain: "myapp.example.com", Compose: "compose.yml"},
-		},
-	}
-	collector := &status.StatusCollector{
-		Config:  cfg,
-		DataDir: t.TempDir(),
-		Logger:  slog.Default(),
-	}
-	h := NewWebHandler(collector, cfg, "secret", slog.Default())
-	if h == nil {
-		t.Fatal("NewWebHandler returned nil")
-	}
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/app/myapp", nil)
-	req.SetBasicAuth("herald", "secret")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", w.Code)
-	}
-}
-
-func TestHandleAPIStatus_OK(t *testing.T) {
-	h := testHandler(t, "secret")
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/status", nil)
-	req.SetBasicAuth("herald", "secret")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", w.Code)
-	}
-	ct := w.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
-}
-
-func TestHandleAPIStatus_Unauthorized(t *testing.T) {
-	h := testHandler(t, "secret")
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/status", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("got %d, want 401", w.Code)
+func TestBuildPublic_NoPublicStacksIsUnknown(t *testing.T) {
+	cfg := &config.Config{Stacks: map[string]config.Stack{"a": {}}}
+	h := newTestHandler(t, cfg)
+	s := &status.ServerStatus{Stacks: []status.StackStatus{{Name: "a", State: "running"}}}
+	if got := h.buildPublic(s).Overall; got != "unknown" {
+		t.Errorf("overall = %q, want unknown", got)
 	}
 }
 
@@ -226,12 +147,7 @@ func TestCachedStatus_TTL(t *testing.T) {
 	if c.data != nil {
 		t.Fatal("expected nil initial data")
 	}
-	// Simulate populated cache.
-	s := &status.ServerStatus{ServerName: "cached"}
-	c.data = s
-	// fetched is zero time — TTL of 5ns means it's expired immediately
-	// With ttl=5ns and zero fetched time, it's expired: re-collect would happen.
-	// Just verify the struct is accessible.
+	c.data = &status.ServerStatus{ServerName: "cached"}
 	if c.ttl != 5 {
 		t.Errorf("ttl not set correctly")
 	}

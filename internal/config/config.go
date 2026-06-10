@@ -62,6 +62,15 @@ type Stack struct {
 	// Path-stack specific
 	AutoDeploy   bool   `yaml:"auto_deploy,omitempty" json:"auto_deploy,omitzero"`
 	UpdateScript string `yaml:"update,omitempty"      json:"update,omitzero"`
+
+	// Public status page opt-in. A stack appears on the public availability page
+	// by name only when Availability.Public is true; everything else stays private.
+	Availability *AvailabilityConfig `yaml:"availability,omitempty" json:"availability,omitzero"`
+}
+
+// AvailabilityConfig controls a stack's presence on the public status page.
+type AvailabilityConfig struct {
+	Public bool `yaml:"public" json:"public"`
 }
 
 type SecretRef struct {

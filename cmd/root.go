@@ -25,6 +25,9 @@ var skipConfigCommands = map[string]bool{
 	"init":      true,
 	"install":   true,
 	"uninstall": true,
+	// doctor loads and validates the config itself as a check, so it must run even
+	// when the config is broken — that is exactly when it is needed.
+	"doctor": true,
 }
 
 // shouldSkipConfig returns true if the command doesn't need a config file.

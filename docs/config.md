@@ -61,6 +61,7 @@ Each key under `stacks:` is the stack name used in CLI commands (`herald deploy 
 | `update` | path stacks | no | — | Path to a shell script run as a post-deploy hook, relative to the IaC repo root. Receives `STACK_NAME` and `STACK_DIR` as environment variables. |
 | `secrets` | both | no | — | List of secrets to inject. See [Secrets](#secrets). |
 | `preview` | repo stacks | no | — | Preview deployment config. See [Preview deployments](#preview-deployments). |
+| `availability.public` | both | no | `false` | When `true`, the stack appears by name on the public status page with its up/degraded/down state. Default keeps it private — the public page exposes nothing about a stack unless it opts in. |
 
 ### Minimal examples
 

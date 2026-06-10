@@ -2,13 +2,9 @@ package web
 
 import (
 	"context"
-	"crypto/subtle"
 	"embed"
-	"encoding/json"
-	"fmt"
 	"html/template"
 	"log/slog"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -17,7 +13,7 @@ import (
 	"github.com/nogo/herald/internal/status"
 )
 
-//go:embed templates static
+//go:embed templates
 var content embed.FS
 
 type cachedStatus struct {
@@ -42,44 +38,22 @@ func (c *cachedStatus) Get(ctx context.Context, collector *status.StatusCollecto
 	return s, nil
 }
 
-// WebHandler serves the status page web UI.
+// WebHandler serves the public availability page. It is a single, unauthenticated
+// endpoint that exposes only what is safe on the open internet: an overall status,
+// the up/degraded/down state of stacks that opted in via availability.public, and a
+// last-checked time. Operational inventory (repos, refs, secrets, webhooks, paths)
+// lives in the CLI (herald status / herald doctor), never here.
 type WebHandler struct {
 	Collector *status.StatusCollector
 	Config    *config.Config
 	Templates *template.Template
-	Password  string
 	Logger    *slog.Logger
 	cache     cachedStatus
-	authRL    AuthFailRateLimiter // rate limiter for auth failures; nil disables
-}
-
-var tmplFuncs = template.FuncMap{
-	"stateClass": func(state string) string {
-		switch state {
-		case "running":
-			return "running"
-		case "degraded":
-			return "degraded"
-		case "error":
-			return "error"
-		default:
-			return "stopped"
-		}
-	},
-	"containers": func(up, total int) string {
-		if total == 0 {
-			return "—"
-		}
-		return fmt.Sprintf("%d/%d", up, total)
-	},
-	"domainURL": func(domain string) string {
-		return "https://" + domain
-	},
 }
 
 // NewWebHandler creates a WebHandler. Returns nil if template parsing fails.
-func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, password string, logger *slog.Logger) *WebHandler {
-	tmpl, err := template.New("").Funcs(tmplFuncs).ParseFS(content, "templates/*.html")
+func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, logger *slog.Logger) *WebHandler {
+	tmpl, err := template.New("").ParseFS(content, "templates/*.html")
 	if err != nil {
 		logger.Error("failed to parse templates, status page disabled", "error", err)
 		return nil
@@ -88,144 +62,90 @@ func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, passwo
 		Collector: collector,
 		Config:    cfg,
 		Templates: tmpl,
-		Password:  password,
 		Logger:    logger,
 		cache:     cachedStatus{ttl: 5 * time.Second},
-		authRL:    nil,
 	}
 }
 
-// AuthFailRateLimiter rate-limits authentication failures, keyed by client IP.
-// Allow reports whether another failed attempt is permitted for the given key.
-type AuthFailRateLimiter interface {
-	Allow(key string) bool
-}
-
-// clientIP returns the client IP (host portion of RemoteAddr) for rate-limit
-// keying. Herald sits behind a reverse proxy; this keys on the proxy address
-// unless a trusted X-Forwarded-For story is added.
-func clientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
-
-// RegisterRoutes adds the status page routes to mux (no rate limiting).
+// RegisterRoutes adds the single public status route. The page is fully
+// self-contained (CSS is inlined), so there are no static assets to serve.
 func (h *WebHandler) RegisterRoutes(mux *http.ServeMux) {
-	h.RegisterRoutesWithRateLimit(mux, nil)
+	mux.HandleFunc("GET /{$}", h.handleStatus)
 }
 
-// RegisterRoutesWithRateLimit adds the status page routes with auth failure rate limiting.
-func (h *WebHandler) RegisterRoutesWithRateLimit(mux *http.ServeMux, rl AuthFailRateLimiter) {
-	h.authRL = rl
-	cop := &http.CrossOriginProtection{}
-	authed := func(fn http.HandlerFunc) http.Handler {
-		return cop.Handler(h.basicAuth(fn))
-	}
-	mux.Handle("GET /{$}", authed(h.handleStatus))
-	mux.Handle("GET /app/{name}", authed(h.handleApp))
-	mux.Handle("GET /api/status", authed(h.handleAPIStatus))
-	mux.Handle("GET /static/", http.FileServerFS(content))
+// publicService is the public-safe view of one opted-in stack.
+type publicService struct {
+	Name  string
+	State string // "up", "degraded", or "down"
 }
 
-func (h *WebHandler) basicAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		// Constant-time comparison prevents timing attacks on credentials.
-		userOK := subtle.ConstantTimeCompare([]byte(user), []byte("herald")) == 1
-		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(h.Password)) == 1
-		if !ok || !userOK || !passOK {
-			// Rate-limit failed attempts per client IP so successful page loads
-			// (and the auto-refresh) never trip the limit while brute force does.
-			if h.authRL != nil && !h.authRL.Allow(clientIP(r)) {
-				slog.Warn("auth rate limited", "remote", r.RemoteAddr)
-				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-				return
-			}
-			w.Header().Set("WWW-Authenticate", `Basic realm="Herald"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *WebHandler) getStatus(r *http.Request) (*status.ServerStatus, error) {
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	return h.cache.Get(ctx, h.Collector)
-}
-
-type statusData struct {
-	*status.ServerStatus
-	CollectedAt time.Time
-}
-
-type appData struct {
-	*status.ServerStatus
-	CollectedAt time.Time
-	AppName     string
-	AppConfig   config.Stack
-	StackStatus *status.StackStatus
+// publicStatus is the entire public page data. It deliberately carries no domain,
+// server name, source, ref, commit, preview, or webhook information.
+type publicStatus struct {
+	Overall   string // "operational", "degraded", "down", or "unknown"
+	Services  []publicService
+	UpdatedAt time.Time
 }
 
 func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
-	s, err := h.getStatus(r)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	s, err := h.cache.Get(ctx, h.Collector)
 	if err != nil {
 		h.Logger.Error("collecting status", "error", err)
 		http.Error(w, "Service temporarily unavailable", http.StatusInternalServerError)
 		return
 	}
-	data := statusData{ServerStatus: s, CollectedAt: time.Now()}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.Templates.ExecuteTemplate(w, "status", data); err != nil {
+	if err := h.Templates.ExecuteTemplate(w, "status", h.buildPublic(s)); err != nil {
 		h.Logger.Error("executing status template", "error", err)
 	}
 }
 
-func (h *WebHandler) handleApp(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	stack, ok := h.Config.Stacks[name]
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	s, err := h.getStatus(r)
-	if err != nil {
-		h.Logger.Error("collecting status", "error", err)
-		http.Error(w, "Service temporarily unavailable", http.StatusInternalServerError)
-		return
-	}
-	var stackSt *status.StackStatus
-	for i := range s.Stacks {
-		if s.Stacks[i].Name == name {
-			stackSt = &s.Stacks[i]
-			break
+// buildPublic reduces the full collected status to the public-safe view, keeping
+// only stacks that opted in with availability.public.
+func (h *WebHandler) buildPublic(s *status.ServerStatus) publicStatus {
+	var services []publicService
+	up, total := 0, 0
+	for _, st := range s.Stacks {
+		cfg, ok := h.Config.Stacks[st.Name]
+		if !ok || cfg.Availability == nil || !cfg.Availability.Public {
+			continue
+		}
+		state := publicState(st.State)
+		services = append(services, publicService{Name: st.Name, State: state})
+		total++
+		if state == "up" {
+			up++
 		}
 	}
-	data := appData{
-		ServerStatus: s,
-		CollectedAt:  time.Now(),
-		AppName:      name,
-		AppConfig:    stack,
-		StackStatus:  stackSt,
+
+	overall := "unknown"
+	switch {
+	case total == 0:
+		overall = "unknown"
+	case up == total:
+		overall = "operational"
+	case up == 0:
+		overall = "down"
+	default:
+		overall = "degraded"
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.Templates.ExecuteTemplate(w, "app", data); err != nil {
-		h.Logger.Error("executing app template", "error", err)
-	}
+
+	return publicStatus{Overall: overall, Services: services, UpdatedAt: time.Now()}
 }
 
-func (h *WebHandler) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
-	s, err := h.getStatus(r)
-	if err != nil {
-		h.Logger.Error("collecting status for API", "error", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "service temporarily unavailable"}) //nolint:errcheck
-		return
+// publicState maps an internal stack state to the public vocabulary. Anything that
+// is not clearly running or degraded is reported as down.
+func publicState(state string) string {
+	switch state {
+	case "running":
+		return "up"
+	case "degraded":
+		return "degraded"
+	default: // stopped, error, not deployed
+		return "down"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s) //nolint:errcheck
 }

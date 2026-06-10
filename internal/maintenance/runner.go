@@ -121,7 +121,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 	r.surveyStacks(ctx, cfg, opts, configOK, rep)
 
 	// Phase D: orphan detection (report-only).
-	rep.Orphans = detectOrphans(ctx, cfg)
+	rep.Orphans = DetectOrphans(ctx, cfg)
 
 	return rep
 }
@@ -224,7 +224,7 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 			continue
 		}
 
-		if stackRunning(ctx, name) {
+		if StackRunning(ctx, name) {
 			sr.State = "running"
 		} else {
 			sr.State = "stopped"
@@ -315,8 +315,8 @@ func asExitError(err error, target **exec.ExitError) bool {
 	return false
 }
 
-// stackRunning reports whether the stack's compose project has running containers.
-func stackRunning(ctx context.Context, name string) bool {
+// StackRunning reports whether the stack's compose project has running containers.
+func StackRunning(ctx context.Context, name string) bool {
 	out, err := exec.CommandContext(ctx, "docker", "compose",
 		"-p", "herald-"+name, "ps", "--format", "json").Output()
 	trimmed := strings.TrimSpace(string(out))
@@ -350,10 +350,10 @@ func sameRepoSet(known map[string]int64, desired map[string]bool) bool {
 	return true
 }
 
-// detectOrphans lists Docker Compose projects with the "herald-" prefix that are
+// DetectOrphans lists Docker Compose projects with the "herald-" prefix that are
 // not accounted for by the current config. Report-only: maintenance never removes
 // containers.
-func detectOrphans(ctx context.Context, cfg *config.Config) []string {
+func DetectOrphans(ctx context.Context, cfg *config.Config) []string {
 	type projectInfo struct {
 		Name string `json:"Name"`
 	}

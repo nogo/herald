@@ -63,6 +63,12 @@ func EnsureNetwork(ctx context.Context, logger *slog.Logger) error {
 	return runner.RunCmd(ctx, logger, "", "docker", "network", "create", caddyNetwork)
 }
 
+// NetworkExists reports whether the caddy Docker network exists. Read-only: unlike
+// EnsureNetwork it never creates the network, so it is safe for diagnosis.
+func NetworkExists(ctx context.Context) bool {
+	return exec.CommandContext(ctx, "docker", "network", "inspect", caddyNetwork).Run() == nil
+}
+
 // EnsureNetwork is a method that delegates to the package-level EnsureNetwork function.
 func (m *CaddyManager) EnsureNetwork(ctx context.Context) error {
 	return EnsureNetwork(ctx, m.Logger)

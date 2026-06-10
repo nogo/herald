@@ -67,7 +67,7 @@ func (rl *rateLimiter) idleBefore(cutoff time.Time) bool {
 
 // keyedRateLimiter maintains one token-bucket limiter per key (client IP), so a
 // flood from one source cannot starve others. Idle buckets are evicted to bound
-// memory. It satisfies web.AuthFailRateLimiter.
+// memory.
 type keyedRateLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*rateLimiter
@@ -174,7 +174,6 @@ func (s *Server) Handler() http.Handler {
 	// Per-IP rate limits: 30 requests/minute for webhooks, 6/minute for auth
 	// failures. Keying by client IP prevents one source from starving others.
 	webhookRL := newKeyedRateLimiter(0.5, 10) // 0.5/sec = 30/min, burst of 10
-	authFailRL := newKeyedRateLimiter(0.1, 5) // 0.1/sec = 6/min, burst of 5
 
 	if s.sem == nil {
 		s.sem = make(chan struct{}, maxConcurrentDeploys)
@@ -191,7 +190,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /health", s.handleHealth)
 	if s.Web != nil {
-		s.Web.RegisterRoutesWithRateLimit(mux, authFailRL)
+		s.Web.RegisterRoutes(mux)
 	}
 	return mux
 }

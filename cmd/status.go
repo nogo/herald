@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os/exec"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -59,9 +61,112 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		printStatus(cmd.OutOrStdout(), s)
+		printStatus(cmd.OutOrStdout(), s, collectContainerStats(ctx))
 		return nil
 	},
+}
+
+// containerStats holds CPU and memory aggregated across a stack's containers.
+type containerStats struct {
+	cpuPercent float64
+	memBytes   int64
+}
+
+// collectContainerStats returns live CPU/memory aggregated per compose project
+// (keyed "herald-<stack>"). It is best-effort: any failure yields a nil map and
+// the caller renders no CPU/mem rather than failing the status command. Two
+// docker calls total, independent of stack count: `docker ps` to map each
+// container to its compose project, then `docker stats --no-stream`.
+func collectContainerStats(ctx context.Context) map[string]containerStats {
+	psOut, err := exec.CommandContext(ctx, "docker", "ps",
+		"--format", "{{.ID}}\t{{.Label \"com.docker.compose.project\"}}").Output()
+	if err != nil {
+		return nil
+	}
+	idToProject := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
+		id, project, ok := strings.Cut(line, "\t")
+		if !ok || project == "" {
+			continue
+		}
+		idToProject[id] = project
+	}
+	if len(idToProject) == 0 {
+		return nil
+	}
+
+	statsOut, err := exec.CommandContext(ctx, "docker", "stats", "--no-stream",
+		"--format", "{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output()
+	if err != nil {
+		return nil
+	}
+	agg := make(map[string]containerStats)
+	for _, line := range strings.Split(strings.TrimSpace(string(statsOut)), "\n") {
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		project, ok := idToProject[fields[0]]
+		if !ok {
+			continue
+		}
+		cur := agg[project]
+		cur.cpuPercent += parseCPUPerc(fields[1])
+		cur.memBytes += parseMemUsage(fields[2])
+		agg[project] = cur
+	}
+	return agg
+}
+
+// parseCPUPerc parses docker stats CPUPerc like "12.34%" into 12.34.
+func parseCPUPerc(s string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(s), "%"), 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// parseMemUsage parses the used side of docker stats MemUsage like
+// "45.6MiB / 1.9GiB" into bytes.
+func parseMemUsage(s string) int64 {
+	used, _, _ := strings.Cut(s, "/")
+	return parseSize(strings.TrimSpace(used))
+}
+
+// parseSize parses a docker size string like "45.6MiB" or "512B" into bytes.
+func parseSize(s string) int64 {
+	units := []struct {
+		suffix string
+		mult   float64
+	}{
+		{"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10},
+		{"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"B", 1},
+	}
+	for _, u := range units {
+		if num, ok := strings.CutSuffix(s, u.suffix); ok {
+			v, err := strconv.ParseFloat(strings.TrimSpace(num), 64)
+			if err != nil {
+				return 0
+			}
+			return int64(v * u.mult)
+		}
+	}
+	return 0
+}
+
+// humanizeBytes formats a byte count as a compact binary size, e.g. "45.6MiB".
+func humanizeBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1fGiB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1fMiB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1fKiB", float64(b)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }
 
 func stateIcon(state string) string {
@@ -81,7 +186,7 @@ func stateIcon(state string) string {
 	}
 }
 
-func printStatus(w io.Writer, s *status.ServerStatus) {
+func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]containerStats) {
 	title := fmt.Sprintf("Herald Status — %s", s.ServerName)
 	sep := strings.Repeat("═", len([]rune(title))+4)
 	fmt.Fprintln(w, title)
@@ -109,7 +214,7 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Stacks:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tSource\tRef")
+		fmt.Fprintln(tw, "  Name\tDomain\tStatus\tContainers\tCPU\tMem\tSource\tRef")
 		for _, st := range s.Stacks {
 			ref := st.DeployedRef
 			if strings.HasPrefix(ref, "refs/tags/") {
@@ -118,12 +223,16 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 			if ref == "" {
 				ref = "-"
 			}
-			containers := ""
+			containers, cpu, mem := "", "-", "-"
 			if st.State != "not deployed" {
 				containers = fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
+				if cs, ok := stats["herald-"+st.Name]; ok {
+					cpu = fmt.Sprintf("%.1f%%", cs.cpuPercent)
+					mem = humanizeBytes(cs.memBytes)
+				}
 			}
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n",
-				st.Name, st.Domain, stateIcon(st.State), containers, st.Source, ref)
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				st.Name, st.Domain, stateIcon(st.State), containers, cpu, mem, st.Source, ref)
 		}
 		tw.Flush()
 	}
@@ -163,6 +272,32 @@ func printStatus(w io.Writer, s *status.ServerStatus) {
 		}
 		tw.Flush()
 	}
+
+	if statusHasIssues(s) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Issues detected — run 'herald doctor' to diagnose.")
+	}
+}
+
+// statusHasIssues reports whether the collected status shows anything that
+// warrants a closer look, gating the doctor hint so it stays signal not noise.
+func statusHasIssues(s *status.ServerStatus) bool {
+	if !s.Caddy.Running {
+		return true
+	}
+	for _, st := range s.Stacks {
+		switch st.State {
+		case "running":
+		default: // stopped, degraded, error, not deployed
+			return true
+		}
+	}
+	for _, wh := range s.Webhooks {
+		if wh.Unknown || !wh.Registered {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {

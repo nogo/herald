@@ -202,6 +202,23 @@ func (s *Store) SetIfAbsent(key, value string) (bool, error) {
 	return written, err
 }
 
+// HealthCheck verifies the age key exists with secure (0600) permissions and that
+// the secrets store decrypts. It is read-only — unlike Init it does not fix
+// permissions — so it is safe for diagnosis. Returns nil when healthy.
+func (s *Store) HealthCheck() error {
+	info, err := os.Stat(s.keyPath)
+	if err != nil {
+		return fmt.Errorf("age key %s: %w", s.keyPath, err)
+	}
+	if info.Mode().Perm() != 0600 {
+		return fmt.Errorf("age key %s has insecure permissions %#o (want 0600)", s.keyPath, info.Mode().Perm())
+	}
+	if _, err := s.readSecrets(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Get retrieves a secret value by key.
 func (s *Store) Get(key string) (string, error) {
 	secrets, err := s.readSecrets()

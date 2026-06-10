@@ -311,6 +311,24 @@ The command should answer:
 
 It should produce actionable output, not a raw dump.
 
+### Doctor Gathers Live; Status Reads Cheap
+
+`status` and `doctor` are different tools with different data sources:
+
+- `status` is run often (on every login; the web page may be polled). It must be
+  cheap and local: liveness from Docker, Caddy from the local container, webhook
+  display from the last reconcile *result*. No live GitHub calls.
+- `doctor` is run rarely and deliberately, to investigate why the server is not
+  deploying itself correctly. It gathers everything **live**, including the
+  expensive checks `status` skips — live GitHub token validation and webhook
+  verification against the expected deploy domain. It does *not* lean on
+  `last-sync.json` for these; when you are investigating you want fresh truth, not
+  a possibly-stale record. The file is at most advisory context.
+
+This is why rate limiting is not a concern (see Priority 5): the only live-GitHub
+consumer is the rarely-run `doctor`, and authenticated GitHub allows 5000 req/hr
+against doctor's ~1 call per repo.
+
 ### Doctor Checks
 
 Initial checks should include:
@@ -371,6 +389,16 @@ Every failing check should include one of:
 - exact file to edit
 - exact external action needed
 - clear explanation why Herald cannot fix it automatically
+
+### Doctor Also Hosts Operational Inventory
+
+Beyond the severity-grouped diagnosis, `doctor` is the home for the operational
+inventory removed from the (now public) web page. After the diagnosis, it prints an
+inventory section: per-stack source (repo/branch or path), deployed ref, domain,
+secret key names and targets (names only, never values), and webhook
+targets/state. doctor already gathers most of this live to run its checks, so this
+is presentation, not new collection. Keep the two concerns visually separate —
+diagnosis first (what's wrong + fix), inventory second (what's configured).
 
 ### Doctor Scope
 
@@ -548,19 +576,29 @@ Incidents do not need a database either. They can be derived from consecutive fa
 
 Optional manually-curated incidents can come later as another file, but the first version should derive outages from the check log.
 
-### Private Status Page
+### Operational Inventory Lives In The CLI, Not A Private Web Page
 
-Keep the current status page behind authentication. It is useful for operational inventory:
+Decision: do not keep a separate auth-gated *web* status page for operational
+inventory. The web surface becomes public availability only (statuspage.io-style).
+The operational inventory moves to the CLI, split between `status` and `doctor`:
 
-- Caddy status
-- stack names and domains
-- deployed refs
-- preview branches
-- webhook state
-- secret keys and targets
-- config details
+- `status` (admin, on login): Caddy state, stack names/domains, deployed refs,
+  container counts, CPU/mem, preview branches, webhook state.
+- `doctor` (admin, when investigating): the same plus the deeper inventory the
+  public page must never expose — secret key names and targets, source paths,
+  per-stack compose/secret detail — alongside its diagnosis.
 
-That page should not be the artifact embedded in public websites or READMEs.
+This collapses the "two status pages" plan into one public web page plus the CLI.
+
+Done: the web surface is now a single unauthenticated public availability page
+(`internal/web`), so it no longer needs auth to protect operational detail. The
+`herald/status_password` secret that gated the old authenticated page is no longer
+referenced by any code; install/init never set it (it was admin-set only), so
+nothing needs removing there. The secret can be deleted from a server's store at
+the admin's discretion.
+
+Operational inventory is admin data and must not be embedded in public websites or
+READMEs — which is exactly why it lives in the CLI now, not a web page.
 
 ## Priority 4: Better Setup Automation
 
@@ -622,7 +660,37 @@ This reinforces the product promise: after setup, the server maintains deploymen
 
 Avoid Terraform-style state. Herald does not need a remote state model.
 
-But Herald should persist the last maintenance result for status, web UI, `doctor`, and support.
+Status: implemented. The maintenance package writes `last-sync.json` per pass
+(`internal/maintenance/report.go`). What remains is to scope it correctly — see
+the decision below.
+
+### Decision: report is an event record, not a state cache
+
+`last-sync.json` records *what the last maintenance pass did and observed*, not the
+current state of the system. Two kinds of data were initially conflated:
+
+- **Live state** — is a stack running, is Caddy up, are required secrets present,
+  which projects are orphaned. Derivable cheaply and locally at any time from
+  Docker, the config, and the secrets store. It is *more accurate gathered live*,
+  because the file goes stale the moment a pass finishes (a stack can crash 30s
+  later). Consumers must query this live, not trust the file.
+- **Pass history** — when the pass ran, IaC `old→new` HEAD, the webhook reconcile
+  tally (created/pruned/synced), the per-stack action taken, and errors. *Not*
+  derivable from any live query: once `Runner.Run` returns it is gone unless
+  persisted. This is the only data the file uniquely owns.
+
+So the file answers exactly one question: *"what did the daemon do while I wasn't
+looking, and did anything fail?"* It is not a mirror of current state.
+
+An earlier rationale — "cache webhook/state data to avoid live GitHub API calls" —
+is **dropped**. No frequently-run consumer needs live GitHub state: `status` shows
+the last reconcile *result* (a cheap local record) and reports liveness from local
+Docker; `doctor` is run rarely and deliberately, so its live GitHub verification
+can pay a handful of API calls. Rate limit is a non-issue.
+
+Implication: `last-sync.json` should shrink to the pass-history fields. Any
+liveness fields it still carries are advisory context ("as observed during the
+last pass"), never the source of truth for "is it up now".
 
 Possible file:
 
@@ -630,20 +698,15 @@ Possible file:
 /etc/herald/last-sync.json
 ```
 
-Contents:
+Contents (pass-history record):
 
-- last sync time
-- server repo commit
-- config path
-- config load result
-- Caddy result
-- webhook sync result
-- missing secrets by stack
-- undeployed stacks
-- stopped/degraded stacks
-- orphaned Herald compose projects
-- stale previews
-- last maintenance error
+- last sync time (started / finished)
+- server repo commit (old → new HEAD)
+- config load/validate result
+- Caddy result of the pass
+- webhook reconcile tally (synced / created / pruned / errors)
+- per-stack action taken (redeployed / blocked / reported)
+- last maintenance error(s)
 
 This should be generated by the internal maintenance package. `webhooks.json` may remain a small specialized file, or webhook status can become part of the broader report. Avoid introducing two competing sources of read-side truth.
 

@@ -69,28 +69,25 @@ var serveCmd = &cobra.Command{
 			Logger:     slog.Default(),
 		}
 
-		// Set up status page if password is configured.
-		var webHandler *web.WebHandler
-		if statusPass, err := store.Get("herald/status_password"); err == nil && statusPass != "" {
-			caddyMgr := &caddy.CaddyManager{
-				Config:     Cfg,
-				Logger:     slog.Default(),
-				HeraldPort: listenPort,
-			}
-			collector := &status.StatusCollector{
-				Config:     Cfg,
-				LiveConfig: live,
-				DataDir:    dataDir,
-				Logger:     slog.Default(),
-				Caddy:      caddyMgr,
-				Preview:    previewMgr,
-			}
-			webHandler = web.NewWebHandler(collector, Cfg, statusPass, slog.Default())
-			if webHandler != nil {
-				slog.Info("status page enabled", "domain", Cfg.Server.DeployDomain)
-			}
-		} else {
-			slog.Info("status page disabled: run 'herald secret set herald/status_password <password>' to enable")
+		// Public availability page: a single unauthenticated endpoint exposing only
+		// the up/degraded/down state of stacks that opted in via availability.public.
+		// Operational detail lives in the CLI (herald status / herald doctor).
+		caddyMgr := &caddy.CaddyManager{
+			Config:     Cfg,
+			Logger:     slog.Default(),
+			HeraldPort: listenPort,
+		}
+		collector := &status.StatusCollector{
+			Config:     Cfg,
+			LiveConfig: live,
+			DataDir:    dataDir,
+			Logger:     slog.Default(),
+			Caddy:      caddyMgr,
+			Preview:    previewMgr,
+		}
+		webHandler := web.NewWebHandler(collector, Cfg, slog.Default())
+		if webHandler != nil {
+			slog.Info("public status page enabled")
 		}
 
 		runner := &maintenance.Runner{

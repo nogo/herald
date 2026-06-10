@@ -114,7 +114,8 @@ Everything Herald manages is a stack: a Docker Compose project with a domain, se
 herald install              Install as systemd service
 herald serve                Start webhook listener
 herald sync                 Pull IaC repo + reconcile config + sync webhooks
-herald status               Show apps, services, domains, health
+herald status               Show apps, services, domains, health (with CPU/mem)
+herald doctor               Diagnose deploy/wiring problems with fix commands
 ```
 
 **Stacks**
@@ -175,12 +176,11 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key points:
 - GitHub tokens never in URLs, process args, or logs
 - Git hooks disabled on all operations; webhook git refs validated
 - Webhook HMAC-SHA256 + per-IP rate limiting
-- Status page uses constant-time auth comparison
 - Preview environments receive no secrets; fork PRs cannot trigger them
 - Systemd hardening (NoNewPrivileges, ProtectSystem, kernel/namespace restrictions)
 - Per-app Docker network isolation (only the front service joins Caddy)
 
-The authenticated status page is for operational detail. Public availability badges/status pages are planned as a separate, minimal surface that exposes only opted-in service availability.
+The web surface is a single public availability page: it shows only the up/degraded/down state of stacks that opted in with `availability.public`, plus an overall status and last-checked time. No domains, refs, secrets, webhooks, or paths. Operational detail is admin-only and lives in the CLI (`herald status`, `herald doctor`).
 
 ## Comparison
 
@@ -203,11 +203,10 @@ The authenticated status page is for operational detail. Public availability bad
 
 Near-term direction:
 
-- make the daemon run the full `herald sync` maintenance path on server repo pushes and startup
-- add `herald doctor` for actionable private diagnosis
-- add public-safe availability badges/status pages backed by append-only JSONL files, no database
+- add availability badges (`/badge`, SVG) and append-only JSONL history behind the public status page, no database
+- optionally let a stack expose more on the public page (e.g. domain link, HTTP health check) as explicit opt-ins
 
-The public availability surface should show only `up`, `degraded`, `down`, or `unknown` for opted-in services. Detailed status stays private.
+Done recently: the daemon runs the full maintenance path on server-repo pushes and startup; `herald doctor` gives actionable private diagnosis; the web surface is a single public availability page showing only `up`/`degraded`/`down`/`unknown` for opted-in services.
 
 ## Architecture
 
