@@ -12,6 +12,7 @@ INSTALL_DIR="/usr/local/bin"
 DATA_DIR="/etc/herald"
 DEPLOY_DIR="/opt/deploy"
 USER="herald"
+UNIT_PATH="/etc/systemd/system/herald.service"
 
 # --- helpers ---
 
@@ -23,6 +24,79 @@ die()  { err "$*"; exit 1; }
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+# write_service writes the systemd unit and a placeholder environment file, then
+# reloads systemd. Idempotent — also called on update so hardening changes
+# propagate. ExecStart omits --config so the daemon auto-detects
+# $DATA_DIR/repo/config.yml after `herald init` runs. A custom services_dir
+# requires editing ReadWritePaths below by hand.
+write_service() {
+    cat > "$UNIT_PATH" <<EOF
+[Unit]
+Description=Herald - deployment daemon
+Documentation=https://github.com/${REPO}
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=${USER}
+Group=${USER}
+ExecStart=${INSTALL_DIR}/herald serve --data-dir ${DATA_DIR}
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Environment — secrets go in the environment file, never in the unit file
+EnvironmentFile=-${DATA_DIR}/environment
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=${DATA_DIR} ${DEPLOY_DIR} /var/run/docker.sock /home/${USER}
+PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+SystemCallArchitectures=native
+# Note: docker socket access is root-equivalent; these directives harden the
+# herald process surface but do not contain a compromised docker socket.
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=herald
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Placeholder environment file (loaded by the unit; never holds secrets at rest).
+    if [ ! -f "$DATA_DIR/environment" ]; then
+        cat > "$DATA_DIR/environment" <<'ENVEOF'
+# Herald environment variables
+# Add environment variables here. They will be loaded by the systemd service.
+# Example:
+# GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+ENVEOF
+        chown "$USER:$USER" "$DATA_DIR/environment"
+        chmod 600 "$DATA_DIR/environment"
+    fi
+
+    systemctl daemon-reload
+    ok "systemd unit written to $UNIT_PATH"
 }
 
 # --- checks ---
@@ -123,6 +197,11 @@ if [ "$IS_UPDATE" = true ]; then
     install -m 755 "$BINARY" "$INSTALL_DIR/herald"
     ok "Binary updated"
 
+    # Refresh the unit so hardening/path changes in this release propagate.
+    if command -v systemctl >/dev/null 2>&1; then
+        write_service
+    fi
+
     # Restart service if running
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet herald 2>/dev/null; then
         info "Restarting herald service..."
@@ -167,6 +246,13 @@ ok "Directories ready"
 install -m 755 "$BINARY" "$INSTALL_DIR/herald"
 ok "Installed to $INSTALL_DIR/herald"
 
+# systemd unit (written disabled/stopped — there is no config until `herald init`)
+if command -v systemctl >/dev/null 2>&1; then
+    write_service
+else
+    warn "systemd not found — skipping service install"
+fi
+
 cat <<EOF
 
   ──────────────────────────────────────
@@ -176,19 +262,20 @@ cat <<EOF
   User:     $USER
   Data:     $DATA_DIR
   Deploy:   $DEPLOY_DIR
+  Service:  $UNIT_PATH (installed, not started)
 
-  Next steps (as $USER):
+  Next steps:
 
-    su - $USER
-    herald auth login --client-id <your-oauth-client-id>
-    herald init <your-org/server-repo>
-    herald secret set herald/webhook_secret
-    herald deploy --all
-    exit
+    # 1. Bootstrap from your server repo (handles auth, secrets, webhooks):
+    sudo -iu $USER herald init <your-org/server-repo>
 
-  Then install as a service (as root):
+    # 2. Start the daemon (wires Caddy + webhooks on first start):
+    sudo systemctl enable --now herald
 
-    herald install --user $USER
+  Set any required app secrets with:
+    sudo -iu $USER herald secret set <stack>/<key>
+
+  Uninstall later with: sudo sh uninstall.sh
 
   ──────────────────────────────────────
 EOF

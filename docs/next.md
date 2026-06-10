@@ -23,7 +23,7 @@ Already implemented:
 - `webhooks.json` already persists webhook sync status for the status read side.
 - `herald preview cleanup` already removes previews for branches that no longer exist.
 - `herald init` already checks prerequisites, initializes secrets, starts Caddy, registers webhooks, and clones stack repos.
-- `herald install` already writes/enables/starts the systemd service by default.
+- `scripts/install.sh` installs the binary, creates the herald user/dirs, and writes the systemd unit (the `herald install`/`uninstall` subcommands were removed; systemd is a one-time root operation owned by the shell scripts, not the binary).
 - `herald deploy --all` already exists.
 
 Important gaps:
@@ -615,46 +615,38 @@ READMEs — which is exactly why it lives in the CLI now, not a web page.
 - registers webhooks
 - clones repo stacks
 
-The next step is to reduce the remaining manual tail.
+The remaining manual tail was reduced not by a `herald init --install` flag but by
+moving systemd ownership to the shell installer. The privilege split (`init` runs
+as the `herald` user; systemd install needs root) made a single Go command
+awkward; the installer already runs as root and creates herald-owned directories,
+so it is the natural home for the unit.
 
-Proposed command:
+Decided and implemented:
+
+- `scripts/install.sh` writes the hardened systemd unit inline (binary, user,
+  dirs, unit, env file) and leaves it stopped — there is no config until `init`.
+- `scripts/uninstall.sh` removes the unit and binary (`--purge` also removes data,
+  secrets, and the user). The `herald install`/`herald uninstall` subcommands and
+  the `internal/systemd` package were removed — minimal command surface.
+- `herald init` stays as the app-bootstrap step (auth, clone, secrets, webhooks),
+  run as `sudo -iu herald herald init <repo>`; ownership is already correct so no
+  chown is needed.
+
+Setup is now three privilege-clean steps:
 
 ```sh
-herald init myorg/server --install --deploy
+curl -fsSL .../install.sh | sudo sh         # root: binary, user, dirs, unit
+sudo -iu herald herald init myorg/server    # herald: bootstrap
+sudo systemctl enable --now herald          # root: start; daemon wires the rest
 ```
 
-Behavior:
+Known tradeoff: the unit hardcodes `ReadWritePaths=/opt/deploy`. A custom
+`services_dir` requires editing the unit by hand (documented). First deploy stays
+manual (`herald deploy`); the startup maintenance pass reports blockers in the
+journal.
 
-- bootstrap as today
-- install and enable the systemd service
-- start the daemon
-- run startup sync
-- deploy all stacks that are deployable
-- skip stacks blocked by missing required secrets
-- print the remaining blockers
-
-Example completion:
-
-```text
-Herald initialized: srv1
-
-Running:
-  caddy
-  herald.service
-
-Deployed:
-  blog
-  plausible
-
-Needs secrets:
-  nextcloud/db_password
-    fix: herald secret set nextcloud/db_password
-
-Next:
-  herald deploy nextcloud
-```
-
-This reinforces the product promise: after setup, the server maintains deployment wiring itself.
+Deferred: first-deploy automation (the old `--deploy` idea) — it needs secret-prep
+the daemon should not guess at, so first deploy remains a manual `herald deploy`.
 
 ## Priority 5: Operational Report File
 
