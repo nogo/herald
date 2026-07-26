@@ -17,6 +17,9 @@ services:
       - caddy
     labels:
       caddy.email: "{{.AcmeEmail}}"
+{{- if .AcmeCA}}
+      caddy.acme_ca: "{{.AcmeCA}}"
+{{- end}}
       caddy_0: "{{.DeployDomain}}"
       caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
 

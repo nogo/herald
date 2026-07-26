@@ -85,7 +85,8 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		return fmt.Errorf("creating caddy dir: %w", err)
 	}
 
-	content := generateComposeContent(m.Config.Server.AcmeEmail, m.Config.Server.DeployDomain, m.HeraldPort)
+	content := generateComposeContent(m.Config.Server.AcmeEmail, m.Config.Server.AcmeCA,
+		m.Config.Server.DeployDomain, m.HeraldPort)
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
@@ -243,15 +244,17 @@ func formatUptime(startedAt string) string {
 
 type composeData struct {
 	AcmeEmail    string
+	AcmeCA       string
 	DeployDomain string
 	GatewayIP    string
 	HeraldPort   int
 }
 
-func generateComposeContent(acmeEmail, deployDomain string, heraldPort int) string {
+func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort int) string {
 	var buf bytes.Buffer
 	data := composeData{
 		AcmeEmail:    acmeEmail,
+		AcmeCA:       acmeCA,
 		DeployDomain: deployDomain,
 		GatewayIP:    getDockerGatewayIP(),
 		HeraldPort:   heraldPort,

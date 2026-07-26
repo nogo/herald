@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nogo/herald/internal/config"
 )
 
 func discardLogger() *slog.Logger {
@@ -293,4 +295,68 @@ func TestWriteDockerSecrets(t *testing.T) {
 			t.Errorf("expected 0600, got %04o", perm)
 		}
 	})
+}
+
+func TestConfigDrifted(t *testing.T) {
+	stack := config.Stack{
+		Repo:   "acme/app",
+		Branch: "main",
+		Domain: "app.example.com",
+	}
+
+	dir := t.TempDir()
+
+	// No stamp at all: a stack deployed before Herald recorded fingerprints must
+	// not be reported as drifted, or an upgrade flags every stack at once.
+	if ConfigDrifted(dir, stack) {
+		t.Error("ConfigDrifted = true with no stamp, want false")
+	}
+
+	stamp := func(s config.Stack) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "deployed_config"), []byte(s.Hash()), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stamp(stack)
+	if ConfigDrifted(dir, stack) {
+		t.Error("ConfigDrifted = true for an unchanged stack, want false")
+	}
+
+	// The case that silently broke TLS: domain edited, source untouched.
+	moved := stack
+	moved.Domain = "new.example.com"
+	if !ConfigDrifted(dir, moved) {
+		t.Error("ConfigDrifted = false after a domain change, want true")
+	}
+
+	// Non-routing fields count too — any config.yml edit needs a redeploy to apply.
+	renamed := stack
+	renamed.Branch = "release"
+	if !ConfigDrifted(dir, renamed) {
+		t.Error("ConfigDrifted = false after a branch change, want true")
+	}
+
+	stamp(moved)
+	if ConfigDrifted(dir, moved) {
+		t.Error("ConfigDrifted = true right after redeploying the changed stack, want false")
+	}
+}
+
+func TestStackHashStable(t *testing.T) {
+	s := config.Stack{Repo: "acme/app", Domain: "app.example.com", Secrets: []config.SecretRef{
+		{Key: "db/password", Type: "env", Target: "DB_PASSWORD"},
+	}}
+	if s.Hash() == "" {
+		t.Fatal("Hash() = empty")
+	}
+	if s.Hash() != s.Hash() {
+		t.Error("Hash() is not stable across calls")
+	}
+	other := s
+	other.Domain = "other.example.com"
+	if s.Hash() == other.Hash() {
+		t.Error("Hash() collides across different domains")
+	}
 }

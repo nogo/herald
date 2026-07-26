@@ -25,7 +25,8 @@ stacks:    # optional — everything herald deploys
 | `services_dir` | yes | — | Base directory for all deployments (e.g. `/opt/deploy`). All stacks land directly under `<name>/` (flat, no subdirectories). |
 | `port` | no | `9483` | Port herald listens on. |
 | `bind` | no | all interfaces | Listen address. Empty binds all interfaces (`:port`). Set `127.0.0.1` to bind loopback-only when Caddy runs on the same host. |
-| `acme_email` | no | `webmaster@<deploy_domain>` | Email for ACME/Let's Encrypt TLS certificate registration via Caddy. |
+| `acme_email` | yes | — | Email for ACME/Let's Encrypt registration via Caddy. Required, never derived: Caddy keys its ACME account by contact email, so a derived value silently registers a **new account** whenever the value it was derived from changes — invalidating any CAA `accounturi` pin and orphaning the old account. |
+| `acme_ca` | no | Caddy's default chain | ACME directory URL. Empty leaves Caddy's default issuers (Let's Encrypt, then ZeroSSL). Pin a single CA here, or point at `https://acme-staging-v02.api.letsencrypt.org/directory` to bring up a server without spending production rate limit. |
 | `github_token` | no | — | GitHub personal access token. Supports `${ENV_VAR}` expansion. Prefer `herald auth login` instead. |
 
 ```yaml

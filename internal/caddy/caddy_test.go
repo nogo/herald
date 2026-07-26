@@ -6,7 +6,7 @@ import (
 )
 
 func TestGenerateComposeContent(t *testing.T) {
-	content := generateComposeContent("admin@example.com", "deploy.example.com", 8080)
+	content := generateComposeContent("admin@example.com", "", "deploy.example.com", 8080)
 
 	checks := []string{
 		"lucaslorentz/caddy-docker-proxy:2.9",
@@ -34,10 +34,23 @@ func TestGenerateComposeContent(t *testing.T) {
 	if strings.Contains(content, "herald-proxy-label") {
 		t.Errorf("compose should not contain the old herald-proxy sidecar")
 	}
+
+	// No acme_ca given: Caddy keeps its default issuer chain.
+	if strings.Contains(content, "acme_ca") {
+		t.Errorf("compose should omit acme_ca when unset, got:\n%s", content)
+	}
+}
+
+func TestGenerateComposeContentAcmeCA(t *testing.T) {
+	const staging = "https://acme-staging-v02.api.letsencrypt.org/directory"
+	content := generateComposeContent("admin@example.com", staging, "deploy.example.com", 8080)
+	if !strings.Contains(content, `caddy.acme_ca: "`+staging+`"`) {
+		t.Errorf("compose content missing acme_ca label, got:\n%s", content)
+	}
 }
 
 func TestGenerateComposeContentPort(t *testing.T) {
-	content := generateComposeContent("x@x.com", "x.com", 9483)
+	content := generateComposeContent("x@x.com", "", "x.com", 9483)
 	if !strings.Contains(content, ":9483") {
 		t.Errorf("expected port 9483 in compose content")
 	}

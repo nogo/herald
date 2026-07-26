@@ -111,8 +111,12 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 		rep.Config.Loaded = true
 	}
 
-	// Phase B1: ensure Caddy is running.
+	// Phase B1: ensure Caddy is running, protect its ACME account, survey TLS.
 	rep.Caddy = r.ensureCaddy(ctx, cfg)
+	if strings.HasPrefix(rep.Caddy, "running") || strings.HasPrefix(rep.Caddy, "started") {
+		r.syncACMEAccount(ctx, rep)
+		rep.Certificates = surveyCertificates(ctx)
+	}
 
 	// Phase B2: reconcile webhooks (create/repair/prune).
 	r.reconcileWebhooks(ctx, cfg, opts, rep)
@@ -151,6 +155,83 @@ func (r *Runner) ensureCaddy(ctx context.Context, cfg *config.Config) string {
 		return "failed to start: " + err.Error()
 	}
 	return "started"
+}
+
+// acmeAccountKey is where the backup of Caddy's ACME account lives in the
+// secrets store.
+const acmeAccountKey = "herald/caddy_acme_account"
+
+// syncACMEAccount keeps a copy of Caddy's ACME account outside the caddy_data
+// volume, and restores it when the volume comes up empty. The account key exists
+// nowhere else: lose the volume and Caddy silently registers a new account, which
+// invalidates any CAA accounturi pin and re-issues every certificate at once —
+// straight into Let's Encrypt's per-domain weekly limit.
+//
+// This protects against volume loss, not host loss: the backup lands in the
+// secrets store under the data dir, so a full host rebuild still needs that
+// restored from wherever you keep it.
+func (r *Runner) syncACMEAccount(ctx context.Context, rep *Report) {
+	live, err := caddy.ExportACMEAccount(ctx)
+	if err != nil {
+		rep.addErr("reading Caddy ACME account: %v", err)
+		return
+	}
+	backup, _ := r.Secrets.Get(acmeAccountKey)
+
+	if len(live) == 0 {
+		if backup == "" {
+			return // nothing issued yet; nothing to protect
+		}
+		r.Logger.Warn("caddy has no ACME account but a backup exists; restoring",
+			"hint", "the caddy_data volume was recreated")
+		if err := caddy.ImportACMEAccount(ctx, backup); err != nil {
+			rep.addErr("restoring Caddy ACME account: %v", err)
+			return
+		}
+		// Not an error, but the operator must see it: the volume was recreated.
+		rep.Caddy += " (ACME account restored from backup — caddy_data had been recreated)"
+		return
+	}
+
+	if live != backup {
+		if err := r.Secrets.Set(acmeAccountKey, live); err != nil {
+			rep.addErr("backing up Caddy ACME account: %v", err)
+			return
+		}
+		r.Logger.Info("backed up Caddy ACME account to the secrets store")
+	}
+}
+
+// surveyCertificates records TLS health so a failing renewal shows up in the
+// pass — and therefore in last-sync.json — instead of only when someone thinks
+// to run doctor.
+func surveyCertificates(ctx context.Context) CertResult {
+	var res CertResult
+
+	certs, err := caddy.ListCertificates(ctx)
+	if err != nil {
+		res.Error = err.Error()
+	}
+	res.Total = len(certs)
+	for _, c := range certs {
+		if res.NextExpiry.IsZero() || c.NotAfter.Before(res.NextExpiry) {
+			res.NextExpiry = c.NotAfter
+		}
+		switch {
+		case c.Expired():
+			res.Expired = append(res.Expired, c.Name())
+		case c.Remaining() < caddy.ExpiryThreshold:
+			res.Expiring = append(res.Expiring, c.Name())
+		}
+	}
+
+	if rerr, err := caddy.RecentRenewalError(ctx, caddy.RenewalErrorWindow); err == nil && rerr != nil {
+		res.RenewalError = rerr.Detail
+		if rerr.Identifier != "" {
+			res.RenewalError = rerr.Identifier + ": " + rerr.Detail
+		}
+	}
+	return res
 }
 
 func (r *Runner) reconcileWebhooks(ctx context.Context, cfg *config.Config, opts Options, rep *Report) {
@@ -238,6 +319,11 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 			missingByStack[name] = missing
 		}
 
+		// config.yml can change a stack without its source moving — a `domain:` edit
+		// being the case that silently breaks TLS, since the running container keeps
+		// its old caddy label and the new domain never gets a certificate.
+		sr.ConfigDrift = deployer.ConfigDrifted(deployDir, stack)
+
 		// The only automated deploy: a changed auto_deploy path stack with secrets
 		// satisfied and a valid config. Everything else is report-only.
 		if configOK && opts.RedeployChanged && stack.Path != "" && stack.AutoDeploy {
@@ -251,14 +337,20 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 						"stack", name, "error", cerr)
 					changed = true
 				}
-				if changed {
-					r.Logger.Info("maintenance: redeploying changed path stack", "stack", name)
+				if changed || sr.ConfigDrift {
+					r.Logger.Info("maintenance: redeploying changed path stack",
+						"stack", name, "config_drift", sr.ConfigDrift)
 					r.deploy(ctx, name, opts.BlockOnDeploys)
 					sr.Action = "redeployed"
+					sr.ConfigDrift = false
 				}
 			}
 		} else if len(missing) > 0 {
 			sr.Action = "blocked"
+		} else if sr.ConfigDrift {
+			// Repo stacks and manual path stacks are never auto-deployed, so drift is
+			// reported rather than acted on — same policy as before, minus the silence.
+			sr.Action = "config drift"
 		}
 
 		rep.Stacks = append(rep.Stacks, sr)

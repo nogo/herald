@@ -343,8 +343,24 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		}
 	}
 
+	// Record the stack's config fingerprint alongside the ref. The ref only tracks
+	// source movement; this tracks config.yml, which is what a domain change edits.
+	_ = os.WriteFile(filepath.Join(deployDir, "deployed_config"), []byte(stack.Hash()), 0644)
+
 	d.Logger.Info("deploy complete", "stack", stackName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
+}
+
+// ConfigDrifted reports whether config.yml changed the stack since its last
+// deploy. A stack deployed before Herald recorded fingerprints has no stamp; that
+// is reported as no drift, so an upgrade does not flag every stack at once.
+func ConfigDrifted(deployDir string, stack config.Stack) bool {
+	data, err := os.ReadFile(filepath.Join(deployDir, "deployed_config"))
+	if err != nil {
+		return false
+	}
+	recorded := strings.TrimSpace(string(data))
+	return recorded != "" && recorded != stack.Hash()
 }
 
 // ReadDeployedIaCCommit returns the IaC commit a path stack was last deployed

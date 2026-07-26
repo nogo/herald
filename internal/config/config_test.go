@@ -71,6 +71,7 @@ func TestLoad_DefaultBranchAndCompose(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   myapp:
@@ -96,6 +97,7 @@ func TestLoad_PathStack(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   myservice:
@@ -133,6 +135,7 @@ func TestLoad_DefaultPort(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 `)
 	cfg, err := config.Load(tmp)
@@ -142,8 +145,24 @@ server:
 	if cfg.Server.Port != 9483 {
 		t.Errorf("default port = %d, want 9483", cfg.Server.Port)
 	}
-	if cfg.Server.AcmeEmail != "webmaster@deploy.example.com" {
-		t.Errorf("default acme_email = %q", cfg.Server.AcmeEmail)
+	if cfg.Server.AcmeEmail != "ops@example.com" {
+		t.Errorf("acme_email = %q, want the configured value (it is never derived)", cfg.Server.AcmeEmail)
+	}
+}
+
+func TestLoad_AcmeEmailRequired(t *testing.T) {
+	tmp := writeTempConfig(t, `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  services_dir: /opt
+`)
+	_, err := config.Load(tmp)
+	if err == nil {
+		t.Fatal("expected an error when acme_email is missing")
+	}
+	if !strings.Contains(err.Error(), "server.acme_email is required") {
+		t.Errorf("error = %v, want it to name server.acme_email", err)
 	}
 }
 
@@ -151,6 +170,7 @@ func TestLoad_MissingServerName(t *testing.T) {
 	tmp := writeTempConfig(t, `
 server:
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 `)
 	_, err := config.Load(tmp)
@@ -182,6 +202,7 @@ func TestLoad_PathTraversalRejected(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -200,6 +221,7 @@ func TestLoad_InvalidStackName(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   "../evil":
@@ -218,6 +240,7 @@ func TestLoad_MissingSource(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -235,6 +258,7 @@ func TestLoad_BothRepoAndPath(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -254,6 +278,7 @@ func TestLoad_InvalidSecretType(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -277,6 +302,7 @@ func TestLoad_PreviewEnabledWithoutDomain(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -298,6 +324,7 @@ func TestLoad_PreviewDomainWithoutWildcard(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -320,6 +347,7 @@ func TestLoad_PathStackWithBranch(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   svc:
@@ -339,6 +367,7 @@ func TestLoad_PathStackWithTag(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   svc:
@@ -358,6 +387,7 @@ func TestLoad_PathStackWithPreview(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   svc:
@@ -378,6 +408,7 @@ func TestLoad_PathStackWithCompose(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   svc:
@@ -397,6 +428,7 @@ func TestLoad_TagAndBranchExclusive(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -417,6 +449,7 @@ func TestLoad_TagPatternRequiresBranch(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -437,6 +470,7 @@ func TestLoad_GenerateValidation(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt
 stacks:
   myapp:
@@ -494,6 +528,7 @@ func TestLoad_RepoStackWithTagPattern(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   myapp:
@@ -536,6 +571,7 @@ func TestLoad_RepoStackWithTag(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   myapp:
@@ -562,6 +598,7 @@ func TestLoad_PathStackFullRoundTrip(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   myservice:
@@ -611,6 +648,7 @@ func TestLoad_EmptyStacks(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks: {}
 `)
@@ -628,6 +666,7 @@ func TestLoad_StackNameVariants(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 stacks:
   my-app:
@@ -656,6 +695,7 @@ func TestLoad_ValidationErrors(t *testing.T) {
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
 `
 	cases := []struct {
@@ -678,6 +718,7 @@ server:
 server:
   name: test
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
 `,
 			wantErr: "server.services_dir",
 		},

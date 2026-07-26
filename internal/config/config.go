@@ -1,6 +1,9 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,8 +28,16 @@ type Server struct {
 	DeployDomain string `yaml:"deploy_domain"  json:"deploy_domain"`
 	ServicesDir  string `yaml:"services_dir"   json:"services_dir"`
 	GithubToken  string `yaml:"github_token"   json:"github_token,omitempty"`
-	AcmeEmail    string `yaml:"acme_email"     json:"acme_email,omitempty"`
-	Port         int    `yaml:"port,omitempty" json:"port,omitzero"`
+	// AcmeEmail is required, not derived. Caddy keys its ACME account by contact
+	// email, so a derived value silently registers a new account whenever the
+	// value it was derived from changes — which invalidates CAA accounturi pins
+	// and orphans the previous account.
+	AcmeEmail string `yaml:"acme_email"     json:"acme_email"`
+	// AcmeCA overrides the ACME directory URL. Empty uses Caddy's default issuer
+	// chain (Let's Encrypt, then ZeroSSL). Set it to pin a single CA, or to the
+	// staging directory when bringing up a server without spending rate limit.
+	AcmeCA string `yaml:"acme_ca,omitempty" json:"acme_ca,omitzero"`
+	Port   int    `yaml:"port,omitempty" json:"port,omitzero"`
 	// Bind is the listen address. Empty means all interfaces (":port"). Set to
 	// "127.0.0.1" to bind loopback-only when Caddy runs on the same host.
 	Bind string `yaml:"bind,omitempty" json:"bind,omitzero"`
@@ -66,6 +77,21 @@ type Stack struct {
 	// Public status page opt-in. A stack appears on the public availability page
 	// by name only when Availability.Public is true; everything else stays private.
 	Availability *AvailabilityConfig `yaml:"availability,omitempty" json:"availability,omitzero"`
+}
+
+// Hash is a stable fingerprint of everything config.yml declares about a stack.
+// A deploy records it so a later pass can tell that the stack's config changed
+// without its source changing — a `domain:` edit being the case that matters,
+// since it leaves a stale caddy label on a container nobody redeployed and the
+// new domain never gets a certificate.
+func (s Stack) Hash() string {
+	// Field order is the struct's and map keys are sorted, so this is stable.
+	data, err := json.Marshal(s)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // AvailabilityConfig controls a stack's presence on the public status page.
@@ -113,11 +139,6 @@ func Load(path string) (*Config, error) {
 	})
 	if cfg.Server.GithubToken == "" && strings.Contains(original, "${") {
 		slog.Warn("github_token contains env var reference but expanded to empty string")
-	}
-
-	// Default acme_email to webmaster@<deploy_domain>.
-	if cfg.Server.AcmeEmail == "" && cfg.Server.DeployDomain != "" {
-		cfg.Server.AcmeEmail = "webmaster@" + cfg.Server.DeployDomain
 	}
 
 	// Default port.
@@ -189,6 +210,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Server.ServicesDir == "" {
 		return errors.New("server.services_dir is required")
+	}
+	if cfg.Server.AcmeEmail == "" {
+		return errors.New("server.acme_email is required — it determines Caddy's ACME account, so it must be pinned rather than derived")
 	}
 
 	// Collect all domains to detect duplicates across stacks.

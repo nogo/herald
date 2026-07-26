@@ -81,6 +81,7 @@ server:
   deploy_domain: deploy.example.com
   services_dir: /opt/deploy
   port: 9483
+  acme_email: ops@example.com
 
 stacks:
   myapp:

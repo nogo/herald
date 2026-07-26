@@ -1,6 +1,7 @@
 server:
   name: srv2
   deploy_domain: deploy.example.com
+  acme_email: ops@example.com
   services_dir: /opt/deploy
   github_token: ${GITHUB_TOKEN}
 

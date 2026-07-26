@@ -18,6 +18,7 @@ type Report struct {
 	IaC            IaCResult           `json:"iac"`
 	Config         ConfigResult        `json:"config"`
 	Caddy          string              `json:"caddy"`
+	Certificates   CertResult          `json:"certificates"`
 	Webhooks       WebhookResult       `json:"webhooks"`
 	Stacks         []StackReport       `json:"stacks"`
 	Orphans        []string            `json:"orphans,omitempty"`
@@ -39,6 +40,18 @@ type ConfigResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// CertResult records TLS certificate health as observed during the pass. Caddy
+// owns issuance and renewal; Herald only reports, because a failing renewal is
+// otherwise invisible until the certificate dies 30 days later.
+type CertResult struct {
+	Total        int       `json:"total"`
+	Expired      []string  `json:"expired,omitempty"`
+	Expiring     []string  `json:"expiring,omitempty"` // valid, but too close to expiry to still be renewing
+	NextExpiry   time.Time `json:"next_expiry,omitzero"`
+	RenewalError string    `json:"renewal_error,omitempty"`
+	Error        string    `json:"error,omitempty"` // could not read Caddy's state
+}
+
 // WebhookResult tallies the webhook reconciliation.
 type WebhookResult struct {
 	Synced  int    `json:"synced"`
@@ -54,8 +67,9 @@ type StackReport struct {
 	Name           string   `json:"name"`
 	Source         string   `json:"source"` // "repo" or "path"
 	State          string   `json:"state"`  // "running", "stopped", "not deployed"
-	Action         string   `json:"action"` // "redeployed", "report", "blocked", "none"
+	Action         string   `json:"action"` // "redeployed", "report", "blocked", "config drift", "none"
 	Detail         string   `json:"detail,omitempty"`
+	ConfigDrift    bool     `json:"config_drift,omitempty"` // config.yml changed since the last deploy
 	MissingSecrets []string `json:"missing_secrets,omitempty"`
 }
 
@@ -104,6 +118,31 @@ func (r *Report) Write(dataDir string) error {
 	return nil
 }
 
+func (r *Report) renderCertificates(w io.Writer) {
+	c := r.Certificates
+	switch {
+	case c.Error != "":
+		fmt.Fprintf(w, "  Certificates: could not check — %s\n", c.Error)
+	case c.Total == 0:
+		// Nothing issued yet, or Caddy is down; the Caddy line already says which.
+	case len(c.Expired) > 0 || len(c.Expiring) > 0:
+		fmt.Fprintf(w, "  Certificates: %d total, %d EXPIRED, %d expiring\n",
+			c.Total, len(c.Expired), len(c.Expiring))
+		for _, d := range c.Expired {
+			fmt.Fprintf(w, "    expired:  %s\n", d)
+		}
+		for _, d := range c.Expiring {
+			fmt.Fprintf(w, "    expiring: %s\n", d)
+		}
+	default:
+		fmt.Fprintf(w, "  Certificates: %d ok, next expiry %s\n",
+			c.Total, c.NextExpiry.Local().Format("2006-01-02"))
+	}
+	if c.RenewalError != "" {
+		fmt.Fprintf(w, "  Renewals: FAILING — %s\n", c.RenewalError)
+	}
+}
+
 // Render writes a human-readable summary of the pass.
 func (r *Report) Render(w io.Writer) {
 	fmt.Fprintln(w, "Maintenance pass complete:")
@@ -121,6 +160,7 @@ func (r *Report) Render(w io.Writer) {
 	}
 
 	fmt.Fprintf(w, "  Caddy: %s\n", r.Caddy)
+	r.renderCertificates(w)
 
 	switch {
 	case r.Webhooks.Error != "":
@@ -164,6 +204,10 @@ func (r *Report) Render(w io.Writer) {
 		}
 		if s.Action == "blocked" {
 			pending = append(pending, fmt.Sprintf("  → Stack '%s' blocked: missing %v", s.Name, s.MissingSecrets))
+		}
+		if s.ConfigDrift {
+			pending = append(pending, fmt.Sprintf(
+				"  → Run 'herald deploy %s': config.yml changed since its last deploy (a domain change needs a redeploy to move the certificate)", s.Name))
 		}
 	}
 	if len(pending) > 0 {

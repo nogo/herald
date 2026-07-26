@@ -12,17 +12,20 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	bootstrap "github.com/nogo/herald/internal/init"
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/deployer"
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/maintenance"
@@ -227,14 +230,19 @@ func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
 	}
 }
 
+// acmeLogHint is the one command that explains any certificate problem here.
+const acmeLogHint = "docker logs herald-caddy 2>&1 | grep -iE 'challenge|caa|renew'"
+
 func (di *Diagnosis) checkCaddy(ctx context.Context, d Deps) {
 	mgr := &caddy.CaddyManager{Config: d.Config, Logger: d.Logger, HeraldPort: d.HeraldPort}
-	if running, err := mgr.IsRunning(ctx); err != nil {
+	running, err := mgr.IsRunning(ctx)
+	switch {
+	case err != nil:
 		di.warn(catCaddy, "running", "could not query Docker: "+err.Error(), "")
-	} else if !running {
+	case !running:
 		di.fail(catCaddy, "running", "herald-caddy container is not running",
 			"herald caddy start (or restart herald.service)")
-	} else {
+	default:
 		di.pass(catCaddy, "running")
 	}
 
@@ -243,6 +251,105 @@ func (di *Diagnosis) checkCaddy(ctx context.Context, d Deps) {
 	} else {
 		di.pass(catCaddy, "network")
 	}
+
+	// Both read out of the running container, so they are meaningless when it is down.
+	if running {
+		di.checkCertificates(ctx, d)
+		di.checkRenewals(ctx)
+	}
+}
+
+// deployedStackCount counts stacks with a deploy directory, i.e. stacks that
+// should already have a certificate.
+func deployedStackCount(d Deps) int {
+	if d.Config == nil {
+		return 0
+	}
+	n := 0
+	for name := range d.Config.Stacks {
+		if _, err := os.Stat(filepath.Join(d.Config.Server.ServicesDir, name)); err == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// checkCertificates reports certificates that are expired or too close to expiry
+// to still be renewing normally. A running Caddy serving a dead certificate is
+// otherwise indistinguishable from a healthy one.
+func (di *Diagnosis) checkCertificates(ctx context.Context, d Deps) {
+	certs, err := caddy.ListCertificates(ctx)
+	if err != nil {
+		di.warn(catCaddy, "certificates", "could not read Caddy's certificate store: "+err.Error(), "")
+		return
+	}
+	if len(certs) == 0 {
+		// An empty store with stacks already deployed is the signature of a
+		// recreated caddy_data volume: new ACME account, and every certificate
+		// about to be re-issued at once against the weekly per-domain limit.
+		if n := deployedStackCount(d); n > 0 {
+			di.warn(catCaddy, "certificates",
+				fmt.Sprintf("no certificates stored, but %d stack(s) are deployed — the caddy_data volume looks recreated", n),
+				"expect re-issuance; watch for Let's Encrypt rate limits: "+acmeLogHint)
+		}
+		return
+	}
+
+	soonest := certs[0]
+	problems := 0
+	for _, c := range certs {
+		if c.NotAfter.Before(soonest.NotAfter) {
+			soonest = c
+		}
+		switch {
+		case c.Expired():
+			problems++
+			di.fail(catCaddy, "certificate "+c.Name()+": expired",
+				fmt.Sprintf("expired %s ago (issuer %s)", humanDays(-c.Remaining()), c.Issuer),
+				acmeLogHint)
+		case c.Remaining() < caddy.ExpiryThreshold:
+			problems++
+			di.fail(catCaddy, "certificate "+c.Name()+": renewal overdue",
+				fmt.Sprintf("expires in %s; Caddy renews at 30 days, so renewal is failing", humanDays(c.Remaining())),
+				acmeLogHint)
+		}
+	}
+	if problems == 0 {
+		di.pass(catCaddy, fmt.Sprintf("certificates (%d, next expiry %s)", len(certs), humanDays(soonest.Remaining())))
+	}
+}
+
+// checkRenewals surfaces the newest ACME failure from Caddy's log. This catches a
+// broken renewal weeks before checkCertificates can — the certificate is still
+// valid while the renewals behind it are already failing.
+func (di *Diagnosis) checkRenewals(ctx context.Context) {
+	rerr, err := caddy.RecentRenewalError(ctx, caddy.RenewalErrorWindow)
+	if err != nil {
+		di.warn(catCaddy, "renewals", "could not read Caddy logs: "+err.Error(), "")
+		return
+	}
+	if rerr == nil {
+		di.pass(catCaddy, "renewals")
+		return
+	}
+	label := "renewal failing"
+	if rerr.Identifier != "" {
+		label = "renewal failing: " + rerr.Identifier
+	}
+	di.fail(catCaddy, label,
+		fmt.Sprintf("%s (last attempt %s)", rerr.Detail, rerr.At.Local().Format(time.RFC3339)),
+		acmeLogHint)
+}
+
+// humanDays renders a duration at the granularity operators think in.
+func humanDays(d time.Duration) string {
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%d hours", int(d.Hours()))
+	}
+	if days := int(d.Hours() / 24); days != 1 {
+		return fmt.Sprintf("%d days", days)
+	}
+	return "1 day"
 }
 
 func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
@@ -267,6 +374,14 @@ func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
 				"no deploy directory — first deploy is manual", "herald deploy "+name)
 			continue
 		}
+		// config.yml edited since the last deploy. A domain change is the case that
+		// matters: the container keeps its old caddy label until it is redeployed,
+		// so the new domain never gets a certificate.
+		if deployer.ConfigDrifted(deployDir, stack) {
+			di.fail(catStacks, name+": config drift",
+				"config.yml changed this stack since its last deploy", "herald deploy "+name)
+		}
+
 		if maintenance.StackRunning(ctx, name) {
 			di.pass(catStacks, name)
 		} else {
