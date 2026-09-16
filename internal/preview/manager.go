@@ -38,6 +38,11 @@ type PreviewManager struct {
 	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
 	LiveConfig *atomic.Pointer[config.Config]
 
+	// Limiter bounds actual concurrent deployment work, shared with production
+	// deploys so the two compete for the same fixed pool of capacity. Nil
+	// disables bounding (used by CLI callers, which never deploy concurrently).
+	Limiter *deployer.Limiter
+
 	mu sync.Mutex // serialises state file reads/writes and pending below
 
 	// pending tracks, per app, the preview IDs reserved by an in-flight
@@ -196,6 +201,14 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	lock := m.opLock(id)
 	lock.Lock()
 	defer lock.Unlock()
+
+	if m.Limiter != nil {
+		release, err := m.Limiter.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("acquiring deploy capacity: %w", err)
+		}
+		defer release()
+	}
 
 	isUpdate, releaseSlot, err := m.reservePreviewSlot(appName, id)
 	if err != nil {

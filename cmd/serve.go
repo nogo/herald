@@ -53,12 +53,19 @@ var serveCmd = &cobra.Command{
 		live := &atomic.Pointer[config.Config]{}
 		live.Store(Cfg)
 
+		// deployLimiter bounds actual simultaneous production and preview
+		// deployments (unlike the webhook dispatch below, which returns
+		// immediately). It is shared by the deployer and preview manager so the
+		// two compete for one fixed pool of capacity.
+		deployLimiter := deployer.NewLimiter(deployer.MaxConcurrentDeployments)
+
 		d := &deployer.Deployer{
 			Config:     Cfg,
 			LiveConfig: live,
 			Secrets:    store,
 			Logger:     slog.Default(),
 			DataDir:    dataDir,
+			Limiter:    deployLimiter,
 		}
 
 		previewMgr := &preview.PreviewManager{
@@ -67,6 +74,7 @@ var serveCmd = &cobra.Command{
 			Secrets:    store,
 			DataDir:    dataDir,
 			Logger:     slog.Default(),
+			Limiter:    deployLimiter,
 		}
 
 		// Public availability page: a single unauthenticated endpoint exposing only
@@ -195,7 +203,11 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("server shutdown: %w", err)
 		}
 
-		d.Wait()
+		// Stop admitting new deployment work before waiting for what's already
+		// admitted to drain, so a detached callback racing shutdown cannot start a
+		// build after this considers deployment work finished.
+		deployLimiter.Close()
+		deployLimiter.Wait()
 		slog.Info("herald server stopped")
 		return nil
 	},
