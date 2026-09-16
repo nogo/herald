@@ -296,16 +296,19 @@ func (m *PreviewManager) Remove(ctx context.Context, previewID string) error {
 	}
 
 	if err := m.runComposeDown(ctx, found.Directory, found.ComposeProject, found.ComposeFile); err != nil {
-		m.Logger.Warn("compose down failed", "id", previewID, "error", err)
+		return fmt.Errorf("compose down: %w", err)
 	}
 
-	// Prune images tagged with this preview.
+	// Prune images tagged with this preview. Best-effort: a failure here must not
+	// hide the fact that teardown succeeded, so it is only logged.
 	pruneCmd := exec.CommandContext(ctx, "docker", "image", "prune", "-f",
 		"--filter", "label=com.herald.preview="+previewID)
-	_ = pruneCmd.Run()
+	if err := pruneCmd.Run(); err != nil {
+		m.Logger.Warn("pruning preview images failed", "id", previewID, "error", err)
+	}
 
 	if err := os.RemoveAll(found.Directory); err != nil {
-		m.Logger.Warn("removing preview dir failed", "id", previewID, "error", err)
+		return fmt.Errorf("removing preview dir: %w", err)
 	}
 
 	m.mu.Lock()
