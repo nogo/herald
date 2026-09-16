@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/nogo/herald/internal/compose"
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 )
 
@@ -238,6 +240,96 @@ func installFakeDocker(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// installFakeGit puts a fake "git" binary at the front of PATH so gitSync
+// succeeds without network access. It only understands enough of the
+// CloneOrFetch command shapes to make the "repo" directory appear: on "clone"
+// it creates the destination directory; "fetch" and "reset" are no-ops.
+func installFakeGit(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := `#!/bin/sh
+mode=""
+last=""
+for a in "$@"; do
+	case "$a" in
+	clone) mode=clone ;;
+	esac
+	last="$a"
+done
+if [ "$mode" = "clone" ]; then
+	mkdir -p "$last"
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// installGatedFakeDocker is like installFakeDocker, but a "compose ... up ..."
+// invocation additionally touches reachedPath as soon as it starts (proving the
+// caller has reached the compose-up step, and so is holding that preview's
+// opLock) and then blocks until gatePath exists. Other subcommands (network
+// inspect, image prune, compose down) return immediately. This gives tests a
+// deterministic way to hold a Deploy mid-flight without relying on sleeps.
+func installGatedFakeDocker(t *testing.T, reachedPath, gatePath string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$HERALD_TEST_DOCKER_FAIL" = "1" ]; then
+	echo fake docker failure >&2
+	exit 1
+fi
+case " $* " in
+*" up "*)
+	: > %q
+	while [ ! -f %q ]; do
+		sleep 0.02
+	done
+	;;
+esac
+exit 0
+`, reachedPath, gatePath)
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// waitForFile polls until path exists or t deadline-ish timeout elapses.
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s to appear", path)
+}
+
+// previewTestApp returns a config.Config with a single preview-enabled stack
+// "app", whose compose file is an absolute path so Deploy never needs to read
+// anything out of the (fake-cloned, empty) repo directory.
+func previewTestApp(t *testing.T, servicesDir string) *config.Config {
+	t.Helper()
+	composeFile := makeTestComposeFile(t, t.TempDir())
+	return &config.Config{
+		Server: config.Server{ServicesDir: servicesDir},
+		Stacks: map[string]config.Stack{
+			"app": {
+				Repo:    "example/app",
+				Branch:  "main",
+				Domain:  "app.example.com",
+				Compose: composeFile,
+				Preview: &config.PreviewConfig{Enabled: true, Domain: "*.preview.example.com"},
+			},
+		},
+	}
+}
+
 func newTestManager(t *testing.T) *PreviewManager {
 	t.Helper()
 	return &PreviewManager{
@@ -381,5 +473,209 @@ func TestPreviewOverridePreservesYAMLTags(t *testing.T) {
 
 	if !strings.Contains(string(overrideData), "!override") {
 		t.Errorf("YAML !override tag was lost in merge:\n%s", overrideData)
+	}
+}
+
+// TestDeploy_ConcurrentFirstDeploy_SingleStateEntry covers a branch push and a
+// pull-request synchronization arriving for the same not-yet-deployed preview
+// at once: both race Deploy for the same app+branch, and must still produce
+// exactly one state entry rather than duplicates.
+func TestDeploy_ConcurrentFirstDeploy_SingleStateEntry(t *testing.T) {
+	installFakeGit(t)
+	installFakeDocker(t)
+
+	mgr := newTestManager(t)
+	mgr.Config = previewTestApp(t, filepath.Join(mgr.DataDir, "services"))
+
+	const n = 5
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = mgr.Deploy(context.Background(), "app", "feature/race", "sha1")
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("deploy %d: unexpected error: %v", i, err)
+		}
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches []PreviewInfo
+	for _, p := range state.Previews {
+		if p.AppName == "app" && p.Branch == "feature/race" {
+			matches = append(matches, p)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 state entry for the racing deploys, got %d: %+v", len(matches), matches)
+	}
+}
+
+// TestDeploy_ConcurrentRequests_RespectPreviewLimit covers a burst of webhook
+// deliveries for one app sitting one slot below maxPreviewsPerApp: several
+// first-time deploys for distinct new branches race for the last slot, while
+// an update to an already-deployed branch races alongside them. Exactly one
+// new preview may be created, and the update must succeed regardless.
+func TestDeploy_ConcurrentRequests_RespectPreviewLimit(t *testing.T) {
+	installFakeGit(t)
+	installFakeDocker(t)
+
+	mgr := newTestManager(t)
+	servicesDir := filepath.Join(mgr.DataDir, "services")
+	mgr.Config = previewTestApp(t, servicesDir)
+
+	// Fill the app to one slot below the limit with pre-existing previews. One
+	// of them ("filler-0") will also receive a concurrent update request.
+	var fillers []PreviewInfo
+	for i := range maxPreviewsPerApp - 1 {
+		branch := fmt.Sprintf("filler-%d", i)
+		fillers = append(fillers, PreviewInfo{
+			ID: makeID("app", branch), AppName: "app", Branch: branch,
+			Domain: "x", ComposeFile: "compose.yml",
+		})
+	}
+	if err := saveState(statePath(mgr.DataDir), &previewState{Previews: fillers}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+
+	updateErr := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		updateErr <- mgr.Deploy(context.Background(), "app", "filler-0", "updated-sha")
+	}()
+
+	const newAttempts = 3
+	newErrs := make([]error, newAttempts)
+	for i := range newAttempts {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			branch := fmt.Sprintf("new-%d", i)
+			newErrs[i] = mgr.Deploy(context.Background(), "app", branch, "sha")
+		}(i)
+	}
+	wg.Wait()
+
+	if err := <-updateErr; err != nil {
+		t.Errorf("update of an existing preview at the limit should succeed, got: %v", err)
+	}
+
+	succeeded, failed := 0, 0
+	for i, err := range newErrs {
+		if err == nil {
+			succeeded++
+		} else {
+			failed++
+			if !strings.Contains(err.Error(), "max previews") {
+				t.Errorf("new attempt %d: expected a max-previews error, got: %v", i, err)
+			}
+		}
+	}
+	if succeeded != 1 || failed != newAttempts-1 {
+		t.Fatalf("expected exactly 1 of %d competing first-time deploys to succeed at the limit, got %d succeeded, %d failed", newAttempts, succeeded, failed)
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	var updated *PreviewInfo
+	for _, p := range state.Previews {
+		if p.AppName != "app" {
+			continue
+		}
+		count++
+		if p.Branch == "filler-0" {
+			pp := p
+			updated = &pp
+		}
+	}
+	if count != maxPreviewsPerApp {
+		t.Errorf("expected exactly %d previews for app after the race, got %d", maxPreviewsPerApp, count)
+	}
+	if updated == nil || updated.Commit != "updated-sha" {
+		t.Errorf("expected filler-0's update to persist, got %+v", updated)
+	}
+}
+
+// TestDeployThenTeardown_Serialized covers a teardown accepted while a deploy
+// for the same preview is still in progress: it forces the deploy to be
+// mid-flight (blocked inside "docker compose up", holding the preview's
+// opLock) via a gate, then issues the teardown. The teardown must wait for the
+// deploy to finish and, once it does, must see and remove the preview the
+// deploy just committed.
+func TestDeployThenTeardown_Serialized(t *testing.T) {
+	installFakeGit(t)
+
+	dir := t.TempDir()
+	reached := filepath.Join(dir, "reached")
+	gate := filepath.Join(dir, "gate")
+	installGatedFakeDocker(t, reached, gate)
+
+	mgr := newTestManager(t)
+	mgr.Config = previewTestApp(t, filepath.Join(mgr.DataDir, "services"))
+
+	id := makeID("app", "feature/gate")
+
+	deployErr := make(chan error, 1)
+	go func() {
+		deployErr <- mgr.Deploy(context.Background(), "app", "feature/gate", "sha1")
+	}()
+
+	// Wait until the deploy has reached "docker compose up": it now holds this
+	// preview's opLock and has not yet committed a state entry.
+	waitForFile(t, reached, 5*time.Second)
+
+	removeErr := make(chan error, 1)
+	go func() {
+		removeErr <- mgr.Remove(context.Background(), id)
+	}()
+
+	// Release the deploy. If Remove raced ahead instead of waiting on the
+	// preview's opLock, it would already have failed with "not found" above,
+	// since the deploy cannot have committed a state entry before this point.
+	if err := os.WriteFile(gate, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-deployErr:
+		if err != nil {
+			t.Fatalf("deploy failed: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for deploy")
+	}
+
+	select {
+	case err := <-removeErr:
+		if err != nil {
+			t.Fatalf("teardown accepted during an in-progress deploy should run after it and succeed, got: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for teardown")
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range state.Previews {
+		if p.ID == id {
+			t.Fatalf("preview %q still present after successful teardown", id)
+		}
 	}
 }
