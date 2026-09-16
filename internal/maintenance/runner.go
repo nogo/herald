@@ -47,6 +47,16 @@ type Options struct {
 	BlockOnDeploys  bool      // run deploys synchronously (CLI) instead of async (daemon)
 }
 
+// stackDeployer is the subset of *deployer.Deployer a maintenance pass drives.
+// Runner depends on this instead of the concrete type so a pass's handling of
+// deploy outcomes (success, failure, async submission) can be tested without a
+// real Docker host.
+type stackDeployer interface {
+	Deploy(ctx context.Context, stackName, ref string) error
+	DeployAsync(stackName, ref string) bool
+	SetConfig(cfg *config.Config)
+}
+
 // Runner performs a maintenance pass. Run is single-flight: overlapping triggers
 // (e.g. back-to-back IaC pushes) coalesce so the config swap and deploy dispatch
 // never race.
@@ -54,7 +64,7 @@ type Runner struct {
 	DataDir    string
 	Logger     *slog.Logger
 	Secrets    *secrets.Store
-	Deployer   *deployer.Deployer
+	Deployer   stackDeployer
 	Live       *atomic.Pointer[config.Config] // authoritative config, published on reload
 	Reload     func() (*config.Config, error) // reload + validate config from disk
 	IaCRepo    string                         // GitHub full name of the server IaC repo, or ""
@@ -107,7 +117,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 	} else {
 		cfg = newCfg
 		r.Live.Store(newCfg)
-		r.Deployer.Config = newCfg // keep the static field consistent for any non-live read
+		r.Deployer.SetConfig(newCfg) // keep the static field consistent for any non-live read
 		rep.Config.Loaded = true
 	}
 
@@ -340,9 +350,13 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 				if changed || sr.ConfigDrift {
 					r.Logger.Info("maintenance: redeploying changed path stack",
 						"stack", name, "config_drift", sr.ConfigDrift)
-					r.deploy(ctx, name, opts.BlockOnDeploys)
-					sr.Action = "redeployed"
-					sr.ConfigDrift = false
+					sr.Action, sr.Detail = r.deploy(ctx, name, opts.BlockOnDeploys)
+					// Only a confirmed synchronous success clears drift: a failed
+					// attempt changed nothing, and an async submission's result
+					// isn't known yet — the next pass re-reads the real state.
+					if sr.Action == "redeployed" {
+						sr.ConfigDrift = false
+					}
 				}
 			}
 		} else if len(missing) > 0 {
@@ -361,14 +375,22 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 	}
 }
 
-func (r *Runner) deploy(ctx context.Context, name string, block bool) {
+// deploy dispatches a stack deploy and reports what actually happened, so the
+// caller can record a StackReport that never claims success it hasn't seen.
+// Synchronous deploys (block=true) return a definitive outcome; asynchronous
+// ones only confirm the deploy was submitted, never that it completed.
+func (r *Runner) deploy(ctx context.Context, name string, block bool) (action, detail string) {
 	if block {
 		if err := r.Deployer.Deploy(ctx, name, ""); err != nil {
 			r.Logger.Error("deploy failed", "stack", name, "error", err)
+			return "deploy failed", err.Error()
 		}
-		return
+		return "redeployed", ""
 	}
-	r.Deployer.DeployAsync(name, "")
+	if r.Deployer.DeployAsync(name, "") {
+		return "deploy queued", ""
+	}
+	return "deploy dropped", "a deploy for this stack is already queued or running"
 }
 
 // gitHEAD returns the short HEAD commit of repoDir, or "" if unavailable.

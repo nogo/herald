@@ -2,6 +2,8 @@ package maintenance
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,7 +11,13 @@ import (
 	"testing"
 
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/secrets"
 )
+
+func discardLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.Level(100)}))
+}
 
 // mustConfig builds a config whose stacks have the given name → repo mapping.
 func mustConfig(t *testing.T, repos map[string]string) *config.Config {
@@ -90,6 +98,165 @@ func TestDesiredRepoSet(t *testing.T) {
 	// No IaC repo: only stack repos.
 	if got := desiredRepoSet(cfg, ""); len(got) != 2 {
 		t.Errorf("without IaC repo, size = %d, want 2: %v", len(got), got)
+	}
+}
+
+// fakeDeployer is a stackDeployer test double: it records what was requested
+// and lets the test dictate the outcome, so surveyStacks' handling of deploy
+// results can be tested without a real Docker host.
+type fakeDeployer struct {
+	deployErr   error
+	asyncQueued bool
+
+	deployCalls []string
+	asyncCalls  []string
+}
+
+func (f *fakeDeployer) Deploy(_ context.Context, stackName, _ string) error {
+	f.deployCalls = append(f.deployCalls, stackName)
+	return f.deployErr
+}
+
+func (f *fakeDeployer) DeployAsync(stackName, _ string) bool {
+	f.asyncCalls = append(f.asyncCalls, stackName)
+	return f.asyncQueued
+}
+
+func (f *fakeDeployer) SetConfig(*config.Config) {}
+
+// autoDeployConfig builds a config with a single auto-deploy path stack whose
+// deploy directory already exists (so surveyStacks reaches the deploy branch)
+// and, when drifted is true, whose recorded config fingerprint no longer
+// matches the stack (so ConfigDrift starts true).
+func autoDeployConfig(t *testing.T, drifted bool) (*config.Config, config.Stack, string) {
+	t.Helper()
+	servicesDir := t.TempDir()
+	name := "app"
+	stack := config.Stack{Path: "app", AutoDeploy: true}
+
+	deployDir := filepath.Join(servicesDir, name)
+	if err := os.MkdirAll(deployDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if drifted {
+		if err := os.WriteFile(filepath.Join(deployDir, "deployed_config"), []byte("stale-hash"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		Server: config.Server{ServicesDir: servicesDir},
+		Stacks: map[string]config.Stack{name: stack},
+	}
+	return cfg, stack, name
+}
+
+func TestSurveyStacksSyncDeploySuccess(t *testing.T) {
+	cfg, _, name := autoDeployConfig(t, true)
+	fd := &fakeDeployer{}
+	r := &Runner{
+		DataDir:  t.TempDir(),
+		Logger:   discardLogger(t),
+		Secrets:  secrets.NewStore(t.TempDir()),
+		Deployer: fd,
+	}
+	rep := &Report{}
+	r.surveyStacks(context.Background(), cfg, Options{RedeployChanged: true, BlockOnDeploys: true}, true, rep)
+
+	if len(fd.deployCalls) != 1 || len(fd.asyncCalls) != 0 {
+		t.Fatalf("expected one synchronous deploy call, got sync=%v async=%v", fd.deployCalls, fd.asyncCalls)
+	}
+	sr := rep.Stacks[0]
+	if sr.Name != name || sr.Action != "redeployed" {
+		t.Errorf("got Action %q, want %q", sr.Action, "redeployed")
+	}
+	if sr.Detail != "" {
+		t.Errorf("got Detail %q, want empty on success", sr.Detail)
+	}
+	if sr.ConfigDrift {
+		t.Error("ConfigDrift should be cleared after a confirmed successful deploy")
+	}
+}
+
+func TestSurveyStacksSyncDeployFailure(t *testing.T) {
+	cfg, _, _ := autoDeployConfig(t, true)
+	fd := &fakeDeployer{deployErr: errors.New("compose up: boom")}
+	r := &Runner{
+		DataDir:  t.TempDir(),
+		Logger:   discardLogger(t),
+		Secrets:  secrets.NewStore(t.TempDir()),
+		Deployer: fd,
+	}
+	rep := &Report{}
+	r.surveyStacks(context.Background(), cfg, Options{RedeployChanged: true, BlockOnDeploys: true}, true, rep)
+
+	sr := rep.Stacks[0]
+	if sr.Action == "redeployed" {
+		t.Error("a failed deploy must not be recorded as redeployed")
+	}
+	if sr.Action != "deploy failed" {
+		t.Errorf("got Action %q, want %q", sr.Action, "deploy failed")
+	}
+	if !strings.Contains(sr.Detail, "boom") {
+		t.Errorf("Detail %q does not surface the deploy error", sr.Detail)
+	}
+	if !sr.ConfigDrift {
+		t.Error("ConfigDrift must not be cleared merely because a failed deployment was attempted")
+	}
+	if !rep.Failed() {
+		t.Error("Report.Failed() should be true when a stack recorded a failed deploy")
+	}
+}
+
+func TestSurveyStacksAsyncSubmission(t *testing.T) {
+	cfg, _, _ := autoDeployConfig(t, true)
+	fd := &fakeDeployer{asyncQueued: true}
+	r := &Runner{
+		DataDir:  t.TempDir(),
+		Logger:   discardLogger(t),
+		Secrets:  secrets.NewStore(t.TempDir()),
+		Deployer: fd,
+	}
+	rep := &Report{}
+	// BlockOnDeploys is false: the daemon path, which dispatches and moves on.
+	r.surveyStacks(context.Background(), cfg, Options{RedeployChanged: true}, true, rep)
+
+	if len(fd.asyncCalls) != 1 || len(fd.deployCalls) != 0 {
+		t.Fatalf("expected one async submission, got sync=%v async=%v", fd.deployCalls, fd.asyncCalls)
+	}
+	sr := rep.Stacks[0]
+	if sr.Action == "redeployed" {
+		t.Error("an async submission must never be reported as completed")
+	}
+	if sr.Action != "deploy queued" {
+		t.Errorf("got Action %q, want %q", sr.Action, "deploy queued")
+	}
+	if !sr.ConfigDrift {
+		t.Error("ConfigDrift must stay set until the async result is known")
+	}
+	if rep.Failed() {
+		t.Error("a queued submission is not a failure")
+	}
+}
+
+func TestSurveyStacksAsyncDropped(t *testing.T) {
+	cfg, _, _ := autoDeployConfig(t, false)
+	fd := &fakeDeployer{asyncQueued: false}
+	r := &Runner{
+		DataDir:  t.TempDir(),
+		Logger:   discardLogger(t),
+		Secrets:  secrets.NewStore(t.TempDir()),
+		Deployer: fd,
+	}
+	rep := &Report{}
+	r.surveyStacks(context.Background(), cfg, Options{RedeployChanged: true}, true, rep)
+
+	sr := rep.Stacks[0]
+	if sr.Action != "deploy dropped" {
+		t.Errorf("got Action %q, want %q", sr.Action, "deploy dropped")
+	}
+	if sr.Detail == "" {
+		t.Error("a dropped submission should explain why in Detail")
 	}
 }
 

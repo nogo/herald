@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 
@@ -55,8 +56,19 @@ drift. This is the same pass the daemon runs on startup and on IaC pushes.`,
 			BlockOnDeploys:  true,
 		})
 		rep.Render(cmd.OutOrStdout())
-		return nil
+		return syncExitError(rep)
 	},
+}
+
+// syncExitError returns the error `herald sync` should exit with for a
+// completed pass, or nil. The report is always rendered first regardless of
+// this result, so a failed deployment is visible even though the process
+// exits nonzero.
+func syncExitError(rep *maintenance.Report) error {
+	if rep.Failed() {
+		return fmt.Errorf("maintenance pass recorded a failed deployment")
+	}
+	return nil
 }
 
 func init() {

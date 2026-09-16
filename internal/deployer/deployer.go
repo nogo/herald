@@ -45,6 +45,7 @@ type Deployer struct {
 	Limiter *Limiter
 
 	stackLocks sync.Map // string → *stackLock
+	wg         sync.WaitGroup
 }
 
 // cfg returns the live config snapshot, preferring LiveConfig when set.
@@ -74,17 +75,19 @@ func (d *Deployer) getStackLock(stackName string) *stackLock {
 	return v.(*stackLock)
 }
 
-// DeployAsync dispatches a deploy in a goroutine with per-stack serialization.
-// At most one deploy may be queued per stack; additional calls are dropped.
-func (d *Deployer) DeployAsync(stackName, ref string) {
+// DeployAsync dispatches a deploy in a goroutine with per-stack serialization
+// and reports whether it was queued. At most one deploy may be queued per
+// stack; additional calls are dropped and report false. Callers must not treat
+// a true return as success — the deploy has only been submitted.
+func (d *Deployer) DeployAsync(stackName, ref string) bool {
 	lock := d.getStackLock(stackName)
 	if lock.count.Add(1) > 2 {
 		lock.count.Add(-1)
 		d.Logger.Info("deploy already queued, dropping", "stack", stackName)
-		return
+		return false
 	}
 
-	go func() {
+	d.wg.Go(func() {
 		lock.mu.Lock()
 		defer lock.mu.Unlock()
 		defer lock.count.Add(-1)
@@ -104,7 +107,18 @@ func (d *Deployer) DeployAsync(stackName, ref string) {
 		if err := d.Deploy(ctx, stackName, ref); err != nil {
 			d.Logger.Error("deploy failed", "stack", stackName, "error", err)
 		}
-	}()
+	})
+	return true
+}
+
+// SetConfig updates the static config fallback used when LiveConfig is nil.
+func (d *Deployer) SetConfig(cfg *config.Config) {
+	d.Config = cfg
+}
+
+// Wait blocks until all in-progress deploys finish.
+func (d *Deployer) Wait() {
+	d.wg.Wait()
 }
 
 // effectiveRef returns the git ref to use for a deploy.
