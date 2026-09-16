@@ -1,7 +1,10 @@
 package preview
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,6 +221,152 @@ func TestPreviewOverrideContainsLabel(t *testing.T) {
 
 	if !strings.Contains(string(overrideData), "com.herald.preview: "+id) {
 		t.Errorf("override missing com.herald.preview label:\n%s", overrideData)
+	}
+}
+
+// installFakeDocker puts a fake "docker" binary at the front of PATH. It exits
+// 1 when HERALD_TEST_DOCKER_FAIL=1 is set in the environment, and 0 otherwise,
+// so tests can flip compose down between failing and succeeding without a real
+// Docker daemon.
+func installFakeDocker(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$HERALD_TEST_DOCKER_FAIL\" = \"1\" ]; then\n\techo fake docker failure >&2\n\texit 1\nfi\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func newTestManager(t *testing.T) *PreviewManager {
+	t.Helper()
+	return &PreviewManager{
+		DataDir: t.TempDir(),
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+// newTestPreviewDir creates a preview directory with the "repo" subdirectory
+// runComposeDown chdirs into, plus a marker file so tests can assert the
+// directory survives (or is removed).
+func newTestPreviewDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "repo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "marker"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestRemove_ComposeDownFailurePreservesState(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "1")
+
+	mgr := newTestManager(t)
+	previewDir := newTestPreviewDir(t)
+	marker := filepath.Join(previewDir, "marker")
+
+	info := PreviewInfo{ID: "app-branch", AppName: "app", Branch: "branch", Directory: previewDir, ComposeProject: "proj", ComposeFile: "compose.yml"}
+	if err := saveState(statePath(mgr.DataDir), &previewState{Previews: []PreviewInfo{info}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Remove(context.Background(), info.ID); err == nil {
+		t.Fatal("expected error from failed compose down, got nil")
+	}
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("preview directory was removed despite compose down failure: %v", err)
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Previews) != 1 || state.Previews[0].ID != info.ID {
+		t.Errorf("expected state entry to survive failed removal, got %+v", state.Previews)
+	}
+}
+
+func TestRemove_FilesystemCleanupFailurePreservesState(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "0")
+
+	mgr := newTestManager(t)
+	previewDir := newTestPreviewDir(t)
+
+	// Strip write permission on a subdirectory so os.RemoveAll cannot unlink the
+	// file inside it, forcing a real filesystem cleanup failure. Restored before
+	// t.TempDir's own cleanup runs (t.Cleanup is LIFO).
+	blocked := filepath.Join(previewDir, "blocked")
+	if err := os.MkdirAll(blocked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "file"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(blocked, 0755) }) //nolint:errcheck
+
+	info := PreviewInfo{ID: "app-branch", AppName: "app", Branch: "branch", Directory: previewDir, ComposeProject: "proj", ComposeFile: "compose.yml"}
+	if err := saveState(statePath(mgr.DataDir), &previewState{Previews: []PreviewInfo{info}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Remove(context.Background(), info.ID); err == nil {
+		t.Fatal("expected error from failed directory cleanup, got nil")
+	}
+
+	if _, err := os.Stat(previewDir); err != nil {
+		t.Errorf("preview directory should survive a failed cleanup: %v", err)
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Previews) != 1 || state.Previews[0].ID != info.ID {
+		t.Errorf("expected state entry to survive failed cleanup, got %+v", state.Previews)
+	}
+}
+
+func TestRemove_RetrySucceedsAfterComposeDownFailure(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "1")
+
+	mgr := newTestManager(t)
+	previewDir := newTestPreviewDir(t)
+
+	info := PreviewInfo{ID: "app-branch", AppName: "app", Branch: "branch", Directory: previewDir, ComposeProject: "proj", ComposeFile: "compose.yml"}
+	if err := saveState(statePath(mgr.DataDir), &previewState{Previews: []PreviewInfo{info}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Remove(context.Background(), info.ID); err == nil {
+		t.Fatal("expected first removal attempt to fail")
+	}
+
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "0")
+
+	if err := mgr.Remove(context.Background(), info.ID); err != nil {
+		t.Fatalf("retry after fixing compose down failed: %v", err)
+	}
+
+	if _, err := os.Stat(previewDir); !os.IsNotExist(err) {
+		t.Errorf("expected preview directory to be removed after successful retry, stat err = %v", err)
+	}
+
+	state, err := loadState(statePath(mgr.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Previews) != 0 {
+		t.Errorf("expected state entry to be removed after successful retry, got %+v", state.Previews)
 	}
 }
 
