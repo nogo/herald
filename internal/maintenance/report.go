@@ -64,10 +64,14 @@ type WebhookResult struct {
 
 // StackReport is the per-stack survey result and the action taken.
 type StackReport struct {
-	Name           string   `json:"name"`
-	Source         string   `json:"source"` // "repo" or "path"
-	State          string   `json:"state"`  // "running", "stopped", "not deployed"
-	Action         string   `json:"action"` // "redeployed", "report", "blocked", "config drift", "none"
+	Name   string `json:"name"`
+	Source string `json:"source"` // "repo" or "path"
+	State  string `json:"state"`  // "running", "stopped", "not deployed"
+	// Action: "redeployed" (confirmed synchronous success), "deploy failed"
+	// (synchronous failure, Detail holds the error), "deploy queued" or
+	// "deploy dropped" (asynchronous submission — result not yet known),
+	// "blocked", "config drift", "none".
+	Action         string   `json:"action"`
 	Detail         string   `json:"detail,omitempty"`
 	ConfigDrift    bool     `json:"config_drift,omitempty"` // config.yml changed since the last deploy
 	MissingSecrets []string `json:"missing_secrets,omitempty"`
@@ -76,6 +80,18 @@ type StackReport struct {
 // addErr appends a top-level error to the report.
 func (r *Report) addErr(format string, args ...any) {
 	r.Errors = append(r.Errors, fmt.Sprintf(format, args...))
+}
+
+// Failed reports whether the pass recorded a failed deployment. `herald sync`
+// uses this to exit nonzero while still rendering the full report and having
+// completed every independent maintenance step.
+func (r *Report) Failed() bool {
+	for _, s := range r.Stacks {
+		if s.Action == "deploy failed" {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadReport reads the last persisted maintenance report from
@@ -172,7 +188,7 @@ func (r *Report) Render(w io.Writer) {
 			r.Webhooks.Synced, r.Webhooks.Created, r.Webhooks.Pruned, r.Webhooks.Errors)
 	}
 
-	var running, stopped, notDeployed, redeployed int
+	var running, stopped, notDeployed, redeployed, queued, failed int
 	for _, s := range r.Stacks {
 		switch s.State {
 		case "running":
@@ -182,12 +198,17 @@ func (r *Report) Render(w io.Writer) {
 		case "not deployed":
 			notDeployed++
 		}
-		if s.Action == "redeployed" {
+		switch s.Action {
+		case "redeployed":
 			redeployed++
+		case "deploy queued", "deploy dropped":
+			queued++
+		case "deploy failed":
+			failed++
 		}
 	}
-	fmt.Fprintf(w, "  Stacks: %d running, %d stopped, %d not deployed, %d redeployed\n",
-		running, stopped, notDeployed, redeployed)
+	fmt.Fprintf(w, "  Stacks: %d running, %d stopped, %d not deployed, %d redeployed, %d queued, %d failed\n",
+		running, stopped, notDeployed, redeployed, queued, failed)
 
 	if len(r.Orphans) > 0 {
 		fmt.Fprintf(w, "  Orphans: %d\n", len(r.Orphans))
@@ -208,6 +229,14 @@ func (r *Report) Render(w io.Writer) {
 		if s.ConfigDrift {
 			pending = append(pending, fmt.Sprintf(
 				"  → Run 'herald deploy %s': config.yml changed since its last deploy (a domain change needs a redeploy to move the certificate)", s.Name))
+		}
+		switch s.Action {
+		case "deploy failed":
+			pending = append(pending, fmt.Sprintf("  → Stack '%s' deploy FAILED: %s", s.Name, s.Detail))
+		case "deploy queued":
+			pending = append(pending, fmt.Sprintf("  → Stack '%s' deploy queued — result not yet known", s.Name))
+		case "deploy dropped":
+			pending = append(pending, fmt.Sprintf("  → Stack '%s' deploy already in progress — not re-queued", s.Name))
 		}
 	}
 	if len(pending) > 0 {
