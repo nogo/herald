@@ -138,8 +138,6 @@ type Server struct {
 	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
 	// Lets the daemon publish reloaded config without racing in-flight handlers.
 	LiveConfig *atomic.Pointer[config.Config]
-
-	sem chan struct{} // bounds concurrent deploy callbacks; initialized in Handler
 }
 
 // conf returns the live config snapshot, preferring LiveConfig when set.
@@ -152,21 +150,11 @@ func (s *Server) conf() *config.Config {
 	return s.Config
 }
 
-// maxConcurrentDeploys bounds how many deploy/preview callbacks run at once so a
-// burst of matched stacks cannot spawn unbounded concurrent compose/git runs.
-const maxConcurrentDeploys = 4
-
-// dispatch runs fn in a goroutine, bounded by the deploy semaphore. The goroutine
-// is spawned immediately (so the HTTP handler returns) but blocks on a slot before
-// running fn, capping concurrent deploys.
+// dispatch runs fn in a goroutine so the HTTP handler returns immediately.
+// Capacity for the actual deployment work fn triggers is bounded downstream,
+// in the shared deployer.Limiter, not here.
 func (s *Server) dispatch(fn func()) {
-	go func() {
-		if s.sem != nil {
-			s.sem <- struct{}{}
-			defer func() { <-s.sem }()
-		}
-		fn()
-	}()
+	go fn()
 }
 
 // Handler returns the configured ServeMux with rate limiting.
@@ -174,10 +162,6 @@ func (s *Server) Handler() http.Handler {
 	// Per-IP rate limits: 30 requests/minute for webhooks, 6/minute for auth
 	// failures. Keying by client IP prevents one source from starving others.
 	webhookRL := newKeyedRateLimiter(0.5, 10) // 0.5/sec = 30/min, burst of 10
-
-	if s.sem == nil {
-		s.sem = make(chan struct{}, maxConcurrentDeploys)
-	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /webhook", func(w http.ResponseWriter, r *http.Request) {

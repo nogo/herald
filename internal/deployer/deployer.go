@@ -38,8 +38,13 @@ type Deployer struct {
 	// so reads are race-free under concurrent config swaps. CLI callers leave it nil.
 	LiveConfig *atomic.Pointer[config.Config]
 
+	// Limiter bounds actual concurrent deployment work, shared with preview
+	// deploys and with production deploys dispatched by maintenance. Daemon
+	// callers set it; CLI callers (herald deploy/sync, which never run deploys
+	// concurrently) leave it nil and DeployAsync runs unbounded.
+	Limiter *Limiter
+
 	stackLocks sync.Map // string → *stackLock
-	wg         sync.WaitGroup
 }
 
 // cfg returns the live config snapshot, preferring LiveConfig when set.
@@ -79,7 +84,7 @@ func (d *Deployer) DeployAsync(stackName, ref string) {
 		return
 	}
 
-	d.wg.Go(func() {
+	go func() {
 		lock.mu.Lock()
 		defer lock.mu.Unlock()
 		defer lock.count.Add(-1)
@@ -87,15 +92,19 @@ func (d *Deployer) DeployAsync(stackName, ref string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
+		if d.Limiter != nil {
+			release, err := d.Limiter.Acquire(ctx)
+			if err != nil {
+				d.Logger.Info("deploy not started", "stack", stackName, "error", err)
+				return
+			}
+			defer release()
+		}
+
 		if err := d.Deploy(ctx, stackName, ref); err != nil {
 			d.Logger.Error("deploy failed", "stack", stackName, "error", err)
 		}
-	})
-}
-
-// Wait blocks until all in-progress deploys finish.
-func (d *Deployer) Wait() {
-	d.wg.Wait()
+	}()
 }
 
 // effectiveRef returns the git ref to use for a deploy.
