@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nogo/herald/internal/config"
@@ -18,7 +19,7 @@ func newTestHandler(t *testing.T, cfg *config.Config) *WebHandler {
 		DataDir: t.TempDir(),
 		Logger:  slog.Default(),
 	}
-	h := NewWebHandler(collector, cfg, slog.Default())
+	h := NewWebHandler(collector, cfg, nil, slog.Default())
 	if h == nil {
 		t.Fatal("NewWebHandler returned nil")
 	}
@@ -151,4 +152,164 @@ func TestCachedStatus_TTL(t *testing.T) {
 	if c.ttl != 5 {
 		t.Errorf("ttl not set correctly")
 	}
+}
+
+// newLiveTestHandler builds a WebHandler backed by an atomic.Pointer[config.Config]
+// primed with initial, mirroring how cmd/serve.go publishes reloads.
+func newLiveTestHandler(t *testing.T, initial *config.Config) (*WebHandler, *atomic.Pointer[config.Config]) {
+	t.Helper()
+	live := &atomic.Pointer[config.Config]{}
+	live.Store(initial)
+	collector := &status.StatusCollector{
+		Config:     initial,
+		LiveConfig: live,
+		DataDir:    t.TempDir(),
+		Logger:     slog.Default(),
+	}
+	h := NewWebHandler(collector, initial, live, slog.Default())
+	if h == nil {
+		t.Fatal("NewWebHandler returned nil")
+	}
+	return h, live
+}
+
+// TestBuildPublic_ReloadTogglesPublicOff verifies that a reload flipping
+// availability.public from true to false hides the stack from the very next
+// response, even though the cached status snapshot (s) never changes.
+func TestBuildPublic_ReloadTogglesPublicOff(t *testing.T) {
+	before := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	h, live := newLiveTestHandler(t, before)
+
+	s := &status.ServerStatus{Stacks: []status.StackStatus{{Name: "blog", State: "running"}}}
+	if pub := h.buildPublic(s); len(pub.Services) != 1 {
+		t.Fatalf("before reload: expected blog visible, got %+v", pub.Services)
+	}
+
+	after := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: false}},
+	}}
+	live.Store(after)
+
+	if pub := h.buildPublic(s); len(pub.Services) != 0 {
+		t.Fatalf("after reload: expected blog hidden without restart, got %+v", pub.Services)
+	}
+}
+
+// TestBuildPublic_ReloadTogglesPublicOn verifies the opposite direction: a
+// stack that becomes public appears as soon as it is reflected in the status
+// snapshot (i.e. on the next normal cache refresh), without any special-casing.
+func TestBuildPublic_ReloadTogglesPublicOn(t *testing.T) {
+	before := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: false}},
+	}}
+	h, live := newLiveTestHandler(t, before)
+
+	s := &status.ServerStatus{Stacks: []status.StackStatus{{Name: "blog", State: "running"}}}
+	if pub := h.buildPublic(s); len(pub.Services) != 0 {
+		t.Fatalf("before reload: expected blog hidden, got %+v", pub.Services)
+	}
+
+	after := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	live.Store(after)
+
+	if pub := h.buildPublic(s); len(pub.Services) != 1 || pub.Services[0].Name != "blog" {
+		t.Fatalf("after reload: expected blog visible, got %+v", pub.Services)
+	}
+}
+
+// TestBuildPublic_ReloadDropsRemovedStack verifies that a stack removed from
+// config entirely (not just de-opted) disappears from public responses, even
+// while the cached status snapshot still reports it.
+func TestBuildPublic_ReloadDropsRemovedStack(t *testing.T) {
+	before := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+		"old":  {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	h, live := newLiveTestHandler(t, before)
+
+	s := &status.ServerStatus{Stacks: []status.StackStatus{
+		{Name: "blog", State: "running"},
+		{Name: "old", State: "running"},
+	}}
+	if pub := h.buildPublic(s); len(pub.Services) != 2 {
+		t.Fatalf("before reload: expected both stacks visible, got %+v", pub.Services)
+	}
+
+	after := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	live.Store(after)
+
+	pub := h.buildPublic(s)
+	if len(pub.Services) != 1 || pub.Services[0].Name != "blog" {
+		t.Fatalf("after reload: expected only blog visible, got %+v", pub.Services)
+	}
+}
+
+// TestWebHandlerCfg_FallsBackWhenLiveConfigUnset verifies that an unset
+// LiveConfig (mirroring a reload that never stored, e.g. because the reloaded
+// config was invalid) falls back to the last snapshot the handler was
+// constructed with, rather than panicking or exposing a zero-value config.
+func TestWebHandlerCfg_FallsBackWhenLiveConfigUnset(t *testing.T) {
+	cfg := &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	live := &atomic.Pointer[config.Config]{} // never stored - simulates no successful reload yet
+	h := NewWebHandler(&status.StatusCollector{Config: cfg, DataDir: t.TempDir(), Logger: slog.Default()}, cfg, live, slog.Default())
+	if h == nil {
+		t.Fatal("NewWebHandler returned nil")
+	}
+
+	if got := h.cfg(); got != cfg {
+		t.Fatalf("cfg() = %p, want fallback to startup config %p", got, cfg)
+	}
+}
+
+// TestBuildPublic_ConcurrentReloadsRaceFree exercises buildPublic against a
+// LiveConfig pointer that is swapped concurrently, to catch both data races
+// (run with -race) and torn reads that mix stacks across two config
+// generations within a single response.
+func TestBuildPublic_ConcurrentReloadsRaceFree(t *testing.T) {
+	cfgA := &config.Config{Stacks: map[string]config.Stack{
+		"a": {Availability: &config.AvailabilityConfig{Public: true}},
+		"b": {Availability: &config.AvailabilityConfig{Public: false}},
+	}}
+	cfgB := &config.Config{Stacks: map[string]config.Stack{
+		"a": {Availability: &config.AvailabilityConfig{Public: false}},
+		"b": {Availability: &config.AvailabilityConfig{Public: true}},
+	}}
+	h, live := newLiveTestHandler(t, cfgA)
+
+	s := &status.ServerStatus{Stacks: []status.StackStatus{
+		{Name: "a", State: "running"},
+		{Name: "b", State: "running"},
+	}}
+
+	const iterations = 500
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < iterations; i++ {
+			if i%2 == 0 {
+				live.Store(cfgA)
+			} else {
+				live.Store(cfgB)
+			}
+		}
+	}()
+
+	for i := 0; i < iterations; i++ {
+		pub := h.buildPublic(s)
+		// cfgA and cfgB each expose exactly one of "a"/"b" as public, never
+		// both and never neither - a mixed result would mean buildPublic read
+		// the config inconsistently across stacks within one response.
+		if len(pub.Services) != 1 {
+			t.Fatalf("expected exactly one public stack per snapshot, got %+v", pub.Services)
+		}
+	}
+	<-done
 }
