@@ -85,7 +85,7 @@ var serveCmd = &cobra.Command{
 			Caddy:      caddyMgr,
 			Preview:    previewMgr,
 		}
-		webHandler := web.NewWebHandler(collector, Cfg, slog.Default())
+		webHandler := web.NewWebHandler(collector, Cfg, live, slog.Default())
 		if webHandler != nil {
 			slog.Info("public status page enabled")
 		}
