@@ -38,7 +38,77 @@ type PreviewManager struct {
 	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
 	LiveConfig *atomic.Pointer[config.Config]
 
-	mu sync.Mutex // serialises state file reads and writes
+	mu sync.Mutex // serialises state file reads/writes and pending below
+
+	// pending tracks, per app, the preview IDs reserved by an in-flight
+	// first-time deploy that has not yet committed a state entry. It lets
+	// concurrent first-time deploys for the same app see each other's reserved
+	// slots and enforce maxPreviewsPerApp without racing. Guarded by mu.
+	pending map[string]map[string]struct{}
+
+	// opLocks holds one *sync.Mutex per preview ID, serialising that preview's
+	// Deploy and Remove calls end to end (git, generated files, compose, and
+	// state) so a branch push and a PR sync — or a deploy and a teardown — for
+	// the same preview cannot interleave. Entries are never removed: preview IDs
+	// are bounded by the branches a repo has ever had, so this stays small for
+	// the life of the daemon.
+	opLocks sync.Map // string → *sync.Mutex
+}
+
+// opLock returns the mutex serialising Deploy/Remove for a single preview ID.
+func (m *PreviewManager) opLock(id string) *sync.Mutex {
+	v, _ := m.opLocks.LoadOrStore(id, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// reservePreviewSlot decides whether id names an existing preview (an update)
+// or a new one, atomically with respect to other pending first-time deploys for
+// the same app. For a new preview it reserves a slot against maxPreviewsPerApp
+// until release is called, so two concurrent first-time deploys for the same
+// app cannot together exceed the limit. release must be called exactly once on
+// every exit path, including cancellation or failure, or the slot leaks for the
+// life of the daemon.
+func (m *PreviewManager) reservePreviewSlot(appName, id string) (isUpdate bool, release func(), err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	state, err := loadState(statePath(m.DataDir))
+	if err != nil {
+		return false, func() {}, fmt.Errorf("loading state: %w", err)
+	}
+
+	for _, p := range state.Previews {
+		if p.ID == id {
+			return true, func() {}, nil
+		}
+	}
+
+	count := len(m.pending[appName])
+	for _, p := range state.Previews {
+		if p.AppName == appName {
+			count++
+		}
+	}
+	if count >= maxPreviewsPerApp {
+		return false, func() {}, fmt.Errorf("max previews (%d) reached for app %q", maxPreviewsPerApp, appName)
+	}
+
+	if m.pending == nil {
+		m.pending = make(map[string]map[string]struct{})
+	}
+	if m.pending[appName] == nil {
+		m.pending[appName] = make(map[string]struct{})
+	}
+	m.pending[appName][id] = struct{}{}
+
+	return false, func() {
+		m.mu.Lock()
+		delete(m.pending[appName], id)
+		if len(m.pending[appName]) == 0 {
+			delete(m.pending, appName)
+		}
+		m.mu.Unlock()
+	}, nil
 }
 
 // cfg returns the live config snapshot, preferring LiveConfig when set.
@@ -121,30 +191,17 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	previewDir := m.previewDir(id)
 	composeProject := "herald-preview-" + id
 
-	m.mu.Lock()
-	state, err := loadState(statePath(m.DataDir))
+	// Serialise this preview's whole operation (git, generated files, compose,
+	// state) against any other Deploy or Remove for the same ID.
+	lock := m.opLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	isUpdate, releaseSlot, err := m.reservePreviewSlot(appName, id)
 	if err != nil {
-		m.mu.Unlock()
-		return fmt.Errorf("loading state: %w", err)
+		return err
 	}
-
-	// Count existing previews for this app (excluding an update to this id).
-	existingCount := 0
-	isUpdate := false
-	for _, p := range state.Previews {
-		if p.AppName == appName {
-			if p.ID == id {
-				isUpdate = true
-			} else {
-				existingCount++
-			}
-		}
-	}
-	m.mu.Unlock()
-
-	if !isUpdate && existingCount >= maxPreviewsPerApp {
-		return fmt.Errorf("max previews (%d) reached for app %q", maxPreviewsPerApp, appName)
-	}
+	defer releaseSlot()
 
 	m.Logger.Info("preview deploy started", "id", id, "domain", domain)
 	start := time.Now()
@@ -222,7 +279,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	state, err = loadState(statePath(m.DataDir))
+	state, err := loadState(statePath(m.DataDir))
 	if err != nil {
 		return fmt.Errorf("reloading state: %w", err)
 	}
@@ -274,6 +331,14 @@ func (m *PreviewManager) List() ([]PreviewInfo, error) {
 
 // Remove tears down the preview with the given ID.
 func (m *PreviewManager) Remove(ctx context.Context, previewID string) error {
+	// Serialise against a Deploy (or another Remove) for the same preview ID.
+	// A teardown accepted while a deploy is in progress waits for that deploy to
+	// finish (successfully or not) before it acts, so it never removes files out
+	// from under a running compose/git operation.
+	lock := m.opLock(previewID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	m.mu.Lock()
 	state, err := loadState(statePath(m.DataDir))
 	if err != nil {
