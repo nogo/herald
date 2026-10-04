@@ -70,6 +70,12 @@ func (i Instance) ComposeFile(stack config.Stack) (string, error) {
 	return filepath.Join(i.RepoDir(), name), nil
 }
 
+// ComposeArgs returns the docker compose arguments that address this instance,
+// ready for a subcommand to be appended. Run them from RepoDir.
+func (i Instance) ComposeArgs(composeFile string) []string {
+	return i.composeContext(composeFile).BaseArgs()
+}
+
 // composeContext returns the docker compose invocation for the instance. The
 // generated .env and override are included only once they exist, so a stack
 // whose deploy failed early can still be taken down.

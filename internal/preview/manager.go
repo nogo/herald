@@ -14,8 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nogo/herald/internal/caddy"
-	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/git"
@@ -190,8 +188,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 
 	id := makeID(appName, branch)
 	domain := SubdomainFromBranch(branch, app.Preview.Domain)
-	previewDir := m.previewDir(id)
-	composeProject := "herald-preview-" + id
+	inst := deployer.PreviewInstance(m.cfg(), id)
 
 	// Serialise this preview's whole operation (git, generated files, compose,
 	// state) against any other Deploy or Remove for the same ID.
@@ -216,60 +213,36 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	m.Logger.Info("preview deploy started", "id", id, "domain", domain)
 	start := time.Now()
 
-	if err := os.MkdirAll(previewDir, 0755); err != nil {
+	if err := os.MkdirAll(inst.Dir, 0755); err != nil {
 		return fmt.Errorf("creating preview dir: %w", err)
 	}
 
-	if err := m.gitSync(ctx, previewDir, app, branch); err != nil {
+	if err := git.CloneOrFetch(ctx, m.cfg().Server.GithubToken, inst.RepoDir(), git.RepoURL(app.Repo), branch); err != nil {
 		return fmt.Errorf("git: %w", err)
 	}
 
 	// Previews intentionally receive NO secrets. A preview can be triggered by an
 	// untrusted pull request, so production secrets must never be resolved into a
-	// preview environment. Only the non-secret env_file (app.EnvFile) flows in, via
-	// envFilePaths below. We still write an empty .env so the override's env_file
-	// reference resolves.
-	var dockerSecrets map[string]string
-	if err := deployer.WriteEnvFile(filepath.Join(previewDir, ".env"), map[string]string{}); err != nil {
+	// preview environment. Only the non-secret env_file (app.EnvFile) flows in. We
+	// still write an empty .env so the override's env_file reference resolves.
+	if err := deployer.WriteEnvFile(inst.EnvFile(), map[string]string{}); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
 	}
 
-	repoDir := filepath.Join(previewDir, "repo")
-	envFilePaths := []string{filepath.Join(previewDir, ".env")}
-	if app.EnvFile != "" {
-		envFilePaths = append(envFilePaths, app.EnvFile)
+	composeFile, err := inst.ComposeFile(app)
+	if err != nil {
+		return fmt.Errorf("finding compose file: %w", err)
 	}
-	composeFile := app.Compose
-	if !filepath.IsAbs(composeFile) {
-		composeFile = filepath.Join(repoDir, composeFile)
-	}
-	internalNet := "herald-preview-" + id + "-internal"
-
-	overrideData, err := deployer.GenerateOverride(deployer.OverrideParams{
-		DeployDir:      previewDir,
+	err = deployer.Up(ctx, inst, deployer.UpSpec{
 		StackName:      appName,
 		Domain:         domain,
 		ComposeFile:    composeFile,
-		EnvFilePaths:   envFilePaths,
-		DockerSecrets:  dockerSecrets,
+		EnvFile:        app.EnvFile,
 		DefaultPort:    "3000",
-		InternalNet:    internalNet,
 		InlineOverride: app.Override,
-	})
+	}, m.Logger, nil)
 	if err != nil {
-		return fmt.Errorf("generating override: %w", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(previewDir, "compose.override.yml"), overrideData, 0644); err != nil {
-		return fmt.Errorf("writing override: %w", err)
-	}
-
-	if err := caddy.EnsureNetwork(ctx, m.Logger); err != nil {
-		return fmt.Errorf("ensuring caddy network: %w", err)
-	}
-
-	if err := m.runCompose(ctx, previewDir, composeProject, app.Compose); err != nil {
-		return fmt.Errorf("compose: %w", err)
+		return fmt.Errorf("bringing up preview: %w", err)
 	}
 
 	m.mu.Lock()
@@ -293,8 +266,8 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 			AppName:        appName,
 			Branch:         branch,
 			Domain:         domain,
-			Directory:      previewDir,
-			ComposeProject: composeProject,
+			Directory:      inst.Dir,
+			ComposeProject: inst.Project,
 			ComposeFile:    app.Compose,
 			CreatedAt:      time.Now().UTC(),
 			Commit:         commit,
@@ -356,7 +329,7 @@ func (m *PreviewManager) Remove(ctx context.Context, previewID string) error {
 		return fmt.Errorf("preview %q not found", previewID)
 	}
 
-	if err := m.runComposeDown(ctx, found.Directory, found.ComposeProject, found.ComposeFile); err != nil {
+	if err := m.composeDown(ctx, *found); err != nil {
 		return fmt.Errorf("compose down: %w", err)
 	}
 
@@ -426,11 +399,6 @@ func (m *PreviewManager) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-// previewDir returns the directory for a preview deployment.
-func (m *PreviewManager) previewDir(id string) string {
-	return filepath.Join(m.cfg().Server.ServicesDir, "previews", id)
-}
-
 // branchExists checks whether the branch exists on the remote.
 func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, branch string) (bool, error) {
 	if err := git.ValidateRef(branch); err != nil {
@@ -444,41 +412,17 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, bra
 	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
-// --- Deploy helpers ---
-
-func (m *PreviewManager) gitSync(ctx context.Context, previewDir string, app config.Stack, branch string) error {
-	repoDir := filepath.Join(previewDir, "repo")
-	return git.CloneOrFetch(ctx, m.cfg().Server.GithubToken, repoDir, git.RepoURL(app.Repo), branch)
-}
-
-func (m *PreviewManager) composeContext(previewDir, composeProject, composeFile string) compose.Context {
-	repoDir := filepath.Join(previewDir, "repo")
+// composeDown removes the preview's containers, volumes and the images compose
+// built for it.
+func (m *PreviewManager) composeDown(ctx context.Context, p PreviewInfo) error {
+	inst := deployer.Instance{Dir: p.Directory, Project: p.ComposeProject}
+	composeFile := p.ComposeFile
 	if !filepath.IsAbs(composeFile) {
-		composeFile = filepath.Join(repoDir, composeFile)
+		composeFile = filepath.Join(inst.RepoDir(), composeFile)
 	}
-	return compose.Context{
-		ProjectName:  composeProject,
-		ComposeFile:  composeFile,
-		OverrideFile: filepath.Join(previewDir, "compose.override.yml"),
-		EnvFile:      filepath.Join(previewDir, ".env"),
-		WorkDir:      repoDir,
-	}
-}
-
-func (m *PreviewManager) runCompose(ctx context.Context, previewDir, composeProject, composeFile string) error {
-	cctx := m.composeContext(previewDir, composeProject, composeFile)
-	m.Logger.Info("compose up", "project", composeProject)
-	args := cctx.BaseArgs()
-	args = append(args, "up", "-d", "--build", "--remove-orphans")
-	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
-}
-
-func (m *PreviewManager) runComposeDown(ctx context.Context, previewDir, composeProject, composeFile string) error {
-	cctx := m.composeContext(previewDir, composeProject, composeFile)
-	m.Logger.Info("compose down", "project", composeProject)
-	args := cctx.BaseArgs()
+	m.Logger.Info("compose down", "project", inst.Project)
 	// --rmi local removes the images compose built for this preview; images with
 	// an explicit image: name (pulled, or shared with production) are kept.
-	args = append(args, "down", "--volumes", "--remove-orphans", "--rmi", "local")
-	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
+	args := append(inst.ComposeArgs(composeFile), "down", "--volumes", "--remove-orphans", "--rmi", "local")
+	return runner.RunCmd(ctx, m.Logger, inst.RepoDir(), "docker", args...)
 }

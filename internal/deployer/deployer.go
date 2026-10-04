@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/git"
@@ -148,15 +147,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		u.Done(stackName, deployErr, time.Since(start))
 	}()
 
-	step := func(name string, fn func() error) error {
-		u.Step(name)
-		if err := fn(); err != nil {
-			u.StepFail(err)
-			return err
-		}
-		u.StepDone("")
-		return nil
-	}
+	step := func(name string, fn func() error) error { return runStep(u, name, fn) }
 	stepDetail := func(name string, fn func() (string, error)) error {
 		u.Step(name)
 		detail, err := fn()
@@ -281,54 +272,15 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		defaultPort = "80"
 	}
 
-	// Generate compose override.
-	deployErr = step("Compose override", func() error {
-		deployRoot, err := os.OpenRoot(deployDir)
-		if err != nil {
-			return fmt.Errorf("opening deploy root: %w", err)
-		}
-		defer deployRoot.Close()
-
-		envFilePaths := []string{inst.EnvFile()}
-		if stack.EnvFile != "" {
-			envFilePaths = append(envFilePaths, stack.EnvFile)
-		}
-		data, err := GenerateOverride(OverrideParams{
-			DeployDir:      deployDir,
-			StackName:      stackName,
-			Domain:         stack.Domain,
-			ComposeFile:    composeFile,
-			EnvFilePaths:   envFilePaths,
-			DockerSecrets:  dockerSecrets,
-			DefaultPort:    defaultPort,
-			InternalNet:    inst.InternalNetwork(),
-			InlineOverride: stack.Override,
-		})
-		if err != nil {
-			return err
-		}
-		f, err := deployRoot.OpenFile(filepath.Base(inst.OverrideFile()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = f.Write(data)
-		return err
-	})
-	if deployErr != nil {
-		return deployErr
-	}
-
-	// Ensure the caddy network exists before compose up.
-	if err := caddy.EnsureNetwork(ctx, d.Logger); err != nil {
-		deployErr = fmt.Errorf("ensuring caddy network: %w", err)
-		return deployErr
-	}
-
-	// Compose up.
-	deployErr = step("Compose up", func() error {
-		return d.runCompose(ctx, inst, composeFile)
-	})
+	deployErr = Up(ctx, inst, UpSpec{
+		StackName:      stackName,
+		Domain:         stack.Domain,
+		ComposeFile:    composeFile,
+		EnvFile:        stack.EnvFile,
+		DockerSecrets:  dockerSecrets,
+		DefaultPort:    defaultPort,
+		InlineOverride: stack.Override,
+	}, d.Logger, u)
 	if deployErr != nil {
 		return deployErr
 	}
@@ -525,25 +477,6 @@ func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes boo
 	ui.FlushStreamWriter(u)
 	u.StepDone("")
 	return nil
-}
-
-// runCompose executes docker compose up -d --build --remove-orphans.
-func (d *Deployer) runCompose(ctx context.Context, inst Instance, composeFile string) error {
-	cctx := inst.composeContext(composeFile)
-
-	d.Logger.Info("compose up", "project", cctx.ProjectName)
-	args := cctx.BaseArgs()
-	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
-	stream := d.ui().StreamWriter()
-	if stream == nil {
-		// Daemon: no UI stream, so compose output goes to the log instead.
-		return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
-	}
-	sw := &composeFilterWriter{w: stream}
-	err := runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
-	sw.Flush()
-	ui.FlushStreamWriter(d.ui())
-	return err
 }
 
 // composeFilterWriter drops per-layer pull chatter (`<hex> Pulling fs layer`,
