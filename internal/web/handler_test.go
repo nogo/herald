@@ -1,11 +1,13 @@
 package web
 
 import (
+	"github.com/nogo/herald/internal/availability"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/status"
@@ -133,12 +135,13 @@ func TestBuildPublic_OverallStates(t *testing.T) {
 	}
 }
 
-func TestBuildPublic_NoPublicStacksIsUnknown(t *testing.T) {
+func TestBuildPublic_NoPublicStacksHasNoOverall(t *testing.T) {
 	cfg := &config.Config{Stacks: map[string]config.Stack{"a": {}}}
 	h := newTestHandler(t, cfg)
 	s := &status.ServerStatus{Stacks: []status.StackStatus{{Name: "a", State: "running"}}}
-	if got := h.buildPublic(s).Overall; got != "unknown" {
-		t.Errorf("overall = %q, want unknown", got)
+	pub := h.buildPublic(s)
+	if pub.Overall != "" || len(pub.Services) != 0 {
+		t.Errorf("got %+v, want no overall and no services", pub)
 	}
 }
 
@@ -290,4 +293,101 @@ func TestBuildPublic_ConcurrentReloadsRaceFree(t *testing.T) {
 		}
 	}
 	<-done
+}
+
+func render(t *testing.T, h *WebHandler, s *status.ServerStatus) string {
+	t.Helper()
+	var sb strings.Builder
+	if err := h.Templates.ExecuteTemplate(&sb, "status", h.buildPublic(s)); err != nil {
+		t.Fatal(err)
+	}
+	return sb.String()
+}
+
+func TestStatusPage_NoPublicStacks(t *testing.T) {
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{"a": {}}})
+	out := render(t, h, &status.ServerStatus{Stacks: []status.StackStatus{{Name: "a", State: "running"}}})
+	if !strings.Contains(out, "No services are listed publicly") {
+		t.Errorf("missing neutral empty state:\n%s", out)
+	}
+	for _, bad := range []string{`class="overall`, "unknown"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("empty page contains %q", bad)
+		}
+	}
+}
+
+func TestStatusPage_NoHistoryIsNoDataNotUp(t *testing.T) {
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}})
+	s := &status.ServerStatus{Stacks: []status.StackStatus{{Name: "blog", State: "running"}}}
+	pub := h.buildPublic(s)
+	svc := pub.Services[0]
+	if svc.State != "up" || len(svc.Days) != 90 || svc.Uptime != "" {
+		t.Fatalf("got state %q, %d days, uptime %q", svc.State, len(svc.Days), svc.Uptime)
+	}
+	for _, d := range svc.Days {
+		if d.State != "nodata" {
+			t.Fatalf("day without history is %q, want nodata", d.State)
+		}
+	}
+}
+
+func TestStatusPage_HistoryAndHover(t *testing.T) {
+	h := newTestHandler(t, &config.Config{Stacks: map[string]config.Stack{
+		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
+	}})
+	log := availability.NewLog(h.Collector.DataDir)
+	now := time.Now().UTC()
+	yesterday := now.Truncate(24 * time.Hour).Add(-24*time.Hour + 10*time.Hour + 17*time.Minute + 33*time.Second)
+	for _, e := range []struct {
+		at    time.Time
+		state string
+	}{{yesterday, "up"}, {yesterday.Add(time.Hour), "down"}, {yesterday.Add(2 * time.Hour), "up"}} {
+		if err := log.Record("blog", e.state, e.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := render(t, h, &status.ServerStatus{Stacks: []status.StackStatus{{Name: "blog", State: "running"}}})
+	if !strings.Contains(out, ": 60 min degraded or down") || !strings.Contains(out, "uptime") {
+		t.Errorf("missing day hover or uptime:\n%s", out)
+	}
+	if strings.Contains(out, "10:17") || strings.Contains(out, "11:17") {
+		t.Errorf("page leaks the time of a state change")
+	}
+}
+
+// TestStatusPage_LeaksNothing renders a stack with every identifying field set
+// and checks none of them reaches the page or its source.
+func TestStatusPage_LeaksNothing(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.Server{Name: "rivendell-prod", DeployDomain: "deploy.acme.example", ServicesDir: "/opt/acme-services"},
+		Stacks: map[string]config.Stack{
+			"blog": {
+				Repo: "acme-corp/blog-app", Branch: "release-branch", Domain: "blog.acme.example",
+				Availability: &config.AvailabilityConfig{Public: true},
+				Secrets:      []config.SecretRef{{Key: "STRIPE_API_KEY", Type: "env", Target: "STRIPE"}},
+			},
+		},
+	}
+	h := newTestHandler(t, cfg)
+	log := availability.NewLog(h.Collector.DataDir)
+	if err := log.Record("blog", "running", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, h, &status.ServerStatus{
+		ServerName: "rivendell-prod",
+		Stacks: []status.StackStatus{{
+			Name: "blog", Domain: "blog.acme.example", State: "running", DeployedRef: "release-branch@c0ffee1",
+		}},
+	})
+	for _, leak := range []string{
+		"rivendell", "acme", "blog.acme.example", "release-branch", "c0ffee1",
+		"herald-blog", "STRIPE_API_KEY", h.Collector.DataDir, "opt/acme", ".jsonl",
+	} {
+		if strings.Contains(out, leak) {
+			t.Errorf("public page leaked %q", leak)
+		}
+	}
 }

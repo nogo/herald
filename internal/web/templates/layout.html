@@ -45,9 +45,15 @@
     .overall.operational { background: var(--running); }
     .overall.degraded { background: var(--degraded); }
     .overall.down { background: var(--error); }
-    .overall.unknown { background: var(--stopped); }
     .services { list-style: none; padding: 0; margin: 0; }
-    .services li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .services li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .service-head { display: flex; align-items: center; gap: 8px; }
+    .bars { display: flex; gap: 2px; margin-top: 8px; }
+    .bar { flex: 1; height: 28px; border-radius: 2px; background: var(--border); }
+    .bar.up { background: var(--running); }
+    .bar.degraded { background: var(--degraded); }
+    .bar.down { background: var(--error); }
+    .bars-foot { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; margin-top: 4px; }
     .service-name { flex: 1; }
     .service-state { text-transform: capitalize; color: var(--text-muted); }
     .empty { color: var(--text-muted); font-style: italic; }

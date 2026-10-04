@@ -404,3 +404,5 @@ After deployment the directory structure under `services_dir` looks like:
       .env
       compose.override.yml
 ```
+
+`<data_dir>/availability/<stack>.jsonl` holds the public availability history of each `availability.public` stack: one line per state change and one heartbeat line per day. These files are the one Herald record that cannot be rebuilt from git or Docker, so back them up if the history matters. Deleting them loses history only: the status page then shows today's state and "no data" for the past.
