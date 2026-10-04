@@ -349,7 +349,7 @@ func TestReadDeployedIaCCommit(t *testing.T) {
 	dir := t.TempDir()
 
 	// No file → empty.
-	if got := ReadDeployedIaCCommit(dir); got != "" {
+	if got := (Instance{Dir: dir}).DeployedIaCCommit(); got != "" {
 		t.Errorf("no record: got %q, want \"\"", got)
 	}
 
@@ -357,7 +357,7 @@ func TestReadDeployedIaCCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "deployed_ref"), []byte("path@abc1234\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ReadDeployedIaCCommit(dir); got != "abc1234" {
+	if got := (Instance{Dir: dir}).DeployedIaCCommit(); got != "abc1234" {
 		t.Errorf("path record: got %q, want \"abc1234\"", got)
 	}
 
@@ -365,7 +365,7 @@ func TestReadDeployedIaCCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "deployed_ref"), []byte("main@def5678"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ReadDeployedIaCCommit(dir); got != "" {
+	if got := (Instance{Dir: dir}).DeployedIaCCommit(); got != "" {
 		t.Errorf("repo record: got %q, want \"\"", got)
 	}
 }

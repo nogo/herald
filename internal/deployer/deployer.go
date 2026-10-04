@@ -290,47 +290,21 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 	if stack.Repo != "" {
 		deployRef := effectiveRef(stack, ref)
 		if commit, err := readDeployedCommit(inst.RepoDir()); err == nil {
-			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
+			inst.recordRef(deployRef, commit)
 		}
 	} else {
 		iacRepoDir := filepath.Join(d.DataDir, "repo")
 		if commit, err := readDeployedCommit(iacRepoDir); err == nil {
-			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte("path@"+commit), 0644)
+			inst.recordRef("path", commit)
 		}
 	}
 
 	// Record the stack's config fingerprint alongside the ref. The ref only tracks
 	// source movement; this tracks config.yml, which is what a domain change edits.
-	_ = os.WriteFile(filepath.Join(deployDir, "deployed_config"), []byte(stack.Hash()), 0644)
+	inst.recordConfig(stack)
 
 	d.Logger.Info("deploy complete", "stack", stackName, "duration", time.Since(start).Round(time.Millisecond))
 	return nil
-}
-
-// ConfigDrifted reports whether config.yml changed the stack since its last
-// deploy. A stack deployed before Herald recorded fingerprints has no stamp; that
-// is reported as no drift, so an upgrade does not flag every stack at once.
-func ConfigDrifted(deployDir string, stack config.Stack) bool {
-	data, err := os.ReadFile(filepath.Join(deployDir, "deployed_config"))
-	if err != nil {
-		return false
-	}
-	recorded := strings.TrimSpace(string(data))
-	return recorded != "" && recorded != stack.Hash()
-}
-
-// ReadDeployedIaCCommit returns the IaC commit a path stack was last deployed
-// from, read from <deployDir>/deployed_ref (format "path@<commit>"). Returns ""
-// if the stack has no record or is not a path stack.
-func ReadDeployedIaCCommit(deployDir string) string {
-	data, err := os.ReadFile(filepath.Join(deployDir, "deployed_ref"))
-	if err != nil {
-		return ""
-	}
-	if rest, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "path@"); ok {
-		return rest
-	}
-	return ""
 }
 
 // readDeployedCommit returns the short HEAD commit hash of the given repo dir.

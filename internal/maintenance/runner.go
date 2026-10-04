@@ -308,14 +308,14 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 			sr.Source = "repo"
 		}
 
-		deployDir := filepath.Join(cfg.Server.ServicesDir, name)
-		if _, err := os.Stat(deployDir); os.IsNotExist(err) {
+		inst := deployer.StackInstance(cfg, name)
+		if !inst.Exists() {
 			sr.State = "not deployed"
 			rep.Stacks = append(rep.Stacks, sr)
 			continue
 		}
 
-		if StackRunning(ctx, name) {
+		if StackRunning(ctx, inst.Project) {
 			sr.State = "running"
 		} else {
 			sr.State = "stopped"
@@ -332,7 +332,7 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 		// config.yml can change a stack without its source moving — a `domain:` edit
 		// being the case that silently breaks TLS, since the running container keeps
 		// its old caddy label and the new domain never gets a certificate.
-		sr.ConfigDrift = deployer.ConfigDrifted(deployDir, stack)
+		sr.ConfigDrift = inst.ConfigDrifted(stack)
 
 		// The only automated deploy: a changed auto_deploy path stack with secrets
 		// satisfied and a valid config. Everything else is report-only.
@@ -340,7 +340,7 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 			if len(missing) > 0 {
 				sr.Action = "blocked"
 			} else {
-				recorded := deployer.ReadDeployedIaCCommit(deployDir)
+				recorded := inst.DeployedIaCCommit()
 				changed, cerr := pathStackChanged(ctx, repoDir, recorded, stack.Path)
 				if cerr != nil {
 					r.Logger.Warn("path change detection failed; redeploying to be safe",
@@ -429,10 +429,10 @@ func asExitError(err error, target **exec.ExitError) bool {
 	return false
 }
 
-// StackRunning reports whether the stack's compose project has running containers.
-func StackRunning(ctx context.Context, name string) bool {
+// StackRunning reports whether the compose project has running containers.
+func StackRunning(ctx context.Context, project string) bool {
 	out, err := exec.CommandContext(ctx, "docker", "compose",
-		"-p", "herald-"+name, "ps", "--format", "json").Output()
+		"-p", project, "ps", "--format", "json").Output()
 	trimmed := strings.TrimSpace(string(out))
 	return err == nil && trimmed != "" && trimmed != "[]"
 }
@@ -479,16 +479,13 @@ func DetectOrphans(ctx context.Context, cfg *config.Config) []string {
 	if err := json.Unmarshal(out, &projects); err != nil {
 		return nil
 	}
-	known := map[string]bool{"herald-caddy": true}
-	for name := range cfg.Stacks {
-		known["herald-"+name] = true
-	}
 	var orphans []string
 	for _, p := range projects {
-		if !strings.HasPrefix(p.Name, "herald-") || strings.HasPrefix(p.Name, "herald-preview-") {
+		name, ok := deployer.StackNameOf(p.Name)
+		if !ok || p.Name == caddy.ProjectName {
 			continue
 		}
-		if !known[p.Name] {
+		if _, configured := cfg.Stacks[name]; !configured {
 			orphans = append(orphans, p.Name)
 		}
 	}

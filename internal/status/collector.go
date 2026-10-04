@@ -17,6 +17,7 @@ import (
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/deployer"
 	githelper "github.com/nogo/herald/internal/git"
 	"github.com/nogo/herald/internal/preview"
 )
@@ -217,23 +218,20 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 		s.Source = "repo"
 	}
 
-	deployDir := filepath.Join(c.cfg().Server.ServicesDir, name)
-	if _, err := os.Stat(deployDir); os.IsNotExist(err) {
+	inst := deployer.StackInstance(c.cfg(), name)
+	if !inst.Exists() {
 		s.State = "not deployed"
 		return s
 	}
 
 	if stack.Repo != "" {
-		if data, err := os.ReadFile(filepath.Join(deployDir, "deployed_ref")); err == nil {
-			s.DeployedRef = strings.TrimSpace(string(data))
-		}
-		repoDir := filepath.Join(deployDir, "repo")
-		if commit, err := readGitHead(ctx, repoDir); err == nil {
+		s.DeployedRef = inst.DeployedRef()
+		if commit, err := readGitHead(ctx, inst.RepoDir()); err == nil {
 			s.LastCommit = commit
 		}
 	}
 
-	up, total, state, err := queryDockerCompose(ctx, "herald-"+name)
+	up, total, state, err := queryDockerCompose(ctx, inst.Project)
 	if err != nil {
 		c.Logger.Warn("docker compose ps failed", "stack", name, "error", err)
 		s.State = "error"

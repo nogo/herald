@@ -267,7 +267,7 @@ func deployedStackCount(d Deps) int {
 	}
 	n := 0
 	for name := range d.Config.Stacks {
-		if _, err := os.Stat(filepath.Join(d.Config.Server.ServicesDir, name)); err == nil {
+		if deployer.StackInstance(d.Config, name).Exists() {
 			n++
 		}
 	}
@@ -368,8 +368,8 @@ func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
 				strings.Join(missing, ", "), "herald secret set "+missing[0])
 		}
 
-		deployDir := filepath.Join(d.Config.Server.ServicesDir, name)
-		if _, err := os.Stat(deployDir); os.IsNotExist(err) {
+		inst := deployer.StackInstance(d.Config, name)
+		if !inst.Exists() {
 			di.fail(catStacks, name+": not deployed",
 				"no deploy directory — first deploy is manual", "herald deploy "+name)
 			continue
@@ -377,17 +377,17 @@ func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
 		// config.yml edited since the last deploy. A domain change is the case that
 		// matters: the container keeps its old caddy label until it is redeployed,
 		// so the new domain never gets a certificate.
-		if deployer.ConfigDrifted(deployDir, stack) {
+		if inst.ConfigDrifted(stack) {
 			di.fail(catStacks, name+": config drift",
 				"config.yml changed this stack since its last deploy", "herald deploy "+name)
 		}
 
-		if maintenance.StackRunning(ctx, name) {
+		if maintenance.StackRunning(ctx, inst.Project) {
 			di.pass(catStacks, name)
 		} else {
 			di.warn(catStacks, name+": stopped",
 				"deploy directory exists but no containers are running",
-				"docker compose -p herald-"+name+" ps")
+				"docker compose -p "+inst.Project+" ps")
 		}
 	}
 }
@@ -397,7 +397,7 @@ func (di *Diagnosis) checkOrphans(ctx context.Context, d Deps) {
 		return
 	}
 	for _, project := range maintenance.DetectOrphans(ctx, d.Config) {
-		name := strings.TrimPrefix(project, "herald-")
+		name, _ := deployer.StackNameOf(project)
 		di.warn(catStacks, project+": orphan", "running but not present in config",
 			"inspect: docker compose -p "+project+" ps  ·  remove: herald down "+name)
 	}
@@ -423,20 +423,10 @@ func (di *Diagnosis) buildInventory(d Deps) {
 			inv.AutoDeploy = stack.AutoDeploy
 			inv.Update = stack.UpdateScript
 		}
-		inv.DeployRef = readDeployRef(filepath.Join(d.Config.Server.ServicesDir, name))
+		inv.DeployRef = deployer.StackInstance(d.Config, name).DeployedRef()
 		for _, s := range stack.Secrets {
 			inv.Secrets = append(inv.Secrets, s.Key+" → "+s.Type+":"+s.Target)
 		}
 		di.Stacks = append(di.Stacks, inv)
 	}
-}
-
-// readDeployRef returns the raw deployed_ref stamp ("main@abc123" or
-// "path@def456"), or "" if the stack was never deployed.
-func readDeployRef(deployDir string) string {
-	data, err := os.ReadFile(filepath.Join(deployDir, "deployed_ref"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }

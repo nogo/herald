@@ -273,7 +273,7 @@ func TestConfigDrifted(t *testing.T) {
 
 	// No stamp at all: a stack deployed before Herald recorded fingerprints must
 	// not be reported as drifted, or an upgrade flags every stack at once.
-	if ConfigDrifted(dir, stack) {
+	if (Instance{Dir: dir}).ConfigDrifted(stack) {
 		t.Error("ConfigDrifted = true with no stamp, want false")
 	}
 
@@ -285,26 +285,26 @@ func TestConfigDrifted(t *testing.T) {
 	}
 
 	stamp(stack)
-	if ConfigDrifted(dir, stack) {
+	if (Instance{Dir: dir}).ConfigDrifted(stack) {
 		t.Error("ConfigDrifted = true for an unchanged stack, want false")
 	}
 
 	// The case that silently broke TLS: domain edited, source untouched.
 	moved := stack
 	moved.Domain = "new.example.com"
-	if !ConfigDrifted(dir, moved) {
+	if !(Instance{Dir: dir}).ConfigDrifted(moved) {
 		t.Error("ConfigDrifted = false after a domain change, want true")
 	}
 
 	// Non-routing fields count too — any config.yml edit needs a redeploy to apply.
 	renamed := stack
 	renamed.Branch = "release"
-	if !ConfigDrifted(dir, renamed) {
+	if !(Instance{Dir: dir}).ConfigDrifted(renamed) {
 		t.Error("ConfigDrifted = false after a branch change, want true")
 	}
 
 	stamp(moved)
-	if ConfigDrifted(dir, moved) {
+	if (Instance{Dir: dir}).ConfigDrifted(moved) {
 		t.Error("ConfigDrifted = true right after redeploying the changed stack, want false")
 	}
 }

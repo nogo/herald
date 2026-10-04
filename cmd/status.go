@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/status"
 	"github.com/nogo/herald/internal/ui"
@@ -75,8 +76,8 @@ type containerStats struct {
 	memBytes   int64
 }
 
-// collectContainerStats returns live CPU/memory aggregated per compose project
-// (keyed "herald-<stack>"). It is best-effort: any failure yields a nil map and
+// collectContainerStats returns live CPU/memory aggregated per production stack,
+// keyed by stack name. It is best-effort: any failure yields a nil map and
 // the caller renders no CPU/mem rather than failing the status command. Two
 // docker calls total, independent of stack count: `docker ps` to map each
 // container to its compose project, then `docker stats --no-stream`.
@@ -113,10 +114,14 @@ func collectContainerStats(ctx context.Context) map[string]containerStats {
 		if !ok {
 			continue
 		}
-		cur := agg[project]
+		name, ok := deployer.StackNameOf(project)
+		if !ok {
+			continue
+		}
+		cur := agg[name]
 		cur.cpuPercent += parseCPUPerc(fields[1])
 		cur.memBytes += parseMemUsage(fields[2])
-		agg[project] = cur
+		agg[name] = cur
 	}
 	return agg
 }
@@ -244,7 +249,7 @@ func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]container
 			cont, cpu, mem := "-", "-", "-"
 			if st.State != "not deployed" {
 				cont = fmt.Sprintf("%d/%d", st.ContainersUp, st.ContainersTotal)
-				if cs, ok := stats["herald-"+st.Name]; ok {
+				if cs, ok := stats[st.Name]; ok {
 					cpu = fmt.Sprintf("%.1f%%", cs.cpuPercent)
 					mem = humanizeBytes(cs.memBytes)
 				}

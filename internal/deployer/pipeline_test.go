@@ -193,7 +193,7 @@ func TestDeploy_RepoStack(t *testing.T) {
 	if got := strings.TrimSpace(readFile(t, filepath.Join(dir, "deployed_ref"))); got != "main@"+fakeCommit {
 		t.Errorf("deployed_ref = %q, want %q", got, "main@"+fakeCommit)
 	}
-	if ConfigDrifted(dir, stack) {
+	if (Instance{Dir: dir}).ConfigDrifted(stack) {
 		t.Error("ConfigDrifted = true right after a deploy")
 	}
 }
@@ -239,8 +239,8 @@ func TestDeploy_PathStack(t *testing.T) {
 	if ups := e.composeUpCalls(t); len(ups) != 1 || !strings.Contains(ups[0], "--project-name herald-wiki ") {
 		t.Errorf("compose up calls = %q, want one for herald-wiki", ups)
 	}
-	if got := ReadDeployedIaCCommit(dir); got != fakeCommit {
-		t.Errorf("ReadDeployedIaCCommit = %q, want %q", got, fakeCommit)
+	if got := (Instance{Dir: dir}).DeployedIaCCommit(); got != fakeCommit {
+		t.Errorf("DeployedIaCCommit = %q, want %q", got, fakeCommit)
 	}
 }
 

@@ -27,6 +27,9 @@ var composeTmpl = template.Must(template.New("compose").Parse(composeTemplate))
 const (
 	caddyNetwork       = "caddy"
 	caddyContainerName = "herald-caddy"
+
+	// ProjectName is the compose project Herald runs Caddy under.
+	ProjectName = "herald-caddy"
 )
 
 // CaddyManager manages the Caddy reverse proxy lifecycle.
@@ -91,7 +94,7 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
 
-	err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", "herald-caddy", "up", "-d")
+	err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", ProjectName, "up", "-d")
 	if err != nil {
 		if strings.Contains(err.Error(), "address already in use") {
 			return fmt.Errorf("ports 80/443 are in use. Stop the existing proxy (nginx-proxy?) before starting Caddy")
@@ -114,7 +117,7 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 // Stop tears down the Caddy compose stack without removing the network or volumes.
 func (m *CaddyManager) Stop(ctx context.Context) error {
 	composePath := m.composeFilePath()
-	if err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", "herald-caddy", "down"); err != nil {
+	if err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", ProjectName, "down"); err != nil {
 		return err
 	}
 	m.Logger.Info("caddy stopped")

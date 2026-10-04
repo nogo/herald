@@ -3,6 +3,7 @@ package deployer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
@@ -11,6 +12,12 @@ import (
 // projectPrefix starts every compose project Herald owns, which is how orphans
 // are told apart from containers Herald does not manage.
 const projectPrefix = "herald-"
+
+// Deploy stamps, written into the deploy dir after a successful deploy.
+const (
+	refStamp    = "deployed_ref"    // "<ref>@<commit>"; path stacks use "path@<IaC commit>"
+	configStamp = "deployed_config" // config.Stack.Hash of the deployed config
+)
 
 // Instance is one deployment of a stack on this server: its directory and its
 // compose project. A production stack and each of its previews are separate
@@ -35,6 +42,18 @@ func PreviewInstance(cfg *config.Config, id string) Instance {
 		Dir:     filepath.Join(cfg.Server.ServicesDir, "previews", id),
 		Project: projectPrefix + "preview-" + id,
 	}
+}
+
+// StackNameOf returns the production stack a compose project belongs to. It
+// reports false for projects Herald did not create for a production stack:
+// previews and everything outside the herald- prefix. Herald's own caddy
+// project carries the prefix too; see caddy.ProjectName.
+func StackNameOf(project string) (string, bool) {
+	name, ok := strings.CutPrefix(project, projectPrefix)
+	if !ok || name == "" || strings.HasPrefix(name, "preview-") {
+		return "", false
+	}
+	return name, true
 }
 
 // RepoDir is where the stack's source lives: a git clone for repo stacks, a
@@ -95,4 +114,46 @@ func (i Instance) composeContext(composeFile string) compose.Context {
 		c.OverrideFile = i.OverrideFile()
 	}
 	return c
+}
+
+// DeployedRef returns the raw ref stamp of the last successful deploy
+// ("main@abc1234", "path@def5678"), or "" if there is none.
+func (i Instance) DeployedRef() string {
+	data, err := os.ReadFile(filepath.Join(i.Dir, refStamp))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// DeployedIaCCommit returns the IaC commit a path stack was last deployed from,
+// or "" if the instance has no record or is not a path stack.
+func (i Instance) DeployedIaCCommit() string {
+	commit, _ := strings.CutPrefix(i.DeployedRef(), "path@")
+	if commit == i.DeployedRef() {
+		return ""
+	}
+	return commit
+}
+
+// ConfigDrifted reports whether config.yml changed the stack since its last
+// deploy. A stack deployed before Herald recorded fingerprints has no stamp; that
+// is reported as no drift, so an upgrade does not flag every stack at once.
+func (i Instance) ConfigDrifted(stack config.Stack) bool {
+	data, err := os.ReadFile(filepath.Join(i.Dir, configStamp))
+	if err != nil {
+		return false
+	}
+	recorded := strings.TrimSpace(string(data))
+	return recorded != "" && recorded != stack.Hash()
+}
+
+// The stamps are best-effort: a deploy that succeeded is not failed because its
+// record could not be written; the next pass just sees an older record.
+func (i Instance) recordRef(ref, commit string) {
+	_ = os.WriteFile(filepath.Join(i.Dir, refStamp), []byte(ref+"@"+commit), 0644)
+}
+
+func (i Instance) recordConfig(stack config.Stack) {
+	_ = os.WriteFile(filepath.Join(i.Dir, configStamp), []byte(stack.Hash()), 0644)
 }
