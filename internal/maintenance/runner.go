@@ -243,7 +243,7 @@ func surveyCertificates(ctx context.Context) CertResult {
 }
 
 func (r *Runner) reconcileWebhooks(ctx context.Context, cfg *config.Config, opts Options, rep *Report) {
-	if opts.Webhooks == ReconcileOff || cfg.Server.GithubToken == "" {
+	if opts.Webhooks == ReconcileOff || cfg.Server.GithubToken == "" || len(desiredRepoSet(cfg, r.IaCRepo)) == 0 {
 		rep.Webhooks.Skipped = true
 		return
 	}

@@ -22,6 +22,7 @@ var (
 // skipConfigCommands are commands that run without a config file.
 var skipConfigCommands = map[string]bool{
 	"version": true,
+	"signal":  true,
 	"init":    true,
 	// doctor loads and validates the config itself as a check, so it must run even
 	// when the config is broken — that is exactly when it is needed.

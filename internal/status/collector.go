@@ -32,6 +32,7 @@ type StatusCollector struct {
 
 // ServerStatus holds a complete snapshot of the server's runtime state.
 type ServerStatus struct {
+	IaCCommit       string          `json:"iac_commit,omitzero"`
 	ServerName      string          `json:"server_name"`
 	Caddy           CaddyStatus     `json:"caddy"`
 	Stacks          []StackStatus   `json:"stacks,omitempty"`
@@ -139,6 +140,9 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 	s := &ServerStatus{
 		ServerName: cfg.Server.Name,
 	}
+
+	// The server clone is the source of truth after a maintenance pull.
+	s.IaCCommit, _ = readGitHead(ctx, filepath.Join(c.DataDir, "repo"))
 
 	// Caddy status.
 	if c.Caddy != nil {
