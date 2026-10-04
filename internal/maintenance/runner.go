@@ -120,6 +120,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 
 	// Phase B1: ensure Caddy is running, protect its ACME account, survey TLS.
 	rep.Caddy = r.ensureCaddy(ctx, cfg)
+	rep.DNSWarning = (&caddy.CaddyManager{Config: cfg, Secrets: r.Secrets}).DNSWarning()
 	if strings.HasPrefix(rep.Caddy, "running") || strings.HasPrefix(rep.Caddy, "started") {
 		r.syncACMEAccount(ctx, rep)
 		rep.Certificates = surveyCertificates(ctx)
@@ -150,12 +151,12 @@ func (r *Runner) token() string {
 }
 
 func (r *Runner) ensureCaddy(ctx context.Context, cfg *config.Config) string {
-	mgr := &caddy.CaddyManager{Config: cfg, Logger: r.Logger, HeraldPort: r.HeraldPort}
+	mgr := &caddy.CaddyManager{Config: cfg, Logger: r.Logger, HeraldPort: r.HeraldPort, Secrets: r.Secrets}
 	running, err := mgr.IsRunning(ctx)
 	if err != nil {
 		return "error checking: " + err.Error()
 	}
-	if running {
+	if running && cfg.Server.TLS == nil {
 		return "running"
 	}
 	if err := mgr.Start(ctx); err != nil {

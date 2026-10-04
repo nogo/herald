@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,7 @@ var caddyStartCmd = &cobra.Command{
 			Config:     Cfg,
 			Logger:     slog.Default(),
 			HeraldPort: heraldPort,
+			Secrets:    secrets.NewStore(dataDir),
 		}
 		return m.Start(context.Background())
 	},

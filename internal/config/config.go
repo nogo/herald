@@ -25,10 +25,11 @@ type Config struct {
 }
 
 type Server struct {
-	Name         string `yaml:"name"           json:"name"`
-	DeployDomain string `yaml:"deploy_domain"  json:"deploy_domain"`
-	ServicesDir  string `yaml:"services_dir"   json:"services_dir"`
-	GithubToken  string `yaml:"github_token"   json:"github_token,omitempty"`
+	TLS          *TLSConfig `yaml:"tls,omitempty" json:"tls,omitempty"`
+	Name         string     `yaml:"name"           json:"name"`
+	DeployDomain string     `yaml:"deploy_domain"  json:"deploy_domain"`
+	ServicesDir  string     `yaml:"services_dir"   json:"services_dir"`
+	GithubToken  string     `yaml:"github_token"   json:"github_token,omitempty"`
 	// AcmeEmail is required, not derived. Caddy keys its ACME account by contact
 	// email, so a derived value silently registers a new account whenever the
 	// value it was derived from changes — which invalidates CAA accounturi pins
@@ -42,6 +43,11 @@ type Server struct {
 	// Bind is the listen address. Empty means all interfaces (":port"). Set to
 	// "127.0.0.1" to bind loopback-only when Caddy runs on the same host.
 	Bind string `yaml:"bind,omitempty" json:"bind,omitzero"`
+}
+
+type TLSConfig struct {
+	DNS      string `yaml:"dns" json:"dns"`
+	Wildcard string `yaml:"wildcard,omitempty" json:"wildcard,omitzero"`
 }
 
 type Stack struct {
@@ -205,6 +211,14 @@ func validateRelativePath(stackName, field, p string) error {
 }
 
 func validate(cfg *Config) error {
+	if tls := cfg.Server.TLS; tls != nil {
+		if tls.DNS != "hetzner" {
+			return fmt.Errorf("server.tls.dns must be hetzner, got %q", tls.DNS)
+		}
+		if tls.Wildcard != "" && !regexp.MustCompile(`^\*\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`).MatchString(tls.Wildcard) {
+			return errors.New("server.tls.wildcard must be a wildcard domain such as *.example.com")
+		}
+	}
 	if cfg.Server.Name == "" {
 		return errors.New("server.name is required")
 	}

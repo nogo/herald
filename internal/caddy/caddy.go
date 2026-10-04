@@ -22,6 +22,16 @@ import (
 //go:embed compose.yml.tmpl
 var composeTemplate string
 
+//go:embed Dockerfile
+var dockerfile string
+
+const HetznerTokenKey = "herald/hetzner_token"
+
+// SecretStore supplies the DNS credential without coupling Caddy to age storage.
+type SecretStore interface {
+	Get(string) (string, error)
+}
+
 var composeTmpl = template.Must(template.New("compose").Parse(composeTemplate))
 
 const (
@@ -37,6 +47,7 @@ type CaddyManager struct {
 	Config     *config.Config
 	Logger     *slog.Logger
 	HeraldPort int
+	Secrets    SecretStore
 }
 
 // CaddyStatus holds the current state of Caddy and its proxied domains.
@@ -88,13 +99,28 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		return fmt.Errorf("creating caddy dir: %w", err)
 	}
 
+	token := m.dnsToken()
+	var tls *config.TLSConfig
+	if token != "" {
+		tls = m.Config.Server.TLS
+	}
 	content := generateComposeContent(m.Config.Server.AcmeEmail, m.Config.Server.AcmeCA,
-		m.Config.Server.DeployDomain, m.HeraldPort)
+		m.Config.Server.DeployDomain, m.HeraldPort, tls)
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
 
-	err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", ProjectName, "up", "-d")
+	if token != "" {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(composePath), "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+			return fmt.Errorf("writing caddy Dockerfile: %w", err)
+		}
+	}
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "-p", ProjectName, "up", "-d")
+	if token != "" {
+		cmd.Args = append(cmd.Args, "--build")
+	}
+	cmd.Env = append(os.Environ(), "HERALD_HETZNER_TOKEN="+token)
+	err := runner.RunExecCmd(ctx, m.Logger, cmd)
 	if err != nil {
 		if strings.Contains(err.Error(), "address already in use") {
 			return fmt.Errorf("ports 80/443 are in use. Stop the existing proxy (nginx-proxy?) before starting Caddy")
@@ -117,7 +143,10 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 // Stop tears down the Caddy compose stack without removing the network or volumes.
 func (m *CaddyManager) Stop(ctx context.Context) error {
 	composePath := m.composeFilePath()
-	if err := runner.RunCmd(ctx, m.Logger, "", "docker", "compose", "-f", composePath, "-p", ProjectName, "down"); err != nil {
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "-p", ProjectName, "down")
+	// Compose interpolates environment even for down; no credential is needed.
+	cmd.Env = append(os.Environ(), "HERALD_HETZNER_TOKEN=unused")
+	if err := runner.RunExecCmd(ctx, m.Logger, cmd); err != nil {
 		return err
 	}
 	m.Logger.Info("caddy stopped")
@@ -246,6 +275,8 @@ func formatUptime(startedAt string) string {
 }
 
 type composeData struct {
+	DNS          bool
+	Wildcard     string
 	AcmeEmail    string
 	AcmeCA       string
 	DeployDomain string
@@ -253,7 +284,7 @@ type composeData struct {
 	HeraldPort   int
 }
 
-func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort int) string {
+func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort int, tls *config.TLSConfig) string {
 	var buf bytes.Buffer
 	data := composeData{
 		AcmeEmail:    acmeEmail,
@@ -262,11 +293,34 @@ func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort i
 		GatewayIP:    getDockerGatewayIP(),
 		HeraldPort:   heraldPort,
 	}
+	if tls != nil {
+		data.DNS = true
+		data.Wildcard = tls.Wildcard
+	}
 	if err := composeTmpl.Execute(&buf, data); err != nil {
 		// Template is embedded and tested — this should never fail.
 		panic(fmt.Sprintf("caddy compose template: %v", err))
 	}
 	return buf.String()
+}
+
+func (m *CaddyManager) dnsToken() string {
+	if m.Config == nil || m.Config.Server.TLS == nil || m.Config.Server.TLS.DNS != "hetzner" || m.Secrets == nil {
+		return ""
+	}
+	token, err := m.Secrets.Get(HetznerTokenKey)
+	if err != nil {
+		return ""
+	}
+	return token
+}
+
+// DNSWarning explains why configured DNS-01 cannot be enabled.
+func (m *CaddyManager) DNSWarning() string {
+	if m.Config != nil && m.Config.Server.TLS != nil && m.dnsToken() == "" {
+		return "DNS-01 is inactive: missing or unreadable " + HetznerTokenKey + "; certificates are the operator's responsibility"
+	}
+	return ""
 }
 
 // getDockerGatewayIP returns the gateway IP of the default Docker bridge network.

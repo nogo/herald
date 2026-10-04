@@ -1,6 +1,11 @@
 package doctor
 
 import (
+	"context"
+	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/secrets"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -103,5 +108,18 @@ func TestRenderInventoryAndLastPass(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q\n---\n%s", want, out)
 		}
+	}
+}
+
+func TestCaddyDNSWarning(t *testing.T) {
+	dir := t.TempDir()
+	store := secrets.NewStore(dir)
+	cfg := &config.Config{Server: config.Server{TLS: &config.TLSConfig{DNS: "hetzner"}}}
+	di := &Diagnosis{}
+	di.checkCaddy(context.Background(), Deps{Config: cfg, Secrets: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	var out strings.Builder
+	di.Render(&out)
+	if !strings.Contains(out.String(), "DNS-01 is inactive") || !strings.Contains(out.String(), "herald/hetzner_token") {
+		t.Fatalf("missing DNS warning: %s", out.String())
 	}
 }

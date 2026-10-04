@@ -81,6 +81,7 @@ var serveCmd = &cobra.Command{
 			Config:     Cfg,
 			Logger:     slog.Default(),
 			HeraldPort: listenPort,
+			Secrets:    store,
 		}
 		collector := &status.StatusCollector{
 			Config:  live,
