@@ -172,6 +172,10 @@ func (di *Diagnosis) checkEnvironment(ctx context.Context, d Deps) {
 }
 
 func (di *Diagnosis) checkConfigAndRepo(ctx context.Context, d Deps) {
+	if bootstrap.NothingPushed(ctx, d.DataDir) {
+		di.pass(catRepo, "nothing pushed yet; on your laptop: "+strings.Join(bootstrap.LocalRemoteCommands(d.DataDir), " or "))
+		return
+	}
 	repoDir := filepath.Join(d.DataDir, "repo")
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		di.fail(catRepo, "server repo", "no git clone at "+repoDir, "herald init <server-repo>")
@@ -190,6 +194,9 @@ func (di *Diagnosis) checkConfigAndRepo(ctx context.Context, d Deps) {
 }
 
 func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
+	if d.IaCRepo == "" && (d.Config == nil || !hasRepoStacks(d.Config)) {
+		return
+	}
 	if d.Token == "" {
 		di.fail(catGitHub, "token", "no token in config or secrets store", "herald auth login")
 		return
@@ -440,4 +447,13 @@ func (di *Diagnosis) buildInventory(d Deps) {
 		}
 		di.Stacks = append(di.Stacks, inv)
 	}
+}
+
+func hasRepoStacks(cfg *config.Config) bool {
+	for _, stack := range cfg.Stacks {
+		if stack.Repo != "" {
+			return true
+		}
+	}
+	return false
 }

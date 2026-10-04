@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/nogo/herald/internal/config"
+	bootstrap "github.com/nogo/herald/internal/init"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
 )
@@ -61,7 +64,13 @@ var rootCmd = &cobra.Command{
 
 		cfg, err := LoadConfigWithToken(cfgFile, dataDir)
 		if err != nil {
-			return err
+			if cmd.Name() == "serve" && !cmd.Flags().Changed("config") && errors.Is(err, os.ErrNotExist) && bootstrap.NothingPushed(context.Background(), dataDir) {
+				name, _ := os.Hostname()
+				cfgFile = filepath.Join(dataDir, "repo", "config.yml")
+				cfg = &config.Config{Server: config.Server{Name: name, ServicesDir: "/srv", Port: 9483}}
+			} else {
+				return err
+			}
 		}
 		Cfg = cfg
 		return nil

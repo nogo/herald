@@ -1,11 +1,14 @@
 package maintenance
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,5 +98,29 @@ func TestReconcileNonGitHubServerRepoSkipped(t *testing.T) {
 		if !rep.Webhooks.Skipped || rep.Webhooks.Error != "" {
 			t.Fatalf("webhooks = %+v", rep.Webhooks)
 		}
+	}
+}
+
+func TestMissingConfigBlocksDeploysAndLogsPath(t *testing.T) {
+	cfg, _, _ := autoDeployConfig(t, false)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "repo", "config.yml")
+	var logs bytes.Buffer
+	fd := &fakeDeployer{asyncQueued: true}
+	live := config.NewLive(cfg)
+	r := &Runner{DataDir: dir, Logger: slog.New(slog.NewTextHandler(&logs, nil)), Secrets: secrets.NewStore(dir), Config: live, Deployer: fd,
+		Reload: func() (*config.Config, error) { return config.Load(path) }}
+	rep := r.Run(context.Background(), Options{RedeployChanged: true})
+	if rep.Config.Loaded || !strings.Contains(rep.Config.Error, path) {
+		t.Fatalf("config = %+v", rep.Config)
+	}
+	if len(fd.asyncCalls) != 0 || len(fd.deployCalls) != 0 {
+		t.Fatalf("deploys = %+v", fd)
+	}
+	if live.Load() != cfg {
+		t.Fatal("bad push replaced live config")
+	}
+	if !strings.Contains(logs.String(), path) || !strings.Contains(logs.String(), "deploying nothing") {
+		t.Fatal(logs.String())
 	}
 }

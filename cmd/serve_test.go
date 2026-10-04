@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	bootstrap "github.com/nogo/herald/internal/init"
 	"github.com/nogo/herald/internal/maintenance"
 	"github.com/nogo/herald/internal/status"
 )
@@ -155,6 +157,32 @@ esac
 			if err != nil || !bytes.Contains(output, []byte("Server repo  bbbbbbb")) {
 				t.Fatalf("status: %s, %v", output, err)
 			}
+			write(filepath.Join(repo, "upstream-head"), "ccccccc\n", 0644)
+			if err := os.Remove(filepath.Join(repo, "config.yml")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(repo, "upstream-config")); err != nil {
+				t.Fatal(err)
+			}
+			if output, err := heraldProcess(t, "signal", "--port", strconv.Itoa(p)).CombinedOutput(); err != nil {
+				t.Fatalf("signal: %s, %v", output, err)
+			}
+			waitFor(t, func() bool {
+				rep, err := maintenance.LoadReport(dir)
+				return err == nil && rep != nil && rep.IaC.NewHEAD == "ccccccc" && strings.Contains(rep.Config.Error, "config.yml")
+			})
+			logged, err := os.ReadFile(log.Name())
+			if err != nil || !bytes.Contains(logged, []byte("deploying nothing")) || !bytes.Contains(logged, []byte(cfgPath)) {
+				t.Fatalf("missing config log: %s, %v", logged, err)
+			}
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", p))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatal(resp.Status)
+			}
 			daemon.Process.Signal(os.Interrupt)
 			if err := daemon.Wait(); err != nil {
 				t.Fatal(err)
@@ -165,5 +193,73 @@ esac
 				t.Fatalf("offline signal: %s, %v", output, err)
 			}
 		})
+	}
+}
+
+func TestServeEmptyBareRepo(t *testing.T) {
+	dir := t.TempDir()
+	var initOutput bytes.Buffer
+	if err := bootstrap.InitBare(context.Background(), &initOutput, bootstrap.BareOptions{DataDir: dir, HeraldBin: "/bin/true"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	log, err := os.Create(filepath.Join(dir, "daemon.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	daemon := heraldProcess(t, "serve", "--data-dir", dir, "--port", strconv.Itoa(p))
+	daemon.Stdout, daemon.Stderr = log, log
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { daemon.Process.Kill(); daemon.Wait() }()
+	client := &http.Client{Timeout: time.Second}
+	waitFor(t, func() bool {
+		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", p))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	})
+	waitFor(t, func() bool {
+		rep, err := maintenance.LoadReport(dir)
+		return err == nil && rep != nil && strings.Contains(rep.Config.Error, "config.yml")
+	})
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "README"), []byte("No config yet\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-b", "main"}, {"add", "README"}, {"-c", "user.name=operator", "-c", "user.email=ops@example.com", "commit", "-m", "Initial repo"}, {"push", filepath.Join(dir, "server.git"), "main"}} {
+		git := exec.Command("git", args...)
+		git.Dir = work
+		if out, err := git.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s, %v", args, out, err)
+		}
+	}
+	if out, err := heraldProcess(t, "signal", "--port", strconv.Itoa(p)).CombinedOutput(); err != nil {
+		t.Fatalf("signal: %s, %v", out, err)
+	}
+	waitFor(t, func() bool {
+		rep, err := maintenance.LoadReport(dir)
+		return err == nil && rep != nil && rep.IaC.NewHEAD != "" && strings.Contains(rep.Config.Error, filepath.Join(dir, "repo", "config.yml"))
+	})
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.Status)
 	}
 }
