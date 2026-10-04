@@ -7,15 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/compose"
@@ -263,20 +260,6 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		return fmt.Errorf("generating override: %w", err)
 	}
 
-	// Merge the preview-specific label into the override.
-	var parsedSvcs struct {
-		Services map[string]any `yaml:"services"`
-	}
-	if parseErr := yaml.Unmarshal(overrideData, &parsedSvcs); parseErr == nil {
-		for svcName := range parsedSvcs.Services {
-			fragment := fmt.Sprintf("services:\n  %s:\n    labels:\n      com.herald.preview: %s\n", svcName, id)
-			if merged, mergeErr := compose.DeepMergeYAML(overrideData, []byte(fragment)); mergeErr == nil {
-				overrideData = merged
-			}
-			break
-		}
-	}
-
 	if err := os.WriteFile(filepath.Join(previewDir, "compose.override.yml"), overrideData, 0644); err != nil {
 		return fmt.Errorf("writing override: %w", err)
 	}
@@ -375,14 +358,6 @@ func (m *PreviewManager) Remove(ctx context.Context, previewID string) error {
 
 	if err := m.runComposeDown(ctx, found.Directory, found.ComposeProject, found.ComposeFile); err != nil {
 		return fmt.Errorf("compose down: %w", err)
-	}
-
-	// Prune images tagged with this preview. Best-effort: a failure here must not
-	// hide the fact that teardown succeeded, so it is only logged.
-	pruneCmd := exec.CommandContext(ctx, "docker", "image", "prune", "-f",
-		"--filter", "label=com.herald.preview="+previewID)
-	if err := pruneCmd.Run(); err != nil {
-		m.Logger.Warn("pruning preview images failed", "id", previewID, "error", err)
 	}
 
 	if err := os.RemoveAll(found.Directory); err != nil {
@@ -502,6 +477,8 @@ func (m *PreviewManager) runComposeDown(ctx context.Context, previewDir, compose
 	cctx := m.composeContext(previewDir, composeProject, composeFile)
 	m.Logger.Info("compose down", "project", composeProject)
 	args := cctx.BaseArgs()
-	args = append(args, "down", "--volumes", "--remove-orphans")
+	// --rmi local removes the images compose built for this preview; images with
+	// an explicit image: name (pulled, or shared with production) are kept.
+	args = append(args, "down", "--volumes", "--remove-orphans", "--rmi", "local")
 	return runner.RunCmd(ctx, m.Logger, cctx.WorkDir, "docker", args...)
 }

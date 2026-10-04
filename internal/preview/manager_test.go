@@ -12,9 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 )
@@ -197,43 +194,15 @@ func makeTestOverrideData(t *testing.T, dir, composeFile, inlineOverride string)
 }
 
 // applyPreviewLabel replicates the label post-processing in Deploy().
-func applyPreviewLabel(overrideData []byte, id string) []byte {
-	var parsedSvcs struct {
-		Services map[string]any `yaml:"services"`
-	}
-	if parseErr := yaml.Unmarshal(overrideData, &parsedSvcs); parseErr == nil {
-		for svcName := range parsedSvcs.Services {
-			fragment := fmt.Sprintf("services:\n  %s:\n    labels:\n      com.herald.preview: %s\n", svcName, id)
-			if merged, mergeErr := compose.DeepMergeYAML(overrideData, []byte(fragment)); mergeErr == nil {
-				return merged
-			}
-			break
-		}
-	}
-	return overrideData
-}
-
-func TestPreviewOverrideContainsLabel(t *testing.T) {
-	dir := t.TempDir()
-	composeFile := makeTestComposeFile(t, dir)
-	id := "myapp-feature-test"
-
-	overrideData := makeTestOverrideData(t, dir, composeFile, "")
-	overrideData = applyPreviewLabel(overrideData, id)
-
-	if !strings.Contains(string(overrideData), "com.herald.preview: "+id) {
-		t.Errorf("override missing com.herald.preview label:\n%s", overrideData)
-	}
-}
-
 // installFakeDocker puts a fake "docker" binary at the front of PATH. It exits
 // 1 when HERALD_TEST_DOCKER_FAIL=1 is set in the environment, and 0 otherwise,
 // so tests can flip compose down between failing and succeeding without a real
-// Docker daemon.
+// Docker daemon. When HERALD_TEST_DOCKER_LOG names a file, every call's
+// arguments are appended to it, one call per line.
 func installFakeDocker(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\nif [ \"$HERALD_TEST_DOCKER_FAIL\" = \"1\" ]; then\n\techo fake docker failure >&2\n\texit 1\nfi\nexit 0\n"
+	script := "#!/bin/sh\nif [ -n \"$HERALD_TEST_DOCKER_LOG\" ]; then echo \"$*\" >> \"$HERALD_TEST_DOCKER_LOG\"; fi\nif [ \"$HERALD_TEST_DOCKER_FAIL\" = \"1\" ]; then\n\techo fake docker failure >&2\n\texit 1\nfi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -351,6 +320,40 @@ func newTestPreviewDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// Images compose built for a preview carry no preview label (service labels
+// land on containers, not images), so teardown must remove them through compose
+// itself or every preview push leaks an image.
+func TestRemove_RemovesImagesComposeBuilt(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "0")
+	dockerLog := filepath.Join(t.TempDir(), "docker.log")
+	t.Setenv("HERALD_TEST_DOCKER_LOG", dockerLog)
+
+	mgr := newTestManager(t)
+	info := PreviewInfo{ID: "app-branch", AppName: "app", Branch: "branch", Directory: newTestPreviewDir(t), ComposeProject: "proj", ComposeFile: "compose.yml"}
+	if err := saveState(statePath(mgr.DataDir), &previewState{Previews: []PreviewInfo{info}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Remove(context.Background(), info.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	data, err := os.ReadFile(dockerLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var down string
+	for _, call := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.Contains(" "+call+" ", " down ") {
+			down = call
+		}
+	}
+	if !strings.Contains(down, "--rmi local") {
+		t.Errorf("compose down = %q, want it to remove locally built images with --rmi local", down)
+	}
 }
 
 func TestRemove_ComposeDownFailurePreservesState(t *testing.T) {
