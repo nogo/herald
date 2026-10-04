@@ -13,6 +13,7 @@ import (
 // not a source of truth: the source of truth stays config.yml, the secrets store,
 // the Docker runtime, and GitHub webhook registrations.
 type Report struct {
+	DNSWarning     string              `json:"dns_warning,omitempty"`
 	StartedAt      time.Time           `json:"started_at"`
 	FinishedAt     time.Time           `json:"finished_at"`
 	IaC            IaCResult           `json:"iac"`
@@ -177,6 +178,9 @@ func (r *Report) Render(w io.Writer) {
 
 	fmt.Fprintf(w, "  Caddy: %s\n", r.Caddy)
 	r.renderCertificates(w)
+	if r.DNSWarning != "" {
+		fmt.Fprintf(w, "  Warning: %s\n", r.DNSWarning)
+	}
 
 	switch {
 	case r.Webhooks.Error != "":

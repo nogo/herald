@@ -872,3 +872,25 @@ func assertContains(t *testing.T, s, substr string) {
 		t.Errorf("expected %q to contain %q", s, substr)
 	}
 }
+
+func TestLoadTLS(t *testing.T) {
+	for _, tc := range []struct{ tls, want string }{
+		{"", ""},
+		{"  tls:\n    dns: hetzner\n", ""},
+		{"  tls:\n    dns: hetzner\n    wildcard: '*.example.com'\n", ""},
+		{"  tls:\n    dns: other\n", "server.tls.dns"},
+		{"  tls:\n    wildcard: '*.example.com'\n", "server.tls.dns"},
+		{"  tls:\n    dns: hetzner\n    wildcard: example.com\n", "server.tls.wildcard"},
+	} {
+		t.Run(tc.tls, func(t *testing.T) {
+			_, err := config.Load(writeTempConfig(t, "server:\n  name: test\n  deploy_domain: deploy.example.com\n  services_dir: /srv\n  acme_email: ops@example.com\n"+tc.tls))
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want %s", err, tc.want)
+			}
+		})
+	}
+}

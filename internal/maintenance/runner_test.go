@@ -308,3 +308,18 @@ func TestSurveyStacksReportsCrashLoopAsDegraded(t *testing.T) {
 		t.Errorf("State = %q, want %q", got, "degraded")
 	}
 }
+
+func TestRunWarnsMissingDNSToken(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Server: config.Server{ServicesDir: dir, TLS: &config.TLSConfig{DNS: "hetzner"}}}
+	r := &Runner{Config: config.NewLive(cfg), Reload: func() (*config.Config, error) { return cfg, nil }, DataDir: dir, Secrets: secrets.NewStore(dir), Logger: discardLogger(t)}
+	rep := r.Run(context.Background(), Options{})
+	var out strings.Builder
+	rep.Render(&out)
+	if !strings.Contains(out.String(), "DNS-01 is inactive") || !strings.Contains(out.String(), "herald/hetzner_token") {
+		t.Fatalf("missing DNS warning: %s", out.String())
+	}
+	if rep.Failed() {
+		t.Fatal("missing DNS token blocked deployment")
+	}
+}

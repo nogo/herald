@@ -235,7 +235,10 @@ func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
 const acmeLogHint = "docker logs herald-caddy 2>&1 | grep -iE 'challenge|caa|renew'"
 
 func (di *Diagnosis) checkCaddy(ctx context.Context, d Deps) {
-	mgr := &caddy.CaddyManager{Config: d.Config, Logger: d.Logger, HeraldPort: d.HeraldPort}
+	mgr := &caddy.CaddyManager{Config: d.Config, Logger: d.Logger, HeraldPort: d.HeraldPort, Secrets: d.Secrets}
+	if warning := mgr.DNSWarning(); warning != "" {
+		di.warn(catCaddy, "DNS-01", warning, "herald secret set "+caddy.HetznerTokenKey)
+	}
 	running, err := mgr.IsRunning(ctx)
 	switch {
 	case err != nil:

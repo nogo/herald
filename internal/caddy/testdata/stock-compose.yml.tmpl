@@ -1,10 +1,6 @@
 services:
   caddy:
-{{- if .DNS}}
-    build: .
-{{- else}}
     image: lucaslorentz/caddy-docker-proxy:2.9
-{{- end}}
     container_name: herald-caddy
     restart: always
     ports:
@@ -17,9 +13,6 @@ services:
       - caddy_config:/config
     environment:
       - CADDY_INGRESS_NETWORKS=caddy
-{{- if .DNS}}
-      - HETZNER_API_TOKEN=${HERALD_HETZNER_TOKEN:?}
-{{- end}}
     networks:
       - caddy
     labels:
@@ -29,14 +22,6 @@ services:
 {{- end}}
       caddy_0: "{{.DeployDomain}}"
       caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
-{{- if .DNS}}
-      caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"
-{{- if .Wildcard}}
-      caddy.auto_https: "prefer_wildcard"
-      caddy_1: "{{.Wildcard}}"
-      caddy_1.respond: "404"
-{{- end}}
-{{- end}}
 
 volumes:
   caddy_data:

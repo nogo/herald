@@ -1,12 +1,16 @@
 package caddy
 
 import (
+	"bytes"
+	"github.com/nogo/herald/internal/config"
+	"os"
 	"strings"
 	"testing"
+	"text/template"
 )
 
 func TestGenerateComposeContent(t *testing.T) {
-	content := generateComposeContent("admin@example.com", "", "deploy.example.com", 8080)
+	content := generateComposeContent("admin@example.com", "", "deploy.example.com", 8080, nil)
 
 	checks := []string{
 		"lucaslorentz/caddy-docker-proxy:2.9",
@@ -43,14 +47,14 @@ func TestGenerateComposeContent(t *testing.T) {
 
 func TestGenerateComposeContentAcmeCA(t *testing.T) {
 	const staging = "https://acme-staging-v02.api.letsencrypt.org/directory"
-	content := generateComposeContent("admin@example.com", staging, "deploy.example.com", 8080)
+	content := generateComposeContent("admin@example.com", staging, "deploy.example.com", 8080, nil)
 	if !strings.Contains(content, `caddy.acme_ca: "`+staging+`"`) {
 		t.Errorf("compose content missing acme_ca label, got:\n%s", content)
 	}
 }
 
 func TestGenerateComposeContentPort(t *testing.T) {
-	content := generateComposeContent("x@x.com", "", "x.com", 9483)
+	content := generateComposeContent("x@x.com", "", "x.com", 9483, nil)
 	if !strings.Contains(content, ":9483") {
 		t.Errorf("expected port 9483 in compose content")
 	}
@@ -111,5 +115,45 @@ func TestParseCaddyUpstream(t *testing.T) {
 func TestFormatUptimeInvalid(t *testing.T) {
 	if got := formatUptime("not-a-time"); got != "unknown" {
 		t.Errorf("formatUptime(invalid) = %q, want %q", got, "unknown")
+	}
+}
+
+func TestStockComposeUnchanged(t *testing.T) {
+	original, err := os.ReadFile("testdata/stock-compose.yml.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.New("stock").Parse(string(original)))
+	var want bytes.Buffer
+	err = tmpl.Execute(&want, composeData{AcmeEmail: "ops@example.com", AcmeCA: "https://ca.example.com", DeployDomain: "deploy.example.com", GatewayIP: getDockerGatewayIP(), HeraldPort: 9483})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := generateComposeContent("ops@example.com", "https://ca.example.com", "deploy.example.com", 9483, nil)
+	if got != want.String() {
+		t.Fatalf("stock compose changed:\n%s", got)
+	}
+}
+
+func TestGenerateDNSCompose(t *testing.T) {
+	for _, wildcard := range []string{"", "*.example.com"} {
+		t.Run(wildcard, func(t *testing.T) {
+			content := generateComposeContent("ops@example.com", "", "deploy.example.com", 9483, &config.TLSConfig{DNS: "hetzner", Wildcard: wildcard})
+			for _, want := range []string{"build: .", "HETZNER_API_TOKEN=${HERALD_HETZNER_TOKEN:?}", `caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"`} {
+				if !strings.Contains(content, want) {
+					t.Errorf("missing %q", want)
+				}
+			}
+			if strings.Contains(content, "lucaslorentz/caddy-docker-proxy:2.9") {
+				t.Fatal("DNS compose uses stock image")
+			}
+			if wildcard != "" {
+				if !strings.Contains(content, `caddy_1: "*.example.com"`) || !strings.Contains(content, `caddy.auto_https: "prefer_wildcard"`) {
+					t.Fatal("wildcard configuration missing")
+				}
+			} else if strings.Contains(content, "prefer_wildcard") || strings.Contains(content, "caddy_1:") {
+				t.Fatal("unexpected wildcard")
+			}
+		})
 	}
 }

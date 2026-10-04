@@ -27,6 +27,7 @@ stacks:    # optional — everything herald deploys
 | `bind` | no | all interfaces | Listen address. Empty binds all interfaces (`:port`). Set `127.0.0.1` to bind loopback-only when Caddy runs on the same host. |
 | `acme_email` | yes | — | Email for ACME/Let's Encrypt registration via Caddy. Required, never derived: Caddy keys its ACME account by contact email, so a derived value silently registers a **new account** whenever the value it was derived from changes — invalidating any CAA `accounturi` pin and orphaning the old account. |
 | `acme_ca` | no | Caddy's default chain | ACME directory URL. Empty leaves Caddy's default issuers (Let's Encrypt, then ZeroSSL). Pin a single CA here, or point at `https://acme-staging-v02.api.letsencrypt.org/directory` to bring up a server without spending production rate limit. |
+| `tls` | no | stock Caddy | Optional Hetzner DNS-01 and wildcard certificates. See [server.tls](#servertls). |
 | `github_token` | no | — | GitHub personal access token. Supports `${ENV_VAR}` expansion. Prefer `herald auth login` instead. |
 
 ```yaml
@@ -37,6 +38,42 @@ server:
   port: 9483
   acme_email: ops@example.com
 ```
+
+---
+
+## `server.tls`
+
+Optional DNS-01 certificate issuance for servers reachable only on a LAN or VPN:
+
+```yaml
+server:
+  tls:
+    dns: hetzner
+    wildcard: "*.home.example.com"
+```
+
+`dns` must be `hetzner`. `wildcard` is optional and must be a wildcard domain.
+With a wildcard, Caddy prefers its certificate for matching stack domains;
+stack routing labels remain unchanged. A wildcard covers one subdomain level,
+not the parent domain or deeper names. Covered stack names need no individual
+certificate and therefore do not appear individually in Certificate Transparency.
+
+Store a Hetzner Cloud API token with `herald secret set herald/hetzner_token`.
+Herald passes it only to the Caddy container through an environment variable,
+without putting it in the generated Compose file or Dockerfile. Zones must live
+in the Hetzner Cloud Console. Tokens cover a whole project: keep DNS zones in a
+project with no servers and grant the token write access for DNS challenges.
+Herald does not create application DNS records.
+
+With the token available, Herald builds a local Caddy image using the embedded
+Dockerfile, pinned to Caddy 2.10.2, caddy-docker-proxy v2.10.0, and Hetzner v2.0.0-preview-3.
+The first start needs network access to build it. Run `herald sync` or
+`herald caddy start` after configuring TLS or changing the token.
+
+Without a readable, nonempty `herald/hetzner_token`, Herald keeps the stock Caddy
+setup and deploys normally. `herald sync` and `herald doctor` warn that DNS-01 is
+inactive; certificate provisioning is then the operator's responsibility.
+Omitting `server.tls` preserves the existing Caddy setup.
 
 ---
 
