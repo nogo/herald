@@ -541,7 +541,12 @@ func (d *Deployer) runCompose(ctx context.Context, deployDir, stackName, compose
 	d.Logger.Info("compose up", "stack", stackName, "project", cctx.ProjectName)
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
-	sw := &composeFilterWriter{w: d.ui().StreamWriter()}
+	stream := d.ui().StreamWriter()
+	if stream == nil {
+		// Daemon: no UI stream, so compose output goes to the log instead.
+		return runner.RunCmd(ctx, d.Logger, cctx.WorkDir, "docker", args...)
+	}
+	sw := &composeFilterWriter{w: stream}
 	err := runner.RunCmdStream(ctx, d.Logger, cctx.WorkDir, sw, sw, "docker", args...)
 	sw.Flush()
 	ui.FlushStreamWriter(d.ui())

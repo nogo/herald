@@ -3,6 +3,7 @@ package deployer
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -329,5 +330,25 @@ func TestDeployAsync_WaitsForLimiterCapacity(t *testing.T) {
 
 	if calls := e.dockerCalls(t); len(calls) != 0 {
 		t.Errorf("deploy ran although the limiter admitted nothing: %q", calls)
+	}
+}
+
+// In the daemon there is no UI stream, so compose output must reach the log —
+// otherwise a failed webhook deploy leaves only "exit status 1" in the journal.
+func TestDeploy_DaemonLogsComposeOutputOnFailure(t *testing.T) {
+	e := newPipelineEnv(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL_UP", "1")
+	stack := repoStack()
+	stack.Secrets = nil
+	d := e.deployer(map[string]config.Stack{"app": stack})
+	var logs strings.Builder
+	d.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	if err := d.Deploy(context.Background(), "app", ""); err == nil {
+		t.Fatal("Deploy succeeded although compose up failed")
+	}
+
+	if !strings.Contains(logs.String(), "fake compose up failure") {
+		t.Errorf("compose stderr missing from daemon log:\n%s", logs.String())
 	}
 }
