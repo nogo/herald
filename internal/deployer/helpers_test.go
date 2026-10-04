@@ -348,10 +348,11 @@ func TestStackHashStable(t *testing.T) {
 	s := config.Stack{Repo: "acme/app", Domain: "app.example.com", Secrets: []config.SecretRef{
 		{Key: "db/password", Type: "env", Target: "DB_PASSWORD"},
 	}}
-	if s.Hash() == "" {
+	first, second := s.Hash(), s.Hash()
+	if first == "" {
 		t.Fatal("Hash() = empty")
 	}
-	if s.Hash() != s.Hash() {
+	if first != second {
 		t.Error("Hash() is not stable across calls")
 	}
 	other := s
