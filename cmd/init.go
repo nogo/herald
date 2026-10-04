@@ -18,14 +18,18 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init <github-repo>",
-	Short: "Bootstrap server from IaC repository",
-	Args:  cobra.ExactArgs(1),
+	Use:   "init [github-repo]",
+	Short: "Bootstrap server from a GitHub IaC repository, or a bare repo on this server",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
-		serverRepo := args[0]
 		ctx := context.Background()
+
+		if len(args) == 0 {
+			return initBare(ctx)
+		}
+		serverRepo := args[0]
 
 		// Resolve GitHub token: flag > env > secrets store > device flow
 		token, err := resolveGitHubToken(ctx, initGitHubToken, initClientID, dataDir)
@@ -51,6 +55,18 @@ var initCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// initBare sets up the server repo on this server; no GitHub token is involved.
+func initBare(ctx context.Context) error {
+	if err := bootstrap.CheckDataDir(dataDir); err != nil {
+		return err
+	}
+	heraldBin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locating herald binary for the post-receive hook: %w", err)
+	}
+	return bootstrap.InitBare(ctx, os.Stdout, bootstrap.BareOptions{DataDir: dataDir, HeraldBin: heraldBin})
 }
 
 // resolveGitHubToken tries multiple sources for a GitHub token:

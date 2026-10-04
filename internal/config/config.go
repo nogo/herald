@@ -222,8 +222,8 @@ func validate(cfg *Config) error {
 	if cfg.Server.Name == "" {
 		return errors.New("server.name is required")
 	}
-	if cfg.Server.DeployDomain == "" {
-		return errors.New("server.deploy_domain is required")
+	if cfg.Server.DeployDomain == "" && cfg.Server.GithubToken != "" {
+		return errors.New("server.deploy_domain is required when server.github_token is set")
 	}
 	if cfg.Server.ServicesDir == "" {
 		return errors.New("server.services_dir is required")

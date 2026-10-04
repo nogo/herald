@@ -6,6 +6,8 @@ One VPS. One server repo. GitHub pushes make it live.
 
 Herald turns a single VPS into a GitHub-driven Docker Compose deploy target. App repo pushes deploy stacks. Server repo pushes update deployment wiring. Herald handles the glue between GitHub, Docker Compose, Caddy TLS, encrypted secrets, preview environments, and operational status.
 
+Without GitHub, the server repo is a bare repo on the server itself (`herald init` with no argument). The operator's `git push` over SSH is the deploy path; no GitHub token or `deploy_domain` is needed.
+
 ## Outcome
 
 A single-binary daemon that runs on one VPS and reacts to GitHub events. Push app code, and the matching stack deploys. Push server config, and Herald pulls the server repo, reloads config, keeps webhooks and Caddy wiring current, and deploys path-sourced stacks that opted into auto-deploy. Secrets are encrypted. TLS is automatic. The server is reproducible from one repo.
@@ -43,7 +45,13 @@ Herald stores state in files and git repos. No PostgreSQL, no Redis, no SQLite. 
 Herald manages one VPS. Multi-server orchestration is out of scope. If you need that, use Kubernetes or Nomad.
 
 ### GitHub-native
-GitHub is the event source. Webhook integration is GitHub-specific (HMAC-SHA256 signatures, GitHub event payloads, GitHub OAuth device flow). Supporting other forges (Gitea, GitLab) is possible later, but not until the GitHub-native product is excellent.
+
+Herald runs in one of two modes, chosen by `herald init`:
+
+- **GitHub** (`herald init owner/repo`): GitHub is the event source. Webhook integration is GitHub-specific (HMAC-SHA256 signatures, GitHub event payloads, GitHub OAuth device flow). Requires `server.deploy_domain`.
+- **Bare repo** (`herald init`): the server repo is `<data_dir>/server.git`, cloned to `<data_dir>/repo`. A `post-receive` hook runs `herald signal` to sync the local daemon. Pushing to it is root-equivalent through Docker, so the operator's own SSH key is the only access control; the repo is group-shared (`core.sharedRepository=group`) so the operator pushes and `herald` reads. `repo:` stacks still clone from GitHub.
+
+Other forges (Gitea, GitLab) are possible later, but not until these two are excellent.
 
 ### Docker Compose as runtime
 Herald generates compose overrides and runs `docker compose up`. It does not manage containers directly. This means herald inherits compose's capabilities and limitations.
