@@ -157,3 +157,10 @@ func TestGenerateDNSCompose(t *testing.T) {
 		})
 	}
 }
+
+func TestComposeOmitsHeraldSiteWithoutDeployDomain(t *testing.T) {
+	got := generateComposeContent("ops@example.com", "", "", 9483, nil)
+	if strings.Contains(got, "caddy_0") {
+		t.Fatalf("compose has a Herald site without deploy_domain:\n%s", got)
+	}
+}

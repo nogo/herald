@@ -12,6 +12,7 @@ INSTALL_DIR="/usr/local/bin"
 DATA_DIR="/etc/herald"
 DEPLOY_DIR="/opt/deploy"
 USER="herald"
+GIT_GROUP="herald-git"
 UNIT_PATH="/etc/systemd/system/herald.service"
 
 # --- helpers ---
@@ -237,8 +238,22 @@ if ! id -nG "$USER" | grep -qw docker; then
     ok "Added '$USER' to docker group"
 fi
 
+# Group shared by the operator and herald: the operator pushes to the bare
+# server repo under $DATA_DIR, herald reads it. The setgid bit makes new files
+# under $DATA_DIR inherit the group; mode 710 lets the group reach server.git
+# without listing the directory.
+getent group "$GIT_GROUP" >/dev/null 2>&1 || groupadd "$GIT_GROUP"
+usermod -aG "$GIT_GROUP" "$USER"
+OPERATOR="${SUDO_USER:-}"
+if [ -z "$OPERATOR" ] || [ "$OPERATOR" = "root" ]; then
+    warn "No sudo user detected — add the operator to group '$GIT_GROUP' by hand to push to the server repo"
+else
+    usermod -aG "$GIT_GROUP" "$OPERATOR"
+    ok "User '$OPERATOR' added to group '$GIT_GROUP' (log in again to pick it up)"
+fi
+
 # Directories
-install -d -o "$USER" -g "$USER" -m 700 "$DATA_DIR"
+install -d -o "$USER" -g "$GIT_GROUP" -m 2710 "$DATA_DIR"
 install -d -o "$USER" -g "$USER" -m 755 "$DEPLOY_DIR"
 ok "Directories ready"
 
@@ -268,6 +283,9 @@ cat <<EOF
 
     # 1. Bootstrap from your server repo (handles auth, secrets, webhooks):
     sudo -iu $USER herald init <your-org/server-repo>
+
+    # ...or, without GitHub, create a bare server repo to `git push` to:
+    sudo -iu $USER herald init
 
     # 2. Start the daemon (wires Caddy + webhooks on first start):
     sudo systemctl enable --now herald

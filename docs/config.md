@@ -21,7 +21,7 @@ stacks:    # optional — everything herald deploys
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `name` | yes | — | Short identifier for this server. Used in logs and status output. |
-| `deploy_domain` | yes | — | Domain where herald's webhook listener is reachable (e.g. `deploy.example.com`). |
+| `deploy_domain` | with `github_token` | — | Domain where herald's webhook listener is reachable (e.g. `deploy.example.com`). Required when `github_token` is set, because GitHub webhooks need it. Without it Caddy starts without a Herald site; the server repo is then deployed by `git push` to the bare repo that `herald init` creates. |
 | `services_dir` | yes | — | Base directory for all deployments (e.g. `/opt/deploy`). All stacks land directly under `<name>/` (flat, no subdirectories). |
 | `port` | no | `9483` | Port herald listens on. |
 | `bind` | no | all interfaces | Listen address. Empty binds all interfaces (`:port`). Set `127.0.0.1` to bind loopback-only when Caddy runs on the same host. |

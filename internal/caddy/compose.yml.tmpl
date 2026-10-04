@@ -27,8 +27,10 @@ services:
 {{- if .AcmeCA}}
       caddy.acme_ca: "{{.AcmeCA}}"
 {{- end}}
+{{- if .DeployDomain}}
       caddy_0: "{{.DeployDomain}}"
       caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
+{{- end}}
 {{- if .DNS}}
       caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"
 {{- if .Wildcard}}

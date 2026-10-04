@@ -704,11 +704,13 @@ server:
 		wantErr string
 	}{
 		{
-			name: "missing deploy_domain",
+			name: "github_token without deploy_domain",
 			yaml: `
 server:
   name: test
   services_dir: /opt/deploy
+  acme_email: ops@example.com
+  github_token: ghp_abc
 `,
 			wantErr: "server.deploy_domain",
 		},
@@ -892,5 +894,17 @@ func TestLoadTLS(t *testing.T) {
 				t.Fatalf("got %v, want %s", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_NoDeployDomainWithoutGitHubToken(t *testing.T) {
+	path := writeTempConfig(t, `
+server:
+  name: pi
+  services_dir: /opt/deploy
+  acme_email: ops@example.com
+`)
+	if _, err := config.Load(path); err != nil {
+		t.Fatalf("config without deploy_domain and github_token should validate: %v", err)
 	}
 }
