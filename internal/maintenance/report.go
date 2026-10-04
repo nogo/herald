@@ -59,7 +59,7 @@ type WebhookResult struct {
 	Created int    `json:"created"`
 	Pruned  int    `json:"pruned"`
 	Errors  int    `json:"errors"`
-	Skipped bool   `json:"skipped"` // true when delta mode found no change
+	Skipped bool   `json:"skipped"` // disabled, no GitHub repos/token, or unchanged delta
 	Error   string `json:"error,omitempty"`
 }
 

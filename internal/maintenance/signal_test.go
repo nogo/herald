@@ -1,0 +1,99 @@
+package maintenance
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/nogo/herald/internal/config"
+	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/webhook"
+)
+
+func TestLocalSignalPullReloadRedeployChanged(t *testing.T) {
+	cfg, _, name := autoDeployConfig(t, false)
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, value string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(value), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(repo, "head"), "old\n", 0644)
+	write(filepath.Join(cfg.Server.ServicesDir, name, "deployed_ref"), "path@old\n", 0644)
+	write(filepath.Join(dir, "git"), `#!/bin/sh
+shift 4
+case "$1" in
+ rev-parse) cat head ;;
+ pull) echo new > head ;;
+ diff) exit 1 ;;
+ *) exit 1 ;;
+esac
+`, 0755)
+	write(filepath.Join(dir, "docker"), "#!/bin/sh\nexit 1\n", 0755)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	live := config.NewLive(cfg)
+	fd := &fakeDeployer{asyncQueued: true}
+	r := &Runner{DataDir: dir, Logger: discardLogger(t), Secrets: secrets.NewStore(dir), Config: live, Deployer: fd,
+		Reload: func() (*config.Config, error) {
+			head, err := os.ReadFile(filepath.Join(repo, "head"))
+			if err != nil || string(head) != "new\n" {
+				t.Errorf("reload ran before pull: %q, %v", head, err)
+			}
+			updated := *cfg
+			updated.Server.Name = "reloaded"
+			return &updated, nil
+		},
+	}
+	done := make(chan *Report, 1)
+	s := &webhook.Server{OnIaCPush: func() {
+		done <- r.Run(context.Background(), Options{Pull: true, Webhooks: ReconcileDelta, RedeployChanged: true})
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/sync", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	response := httptest.NewRecorder()
+	s.Handler().ServeHTTP(response, req)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("signal status = %d", response.Code)
+	}
+	select {
+	case rep := <-done:
+		if !rep.IaC.Pulled || rep.IaC.OldHEAD != "old" || rep.IaC.NewHEAD != "new" || !rep.Config.Loaded {
+			t.Fatalf("maintenance report = %+v", rep)
+		}
+		if live.Load().Server.Name != "reloaded" {
+			t.Fatal("config reload not published")
+		}
+		if len(fd.asyncCalls) != 1 || fd.asyncCalls[0] != name {
+			t.Fatalf("deploys = %v", fd.asyncCalls)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("signal did not complete maintenance")
+	}
+}
+
+func TestReconcileNonGitHubServerRepoSkipped(t *testing.T) {
+	cfg := mustConfig(t, nil)
+	cfg.Server.GithubToken = "unused-token"
+	dir := t.TempDir()
+	// A broken state file must never be read when there are no GitHub repos.
+	if err := os.WriteFile(filepath.Join(dir, "webhooks.json"), []byte("invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{DataDir: dir, IaCRepo: ""}
+	for _, mode := range []Reconcile{ReconcileFull, ReconcileDelta} {
+		rep := &Report{}
+		r.reconcileWebhooks(context.Background(), cfg, Options{Webhooks: mode}, rep)
+		if !rep.Webhooks.Skipped || rep.Webhooks.Error != "" {
+			t.Fatalf("webhooks = %+v", rep.Webhooks)
+		}
+	}
+}

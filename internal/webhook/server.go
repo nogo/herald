@@ -158,10 +158,27 @@ func (s *Server) Handler() http.Handler {
 		s.handleWebhook(w, r)
 	})
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("POST /sync", s.handleSync)
 	if s.Web != nil {
 		s.Web.RegisterRoutes(mux)
 	}
 	return mux
+}
+
+// handleSync trusts only the connection peer. Caddy connects from the Docker
+// bridge, so forwarding headers cannot grant access to this operator endpoint.
+func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || !net.ParseIP(host).IsLoopback() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "sync requires a loopback connection"})
+		return
+	}
+	if s.OnIaCPush == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync is not configured"})
+		return
+	}
+	s.dispatch(s.OnIaCPush)
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": "sync submitted"})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -422,6 +439,9 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 }
 
 func (s *Server) verifySignature(body []byte, sigHeader string) bool {
+	if s.Secret == "" {
+		return false
+	}
 	const prefix = "sha256="
 	if !strings.HasPrefix(sigHeader, prefix) {
 		return false

@@ -126,12 +126,33 @@ Herald registers webhooks on your app repos and on the server repo via the GitHu
 
 Everything Herald manages is a stack: a Docker Compose project with a domain, secrets, and a source.
 
+For a server repo with a local bare repo or non-GitHub `origin`, a git
+`post-receive` hook can send the daemon a sync signal with:
+
+```sh
+herald signal
+```
+
+Run it as the operator who runs Herald. Use `--port <port>` if the daemon uses
+a port other than 9483. The command needs no config and bypasses HTTP proxies.
+It exits non-zero with a diagnostic if the daemon is unreachable or rejects the
+signal. Success means maintenance was submitted: the daemon pulls its
+`<data-dir>/repo` clone, reloads config, and redeploys changed `auto_deploy` path
+stacks. After the pass finishes, `herald status` shows the server-repo commit.
+With only path stacks and a non-GitHub server repo, no GitHub token or webhook
+secret is needed and webhook reconciliation is skipped.
+
+The daemon must listen on an address reachable at `127.0.0.1`. Its `POST /sync`
+route checks the connection peer for loopback; Caddy's Docker bridge connection
+and remote hosts are rejected regardless of forwarding headers.
+
 ## Commands
 
 **Daemon**
 ```
 herald serve                Start webhook listener (runs as the systemd service)
 herald sync                 Pull IaC repo + reconcile config + sync webhooks
+herald signal               Ask the local daemon to sync the server repo
 herald status               Show apps, services, domains, health (with CPU/mem)
 herald doctor               Diagnose deploy/wiring problems with fix commands
 ```

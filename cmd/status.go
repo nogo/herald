@@ -218,6 +218,10 @@ func printStatus(w io.Writer, s *status.ServerStatus, stats map[string]container
 	fmt.Fprintln(w)
 
 	// Caddy on a single line.
+	if s.IaCCommit != "" {
+		fmt.Fprintf(w, "Server repo  %s\n", s.IaCCommit)
+	}
+
 	caddy := "○ stopped"
 	if s.Caddy.Running {
 		parts := []string{"● running"}
