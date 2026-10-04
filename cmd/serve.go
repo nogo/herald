@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nogo/herald/internal/availability"
 	"github.com/nogo/herald/internal/caddy"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
@@ -156,6 +157,9 @@ var serveCmd = &cobra.Command{
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+
+		// Record each public stack's state for the 90-day history on the page.
+		go availability.NewLog(dataDir).Run(ctx, time.Minute, live, collector.Collect, slog.Default())
 
 		go func() {
 			if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

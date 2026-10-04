@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"embed"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/nogo/herald/internal/availability"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/status"
 )
@@ -73,16 +75,25 @@ func (h *WebHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.handleStatus)
 }
 
+// publicDay is one bar of a stack's history. Title is the hover text: the date and
+// the minutes degraded or down, never the time of a state change.
+type publicDay struct {
+	State string // "up", "degraded", "down", or "nodata"
+	Title string
+}
+
 // publicService is the public-safe view of one opted-in stack.
 type publicService struct {
-	Name  string
-	State string // "up", "degraded", or "down"
+	Name   string
+	State  string // "up", "degraded", or "down"
+	Uptime string // e.g. "99.95%"; "" without any data
+	Days   []publicDay
 }
 
 // publicStatus is the entire public page data. It deliberately carries no domain,
 // server name, source, ref, commit, preview, or webhook information.
 type publicStatus struct {
-	Overall   string // "operational", "degraded", "down", or "unknown"
+	Overall   string // "operational", "degraded" or "down"; "" when no stack is public
 	Services  []publicService
 	UpdatedAt time.Time
 }
@@ -108,6 +119,7 @@ func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 // only stacks that opted in with availability.public.
 func (h *WebHandler) buildPublic(s *status.ServerStatus) publicStatus {
 	cfg := h.Config.Load()
+	now := time.Now()
 	var services []publicService
 	up, total := 0, 0
 	for _, st := range s.Stacks {
@@ -115,18 +127,17 @@ func (h *WebHandler) buildPublic(s *status.ServerStatus) publicStatus {
 		if !ok || stackCfg.Availability == nil || !stackCfg.Availability.Public {
 			continue
 		}
-		state := publicState(st.State)
-		services = append(services, publicService{Name: st.Name, State: state})
+		state := availability.PublicState(st.State)
+		services = append(services, h.publicService(st.Name, state, now))
 		total++
 		if state == "up" {
 			up++
 		}
 	}
 
-	overall := "unknown"
+	overall := ""
 	switch {
 	case total == 0:
-		overall = "unknown"
 	case up == total:
 		overall = "operational"
 	case up == 0:
@@ -135,18 +146,27 @@ func (h *WebHandler) buildPublic(s *status.ServerStatus) publicStatus {
 		overall = "degraded"
 	}
 
-	return publicStatus{Overall: overall, Services: services, UpdatedAt: time.Now()}
+	return publicStatus{Overall: overall, Services: services, UpdatedAt: now}
 }
 
-// publicState maps an internal stack state to the public vocabulary. Anything that
-// is not clearly running or degraded is reported as down.
-func publicState(state string) string {
-	switch state {
-	case "running":
-		return "up"
-	case "degraded":
-		return "degraded"
-	default: // stopped, error, not deployed
-		return "down"
+// publicService builds one stack's view: its current state and day bars. A
+// history that cannot be read renders as no data; the current state still shows.
+func (h *WebHandler) publicService(name, state string, now time.Time) publicService {
+	svc := publicService{Name: name, State: state}
+	days, err := availability.NewLog(h.Collector.DataDir).History(name, now)
+	if err != nil {
+		h.Logger.Warn("reading availability history", "stack", name, "error", err)
 	}
+	if pct, ok := availability.Uptime(days); ok {
+		svc.Uptime = fmt.Sprintf("%.2f%%", pct)
+	}
+	for _, d := range days {
+		date := d.Date.Format("2006-01-02")
+		title := date + ": no data"
+		if d.State != availability.NoData {
+			title = fmt.Sprintf("%s: %d min degraded or down", date, d.Minutes)
+		}
+		svc.Days = append(svc.Days, publicDay{State: d.State, Title: title})
+	}
+	return svc
 }

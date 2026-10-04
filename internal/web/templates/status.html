@@ -1,9 +1,11 @@
 {{define "status"}}
 {{template "head" .}}
 
+{{if .Overall}}
 <section>
   <div class="overall {{.Overall}}">{{.Overall}}</div>
 </section>
+{{end}}
 
 <section>
   <h2>Services</h2>
@@ -11,14 +13,18 @@
   <ul class="services">
     {{range .Services}}
     <li>
-      <span class="dot {{.State}}"></span>
-      <span class="service-name">{{.Name}}</span>
-      <span class="service-state">{{.State}}</span>
+      <div class="service-head">
+        <span class="dot {{.State}}"></span>
+        <span class="service-name">{{.Name}}</span>
+        <span class="service-state">{{.State}}</span>
+      </div>
+      <div class="bars">{{range .Days}}<span class="bar {{.State}}" title="{{.Title}}"></span>{{end}}</div>
+      <div class="bars-foot"><span>90 days ago</span><span>{{if .Uptime}}{{.Uptime}} uptime{{else}}no data{{end}}</span><span>Today</span></div>
     </li>
     {{end}}
   </ul>
   {{else}}
-  <p class="empty">No public services.</p>
+  <p class="empty">No services are listed publicly</p>
   {{end}}
 </section>
 

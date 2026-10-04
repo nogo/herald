@@ -59,7 +59,7 @@ TLS and routing are delegated to caddy-docker-proxy via container labels. Herald
 - **Replacing CI/CD.** Herald builds via `docker compose build`. If you need test pipelines, use GitHub Actions and deploy on success.
 - **Wrapping Docker Compose commands.** Commands like `logs` and `exec` that add no herald-specific logic should not exist. Teach the naming convention (`herald-<name>`) instead.
 - **Terraform/OpenTofu-style planning or state.** Herald operates one server from a repo. It does not provide providers, resource graphs, imports, or remote state.
-- **Generic monitoring platform.** Herald may expose simple public availability for opted-in stacks, but detailed monitoring, alerting, and incident management are out of scope.
+- **Generic monitoring platform.** Public availability history is in: opted-in stacks show their up/degraded/down state and 90 days of it on the public page. Detailed monitoring, incidents, alerting, and subscriptions are out of scope.
 
 ## Design Principles
 
