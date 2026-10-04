@@ -723,6 +723,17 @@ server:
 			wantErr: "server.services_dir",
 		},
 		{
+			name: "non-numeric routing port",
+			yaml: serverBlock + `
+stacks:
+  myapp:
+    repo: owner/myapp
+    domain: myapp.example.com
+    port: http
+`,
+			wantErr: `port "http"`,
+		},
+		{
 			name: "invalid repo format - no slash",
 			yaml: serverBlock + `
 stacks:

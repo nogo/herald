@@ -51,6 +51,8 @@ Each key under `stacks:` is the stack name used in CLI commands (`herald deploy 
 | `repo` | repo stacks | yes* | — | GitHub repo in `owner/name` format. Mutually exclusive with `path`. |
 | `path` | path stacks | yes* | — | Path to directory within the IaC repo (e.g. `stacks/nextcloud`). Must contain a `compose.yml`. Mutually exclusive with `repo`. |
 | `domain` | both | yes | — | Primary domain. Herald configures Caddy to route traffic here. |
+| `service` | both | no | detected | Compose service Caddy routes `domain` to. Must exist in the compose file. See [Routing](#routing-service-and-port). |
+| `port` | both | no | detected | Container port of that service (1–65535). See [Routing](#routing-service-and-port). |
 | `branch` | repo stacks | no | `main` | Branch to track. Mutually exclusive with `tag`. |
 | `tag` | repo stacks | no | — | Deploy a specific tag instead of tracking a branch. Mutually exclusive with `branch`. |
 | `tag_pattern` | repo stacks | no | — | Glob pattern (e.g. `v[0-9]*`). When a matching tag is pushed to GitHub, herald deploys it automatically. Requires `branch`. |
@@ -104,6 +106,27 @@ stacks:
           env_file:
             - /opt/deploy/myapp/.env
 ```
+
+### Routing: `service` and `port`
+
+Caddy routes `domain` to one service in the compose file, on one container port. Name them when the compose file has more than one candidate:
+
+```yaml
+stacks:
+  shop:
+    repo: acme/shop
+    domain: shop.example.com
+    service: web   # compose service that receives traffic
+    port: 8080     # container port (not the published host port)
+```
+
+Without `service`, herald picks the service named `app`, then the one named after the stack, then the only service. If none applies — say `web` and `db` with a stack called `shop` — the deploy fails and asks for `service`.
+
+Without `port`, herald uses the service's `expose` / `ports` container port. With none declared it falls back to 3000 for `repo` stacks and 80 for `path` stacks. If the service declares several distinct container ports, the deploy fails and asks for `port`. Port entries that are ranges or use `${VAR}` are not read; set `port` for those.
+
+A compose file herald cannot read or parse fails the deploy with the file's name; it is never replaced with a guessed `app` service. Previews use the same `service` and `port` as their stack.
+
+**Migrating:** earlier versions picked the alphabetically first service when nothing matched, and fell back to `app` on a bad compose file. If a deploy now fails with "set `service:`" or "set `port:`", add that field to the stack.
 
 ### `config` — non-secret base layer
 
@@ -376,7 +399,7 @@ This means:
 - A database in `myapp`'s compose file is unreachable from `otherapp`
 - Only the front service is exposed to Caddy for reverse proxying
 
-If your compose file defines additional services (workers, migrations), use the `override` field to attach them to the internal network or pass the generated `.env` file. Herald only injects the detected main service automatically.
+If your compose file defines additional services (workers, migrations), use the `override` field to attach them to the internal network or pass the generated `.env` file. Herald only injects the routed service (see [Routing](#routing-service-and-port)) automatically.
 
 ---
 

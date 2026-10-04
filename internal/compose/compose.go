@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -67,70 +68,102 @@ type minimalCompose struct {
 	Services map[string]minimalService `yaml:"services"`
 }
 
-// DetectServiceInfo parses a compose file to find the main service name and port.
-// Prefers a service named "app", then appName, then the first alphabetically.
-// defaultPort is returned when no port is found (e.g. "3000" for apps, "80" for stacks).
-func DetectServiceInfo(filePath, appName, defaultPort string) (serviceName, port string, err error) {
-	serviceName, port, _, err = DetectServices(filePath, appName, defaultPort)
-	return
+// Route is the service Caddy sends a stack's domain to, and the container port
+// it listens on. Services lists every service in the compose file.
+type Route struct {
+	Service  string
+	Port     string
+	Services []string
 }
 
-// DetectServices parses a compose file and returns the main service name, its
-// port, and all service names. Selection rules match DetectServiceInfo.
-func DetectServices(filePath, appName, defaultPort string) (mainName, port string, allNames []string, err error) {
+// SelectRoute is the one place that decides where a stack's domain is routed.
+// service and port are the stack's explicit choices and may be empty.
+//
+// Without service, it picks "app", then stackName, then the sole service, and
+// otherwise fails asking for one. Without port, it uses the service's single
+// expose/ports target, defaultPort when it declares none, and fails when it
+// declares several distinct targets. Errors name filePath.
+func SelectRoute(filePath, stackName, service, port, defaultPort string) (Route, error) {
+	if port != "" {
+		if err := ValidatePort(port); err != nil {
+			return Route{}, err
+		}
+	}
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", nil, err
+		return Route{}, fmt.Errorf("reading compose file %s: %w", filePath, err)
 	}
-
 	var mc minimalCompose
 	if err := yaml.Unmarshal(data, &mc); err != nil {
-		return "", "", nil, err
+		return Route{}, fmt.Errorf("parsing compose file %s: %w", filePath, err)
+	}
+	names := slices.Sorted(maps.Keys(mc.Services))
+	if len(names) == 0 {
+		return Route{}, fmt.Errorf("compose file %s defines no services", filePath)
 	}
 
-	if len(mc.Services) == 0 {
-		return "app", defaultPort, nil, nil
+	switch {
+	case service != "":
+		if _, ok := mc.Services[service]; !ok {
+			return Route{}, fmt.Errorf("compose file %s: service %q not found (services: %s)", filePath, service, strings.Join(names, ", "))
+		}
+	case slices.Contains(names, "app"):
+		service = "app"
+	case slices.Contains(names, stackName):
+		service = stackName
+	case len(names) == 1:
+		service = names[0]
+	default:
+		return Route{}, fmt.Errorf("compose file %s has several services (%s) and none is named \"app\" or %q: set `service:` on the stack to the one to route the domain to", filePath, strings.Join(names, ", "), stackName)
 	}
 
-	allNames = slices.Sorted(maps.Keys(mc.Services))
-	mainName = allNames[0]
-	for _, n := range allNames {
-		if n == "app" || n == appName {
-			mainName = n
-			break
+	if port == "" {
+		targets := declaredPorts(mc.Services[service])
+		switch len(targets) {
+		case 0:
+			port = defaultPort
+		case 1:
+			port = targets[0]
+		default:
+			return Route{}, fmt.Errorf("compose file %s: service %q declares several ports (%s): set `port:` on the stack to the one to route to", filePath, service, strings.Join(targets, ", "))
 		}
 	}
-
-	port = extractFirstPort(mc.Services[mainName])
-	if port == "" {
-		port = defaultPort
-	}
-	return mainName, port, allNames, nil
+	return Route{Service: service, Port: port, Services: names}, nil
 }
 
-func extractFirstPort(svc minimalService) string {
-	for _, v := range svc.Expose {
-		if p := portFromAny(v); p != "" {
-			return p
+// ValidatePort reports whether p is a numeric container port, 1-65535.
+func ValidatePort(p string) error {
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("port %q is not a container port between 1 and 65535", p)
+	}
+	return nil
+}
+
+// declaredPorts returns the distinct numeric container ports from a service's
+// expose and ports entries, sorted. Entries it cannot read as a single port
+// (ranges, variable interpolation) are ignored.
+func declaredPorts(svc minimalService) []string {
+	seen := map[string]bool{}
+	for _, v := range slices.Concat(svc.Expose, svc.Ports) {
+		p := portFromAny(v)
+		if ValidatePort(p) == nil {
+			seen[p] = true
 		}
 	}
-	for _, v := range svc.Ports {
-		if p := portFromAny(v); p != "" {
-			return p
-		}
-	}
-	return ""
+	return slices.Sorted(maps.Keys(seen))
 }
 
 func portFromAny(v any) string {
 	switch val := v.(type) {
 	case string:
-		// "3000", "3000:3000", "0.0.0.0:80:3000"
+		// "3000", "3000:3000", "0.0.0.0:80:3000", "3000/tcp"
 		parts := strings.Split(val, ":")
-		p := strings.TrimSpace(parts[len(parts)-1])
-		return p
+		p, _, _ := strings.Cut(parts[len(parts)-1], "/")
+		return strings.TrimSpace(p)
 	case int:
-		return fmt.Sprintf("%d", val)
+		return strconv.Itoa(val)
 	case map[string]any:
 		// long form: {target: 3000, published: 3000}
 		if t, ok := val["target"]; ok {
