@@ -270,7 +270,7 @@ func TestRunPostDeployHook(t *testing.T) {
 		composeFile := filepath.Join(deployDir, "repo", "compose.yml")
 
 		d := &Deployer{
-			Config:  &config.Config{Server: config.Server{ServicesDir: t.TempDir()}},
+			Config:  config.NewLive(&config.Config{Server: config.Server{ServicesDir: t.TempDir()}}),
 			Logger:  discardLogger(),
 			DataDir: dataDir,
 		}
@@ -312,7 +312,7 @@ func TestRunPostDeployHook(t *testing.T) {
 		os.MkdirAll(filepath.Join(dataDir, "repo"), 0755)
 
 		d := &Deployer{
-			Config:  &config.Config{Server: config.Server{ServicesDir: t.TempDir()}},
+			Config:  config.NewLive(&config.Config{Server: config.Server{ServicesDir: t.TempDir()}}),
 			Logger:  discardLogger(),
 			DataDir: dataDir,
 		}
@@ -330,10 +330,10 @@ func TestRunPostDeployHook(t *testing.T) {
 
 func TestDown_StackNotFound(t *testing.T) {
 	d := &Deployer{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Server: config.Server{ServicesDir: t.TempDir()},
 			Stacks: map[string]config.Stack{},
-		},
+		}),
 		Logger: discardLogger(),
 	}
 	err := d.Down(context.Background(), "nonexistent", false)

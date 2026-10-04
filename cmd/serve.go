@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -50,8 +49,7 @@ var serveCmd = &cobra.Command{
 
 		// live is the authoritative config shared by every daemon component. The
 		// maintenance pass publishes reloads here so handlers never race a swap.
-		live := &atomic.Pointer[config.Config]{}
-		live.Store(Cfg)
+		live := config.NewLive(Cfg)
 
 		// deployLimiter bounds actual simultaneous production and preview
 		// deployments (unlike the webhook dispatch below, which returns
@@ -60,21 +58,19 @@ var serveCmd = &cobra.Command{
 		deployLimiter := deployer.NewLimiter(deployer.MaxConcurrentDeployments)
 
 		d := &deployer.Deployer{
-			Config:     Cfg,
-			LiveConfig: live,
-			Secrets:    store,
-			Logger:     slog.Default(),
-			DataDir:    dataDir,
-			Limiter:    deployLimiter,
+			Config:  live,
+			Secrets: store,
+			Logger:  slog.Default(),
+			DataDir: dataDir,
+			Limiter: deployLimiter,
 		}
 
 		previewMgr := &preview.PreviewManager{
-			Config:     Cfg,
-			LiveConfig: live,
-			Secrets:    store,
-			DataDir:    dataDir,
-			Logger:     slog.Default(),
-			Limiter:    deployLimiter,
+			Config:  live,
+			Secrets: store,
+			DataDir: dataDir,
+			Logger:  slog.Default(),
+			Limiter: deployLimiter,
 		}
 
 		// Public availability page: a single unauthenticated endpoint exposing only
@@ -86,14 +82,13 @@ var serveCmd = &cobra.Command{
 			HeraldPort: listenPort,
 		}
 		collector := &status.StatusCollector{
-			Config:     Cfg,
-			LiveConfig: live,
-			DataDir:    dataDir,
-			Logger:     slog.Default(),
-			Caddy:      caddyMgr,
-			Preview:    previewMgr,
+			Config:  live,
+			DataDir: dataDir,
+			Logger:  slog.Default(),
+			Caddy:   caddyMgr,
+			Preview: previewMgr,
 		}
-		webHandler := web.NewWebHandler(collector, Cfg, live, slog.Default())
+		webHandler := web.NewWebHandler(collector, live, slog.Default())
 		if webHandler != nil {
 			slog.Info("public status page enabled")
 		}
@@ -103,18 +98,17 @@ var serveCmd = &cobra.Command{
 			Logger:     slog.Default(),
 			Secrets:    store,
 			Deployer:   d,
-			Live:       live,
+			Config:     live,
 			Reload:     func() (*config.Config, error) { return LoadConfigWithToken(cfgFile, dataDir) },
 			IaCRepo:    getIaCRepo(dataDir),
 			HeraldPort: listenPort,
 		}
 
 		srv := &webhook.Server{
-			Config:     Cfg,
-			LiveConfig: live,
-			Secret:     secret,
-			Verbose:    verbose,
-			Web:        webHandler,
+			Config:  live,
+			Secret:  secret,
+			Verbose: verbose,
+			Web:     webHandler,
 			OnDeploy: func(req webhook.DeployRequest) {
 				d.DeployAsync(req.StackName, req.Ref)
 			},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/ui"
@@ -32,7 +33,7 @@ This is irreversible without a backup.`,
 		}
 
 		d := &deployer.Deployer{
-			Config:  Cfg,
+			Config:  config.NewLive(Cfg),
 			Secrets: secrets.NewStore(dataDir),
 			Logger:  quietLogger(),
 			DataDir: dataDir,

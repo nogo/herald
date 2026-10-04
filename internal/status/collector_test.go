@@ -133,7 +133,7 @@ func TestCollectWebhookStatuses_MissingFile(t *testing.T) {
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir}
 
 	statuses, syncedAt := c.collectWebhookStatuses()
 	if len(statuses) != 1 {
@@ -171,7 +171,7 @@ func TestCollectWebhookStatuses_WithFile(t *testing.T) {
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir}
 
 	statuses, syncedAt := c.collectWebhookStatuses()
 	if len(statuses) != 1 {
@@ -209,7 +209,7 @@ func TestCollectWebhookStatuses_UnregisteredRepo(t *testing.T) {
 			"myapp": {Repo: "nogo/myapp", Branch: "main", Domain: "myapp.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir}
 
 	statuses, _ := c.collectWebhookStatuses()
 	if len(statuses) != 1 {
@@ -236,7 +236,7 @@ func TestCollectStackStatus_Source(t *testing.T) {
 			"mysvc": {Path: "services/mysvc", Domain: "mysvc.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir, Logger: slog.Default()}
 
 	repoStatus := c.collectStackStatus(t.Context(), "myapp", cfg.Stacks["myapp"])
 	if repoStatus.Source != "repo" {
@@ -315,7 +315,7 @@ func TestCollectStackStatus_DeployedRef(t *testing.T) {
 			"mysvc": {Path: "services/mysvc", Domain: "mysvc.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir, Logger: slog.Default()}
 
 	repoStatus := c.collectStackStatus(t.Context(), "myapp", cfg.Stacks["myapp"])
 	if repoStatus.Source != "repo" {
@@ -345,7 +345,7 @@ func TestCollect_Empty(t *testing.T) {
 		},
 		Stacks: map[string]config.Stack{},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir, Logger: slog.Default()}
 
 	status, err := c.Collect(t.Context())
 	if err != nil {
@@ -370,7 +370,7 @@ func TestCollect_MixedStacksSortedByName(t *testing.T) {
 			"beta":  {Repo: "nogo/beta", Branch: "main", Domain: "beta.example.com"},
 		},
 	}
-	c := &StatusCollector{Config: cfg, DataDir: dir, Logger: slog.Default()}
+	c := &StatusCollector{Config: config.NewLive(cfg), DataDir: dir, Logger: slog.Default()}
 
 	status, err := c.Collect(t.Context())
 	if err != nil {

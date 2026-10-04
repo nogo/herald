@@ -17,7 +17,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/caddy"
@@ -54,7 +53,6 @@ type Options struct {
 type stackDeployer interface {
 	Deploy(ctx context.Context, stackName, ref string) error
 	DeployAsync(stackName, ref string) bool
-	SetConfig(cfg *config.Config)
 }
 
 // Runner performs a maintenance pass. Run is single-flight: overlapping triggers
@@ -65,7 +63,7 @@ type Runner struct {
 	Logger     *slog.Logger
 	Secrets    *secrets.Store
 	Deployer   stackDeployer
-	Live       *atomic.Pointer[config.Config] // authoritative config, published on reload
+	Config     *config.Live                   // authoritative config, published on reload
 	Reload     func() (*config.Config, error) // reload + validate config from disk
 	IaCRepo    string                         // GitHub full name of the server IaC repo, or ""
 	HeraldPort int
@@ -109,15 +107,14 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 
 	// Phase A2: reload + validate config. Apply only if valid; a broken push must
 	// not take down wiring or trigger deploys.
-	cfg := r.Live.Load()
+	cfg := r.Config.Load()
 	configOK := true
 	if newCfg, err := r.Reload(); err != nil {
 		rep.Config.Error = err.Error()
 		configOK = false
 	} else {
 		cfg = newCfg
-		r.Live.Store(newCfg)
-		r.Deployer.SetConfig(newCfg) // keep the static field consistent for any non-live read
+		r.Config.Store(newCfg)
 		rep.Config.Loaded = true
 	}
 
@@ -143,7 +140,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 // token resolves the GitHub token from the live config, falling back to the
 // secrets store.
 func (r *Runner) token() string {
-	if cfg := r.Live.Load(); cfg != nil && cfg.Server.GithubToken != "" {
+	if cfg := r.Config.Load(); cfg != nil && cfg.Server.GithubToken != "" {
 		return cfg.Server.GithubToken
 	}
 	if token, err := r.Secrets.Get("herald/github_token"); err == nil {

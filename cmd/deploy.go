@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/nogo/herald/internal/ui"
@@ -24,7 +25,7 @@ var deployCmd = &cobra.Command{
 
 		store := secrets.NewStore(dataDir)
 		d := &deployer.Deployer{
-			Config:  Cfg,
+			Config:  config.NewLive(Cfg),
 			Secrets: store,
 			Logger:  quietLogger(),
 			DataDir: dataDir,

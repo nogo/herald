@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
@@ -77,7 +78,7 @@ var previewCleanupCmd = &cobra.Command{
 
 func newPreviewManager() *preview.PreviewManager {
 	return &preview.PreviewManager{
-		Config:  Cfg,
+		Config:  config.NewLive(Cfg),
 		Secrets: secrets.NewStore(dataDir),
 		DataDir: dataDir,
 		Logger:  slog.Default(),

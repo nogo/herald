@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/nogo/herald/internal/config"
@@ -15,11 +14,11 @@ import (
 func newTestHandler(t *testing.T, cfg *config.Config) *WebHandler {
 	t.Helper()
 	collector := &status.StatusCollector{
-		Config:  cfg,
+		Config:  config.NewLive(cfg),
 		DataDir: t.TempDir(),
 		Logger:  slog.Default(),
 	}
-	h := NewWebHandler(collector, cfg, nil, slog.Default())
+	h := NewWebHandler(collector, config.NewLive(cfg), slog.Default())
 	if h == nil {
 		t.Fatal("NewWebHandler returned nil")
 	}
@@ -154,19 +153,17 @@ func TestCachedStatus_TTL(t *testing.T) {
 	}
 }
 
-// newLiveTestHandler builds a WebHandler backed by an atomic.Pointer[config.Config]
-// primed with initial, mirroring how cmd/serve.go publishes reloads.
-func newLiveTestHandler(t *testing.T, initial *config.Config) (*WebHandler, *atomic.Pointer[config.Config]) {
+// newLiveTestHandler builds a WebHandler whose collector and handler share one
+// config.Live primed with initial, mirroring how cmd/serve.go publishes reloads.
+func newLiveTestHandler(t *testing.T, initial *config.Config) (*WebHandler, *config.Live) {
 	t.Helper()
-	live := &atomic.Pointer[config.Config]{}
-	live.Store(initial)
+	live := config.NewLive(initial)
 	collector := &status.StatusCollector{
-		Config:     initial,
-		LiveConfig: live,
-		DataDir:    t.TempDir(),
-		Logger:     slog.Default(),
+		Config:  live,
+		DataDir: t.TempDir(),
+		Logger:  slog.Default(),
 	}
-	h := NewWebHandler(collector, initial, live, slog.Default())
+	h := NewWebHandler(collector, live, slog.Default())
 	if h == nil {
 		t.Fatal("NewWebHandler returned nil")
 	}
@@ -250,27 +247,8 @@ func TestBuildPublic_ReloadDropsRemovedStack(t *testing.T) {
 	}
 }
 
-// TestWebHandlerCfg_FallsBackWhenLiveConfigUnset verifies that an unset
-// LiveConfig (mirroring a reload that never stored, e.g. because the reloaded
-// config was invalid) falls back to the last snapshot the handler was
-// constructed with, rather than panicking or exposing a zero-value config.
-func TestWebHandlerCfg_FallsBackWhenLiveConfigUnset(t *testing.T) {
-	cfg := &config.Config{Stacks: map[string]config.Stack{
-		"blog": {Availability: &config.AvailabilityConfig{Public: true}},
-	}}
-	live := &atomic.Pointer[config.Config]{} // never stored - simulates no successful reload yet
-	h := NewWebHandler(&status.StatusCollector{Config: cfg, DataDir: t.TempDir(), Logger: slog.Default()}, cfg, live, slog.Default())
-	if h == nil {
-		t.Fatal("NewWebHandler returned nil")
-	}
-
-	if got := h.cfg(); got != cfg {
-		t.Fatalf("cfg() = %p, want fallback to startup config %p", got, cfg)
-	}
-}
-
 // TestBuildPublic_ConcurrentReloadsRaceFree exercises buildPublic against a
-// LiveConfig pointer that is swapped concurrently, to catch both data races
+// config.Live that is swapped concurrently, to catch both data races
 // (run with -race) and torn reads that mix stacks across two config
 // generations within a single response.
 func TestBuildPublic_ConcurrentReloadsRaceFree(t *testing.T) {

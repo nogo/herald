@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/config"
@@ -125,7 +124,7 @@ type DeployRequest struct {
 
 // Server is the webhook HTTP server.
 type Server struct {
-	Config            *config.Config
+	Config            *config.Live
 	Secret            string
 	Verbose           bool
 	Web               *web.WebHandler                      // optional status page handler; nil disables status page
@@ -134,20 +133,6 @@ type Server struct {
 	OnIaCPush         func()                               // called when a push to IaCRepo is received; may be nil
 	OnPreviewDeploy   func(appName, branch, commit string) // called for preview-enabled apps on non-default branches
 	OnPreviewTeardown func(appName, branch string)         // called when a preview branch is deleted or PR closed
-
-	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
-	// Lets the daemon publish reloaded config without racing in-flight handlers.
-	LiveConfig *atomic.Pointer[config.Config]
-}
-
-// conf returns the live config snapshot, preferring LiveConfig when set.
-func (s *Server) conf() *config.Config {
-	if s.LiveConfig != nil {
-		if c := s.LiveConfig.Load(); c != nil {
-			return c
-		}
-	}
-	return s.Config
 }
 
 // dispatch runs fn in a goroutine so the HTTP handler returns immediately.
@@ -264,7 +249,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("webhook payload", "event", eventType, "repo", repo, "branch", branch, "bodyLen", len(body))
 	}
 
-	cfg := s.conf()
+	cfg := s.Config.Load()
 
 	var matchedNames []string
 	for name, stack := range cfg.Stacks {
@@ -352,7 +337,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 // handleTagPush matches a tag name against each stack's tag_pattern and dispatches deploys.
 func (s *Server) handleTagPush(repo, tag, commit, cloneURL string) {
-	cfg := s.conf()
+	cfg := s.Config.Load()
 	var matched []string
 	for name, stack := range cfg.Stacks {
 		if stack.Repo == "" || !strings.EqualFold(stack.Repo, repo) || stack.TagPattern == "" {
@@ -393,7 +378,7 @@ func (s *Server) handlePreviewEvent(repo, branch, commit, eventType string, isDe
 		return false
 	}
 	triggered := false
-	for name, stack := range s.conf().Stacks {
+	for name, stack := range s.Config.Load().Stacks {
 		if stack.Repo == "" || stack.Preview == nil || !stack.Preview.Enabled || !strings.EqualFold(stack.Repo, repo) {
 			continue
 		}

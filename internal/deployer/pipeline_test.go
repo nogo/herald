@@ -99,10 +99,10 @@ exit 0
 
 func (e *pipelineEnv) deployer(stacks map[string]config.Stack) *Deployer {
 	return &Deployer{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Server: config.Server{ServicesDir: e.servicesDir},
 			Stacks: stacks,
-		},
+		}),
 		Secrets: e.store,
 		Logger:  discardLogger(),
 		DataDir: e.dataDir,

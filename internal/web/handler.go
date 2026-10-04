@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/config"
@@ -46,39 +45,25 @@ func (c *cachedStatus) Get(ctx context.Context, collector *status.StatusCollecto
 // lives in the CLI (herald status / herald doctor), never here.
 type WebHandler struct {
 	Collector *status.StatusCollector
-	Config    *config.Config
+	Config    *config.Live
 	Templates *template.Template
 	Logger    *slog.Logger
 	cache     cachedStatus
-
-	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
-	LiveConfig *atomic.Pointer[config.Config]
-}
-
-// cfg returns the live config snapshot, preferring LiveConfig when set.
-func (h *WebHandler) cfg() *config.Config {
-	if h.LiveConfig != nil {
-		if c := h.LiveConfig.Load(); c != nil {
-			return c
-		}
-	}
-	return h.Config
 }
 
 // NewWebHandler creates a WebHandler. Returns nil if template parsing fails.
-func NewWebHandler(collector *status.StatusCollector, cfg *config.Config, live *atomic.Pointer[config.Config], logger *slog.Logger) *WebHandler {
+func NewWebHandler(collector *status.StatusCollector, cfg *config.Live, logger *slog.Logger) *WebHandler {
 	tmpl, err := template.New("").ParseFS(content, "templates/*.html")
 	if err != nil {
 		logger.Error("failed to parse templates, status page disabled", "error", err)
 		return nil
 	}
 	return &WebHandler{
-		Collector:  collector,
-		Config:     cfg,
-		LiveConfig: live,
-		Templates:  tmpl,
-		Logger:     logger,
-		cache:      cachedStatus{ttl: 5 * time.Second},
+		Collector: collector,
+		Config:    cfg,
+		Templates: tmpl,
+		Logger:    logger,
+		cache:     cachedStatus{ttl: 5 * time.Second},
 	}
 }
 
@@ -122,7 +107,7 @@ func (h *WebHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 // buildPublic reduces the full collected status to the public-safe view, keeping
 // only stacks that opted in with availability.public.
 func (h *WebHandler) buildPublic(s *status.ServerStatus) publicStatus {
-	cfg := h.cfg()
+	cfg := h.Config.Load()
 	var services []publicService
 	up, total := 0, 0
 	for _, st := range s.Stacks {

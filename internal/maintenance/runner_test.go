@@ -122,8 +122,6 @@ func (f *fakeDeployer) DeployAsync(stackName, _ string) bool {
 	return f.asyncQueued
 }
 
-func (f *fakeDeployer) SetConfig(*config.Config) {}
-
 // autoDeployConfig builds a config with a single auto-deploy path stack whose
 // deploy directory already exists (so surveyStacks reaches the deploy branch)
 // and, when drifted is true, whose recorded config fingerprint no longer

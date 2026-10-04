@@ -488,7 +488,7 @@ func TestDeploy_ConcurrentFirstDeploy_SingleStateEntry(t *testing.T) {
 	installFakeDocker(t)
 
 	mgr := newTestManager(t)
-	mgr.Config = previewTestApp(t, filepath.Join(mgr.DataDir, "services"))
+	mgr.Config = config.NewLive(previewTestApp(t, filepath.Join(mgr.DataDir, "services")))
 
 	const n = 5
 	var wg sync.WaitGroup
@@ -534,7 +534,7 @@ func TestDeploy_ConcurrentRequests_RespectPreviewLimit(t *testing.T) {
 
 	mgr := newTestManager(t)
 	servicesDir := filepath.Join(mgr.DataDir, "services")
-	mgr.Config = previewTestApp(t, servicesDir)
+	mgr.Config = config.NewLive(previewTestApp(t, servicesDir))
 
 	// Fill the app to one slot below the limit with pre-existing previews. One
 	// of them ("filler-0") will also receive a concurrent update request.
@@ -629,7 +629,7 @@ func TestDeployThenTeardown_Serialized(t *testing.T) {
 	installGatedFakeDocker(t, reached, gate)
 
 	mgr := newTestManager(t)
-	mgr.Config = previewTestApp(t, filepath.Join(mgr.DataDir, "services"))
+	mgr.Config = config.NewLive(previewTestApp(t, filepath.Join(mgr.DataDir, "services")))
 
 	id := makeID("app", "feature/gate")
 
@@ -692,7 +692,7 @@ func TestDeploy_CreatesPreviewInstance(t *testing.T) {
 
 	servicesDir := t.TempDir()
 	mgr := newTestManager(t)
-	mgr.Config = previewTestApp(t, servicesDir)
+	mgr.Config = config.NewLive(previewTestApp(t, servicesDir))
 
 	if err := mgr.Deploy(context.Background(), "app", "feature/x", "sha1"); err != nil {
 		t.Fatalf("Deploy: %v", err)

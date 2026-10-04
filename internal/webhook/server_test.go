@@ -20,7 +20,7 @@ const testSecret = "test-secret"
 
 func newServer() *webhook.Server {
 	return &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Server: config.Server{
 				Name:         "test",
 				DeployDomain: "deploy.example.com",
@@ -31,7 +31,7 @@ func newServer() *webhook.Server {
 				"tracker": {Repo: "nogo/budget-app", Branch: "main"},
 				"other":   {Repo: "nogo/other-app", Branch: "main"},
 			},
-		},
+		}),
 		Secret:   testSecret,
 		OnDeploy: func(webhook.DeployRequest) {},
 	}
@@ -197,11 +197,11 @@ func TestPreviewPullRequestSameRepo(t *testing.T) {
 	type previewEvent struct{ name, branch string }
 	called := make(chan previewEvent, 1)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{
 				"myapp": {Repo: "nogo/myapp", Branch: "main", Preview: &config.PreviewConfig{Enabled: true}},
 			},
-		},
+		}),
 		Secret:          testSecret,
 		OnDeploy:        func(webhook.DeployRequest) {},
 		OnPreviewDeploy: func(name, branch, commit string) { called <- previewEvent{name, branch} },
@@ -229,11 +229,11 @@ func TestPreviewPullRequestSameRepo(t *testing.T) {
 func TestPreviewPullRequestForkIgnored(t *testing.T) {
 	called := make(chan struct{}, 1)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{
 				"myapp": {Repo: "nogo/myapp", Branch: "main", Preview: &config.PreviewConfig{Enabled: true}},
 			},
-		},
+		}),
 		Secret:          testSecret,
 		OnDeploy:        func(webhook.DeployRequest) {},
 		OnPreviewDeploy: func(name, branch, commit string) { called <- struct{}{} },
@@ -302,14 +302,14 @@ func TestDeployCallbackFired(t *testing.T) {
 func TestPathStackNotMatchedByWebhook(t *testing.T) {
 	called := make(chan webhook.DeployRequest, 4)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{
 				// path stack: no Repo field
 				"myservice": {Path: "/opt/services/myservice", Branch: ""},
 				// repo stack on a different repo
 				"other": {Repo: "nogo/other-app", Branch: "main"},
 			},
-		},
+		}),
 		Secret: testSecret,
 		OnDeploy: func(req webhook.DeployRequest) {
 			called <- req
@@ -343,11 +343,11 @@ func TestPathStackNotMatchedByWebhook(t *testing.T) {
 func TestTagPush(t *testing.T) {
 	called := make(chan webhook.DeployRequest, 4)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{
 				"myapp": {Repo: "nogo/myapp", Branch: "main", TagPattern: "v*"},
 			},
-		},
+		}),
 		Secret: testSecret,
 		OnDeploy: func(req webhook.DeployRequest) {
 			called <- req
@@ -382,9 +382,9 @@ func TestTagPush(t *testing.T) {
 func TestIaCRepoPush(t *testing.T) {
 	called := make(chan struct{}, 1)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{},
-		},
+		}),
 		Secret:    testSecret,
 		OnDeploy:  func(webhook.DeployRequest) {},
 		IaCRepo:   "nogo/srv2",
@@ -412,7 +412,7 @@ func TestPreviewDeploy(t *testing.T) {
 	type previewEvent struct{ name, branch, commit string }
 	called := make(chan previewEvent, 1)
 	srv := &webhook.Server{
-		Config: &config.Config{
+		Config: config.NewLive(&config.Config{
 			Stacks: map[string]config.Stack{
 				"myapp": {
 					Repo:    "nogo/myapp",
@@ -420,7 +420,7 @@ func TestPreviewDeploy(t *testing.T) {
 					Preview: &config.PreviewConfig{Enabled: true},
 				},
 			},
-		},
+		}),
 		Secret:   testSecret,
 		OnDeploy: func(webhook.DeployRequest) {},
 		OnPreviewDeploy: func(name, branch, commit string) {

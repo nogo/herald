@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/status"
@@ -33,13 +34,13 @@ var statusCmd = &cobra.Command{
 		}
 
 		previewMgr := &preview.PreviewManager{
-			Config:  Cfg,
+			Config:  config.NewLive(Cfg),
 			DataDir: dataDir,
 			Logger:  slog.Default(),
 		}
 
 		collector := &status.StatusCollector{
-			Config:  Cfg,
+			Config:  config.NewLive(Cfg),
 			DataDir: dataDir,
 			Logger:  slog.Default(),
 			Caddy:   caddyMgr,

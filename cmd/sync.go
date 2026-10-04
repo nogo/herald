@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync/atomic"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
@@ -26,16 +25,14 @@ drift. This is the same pass the daemon runs on startup and on IaC pushes.`,
 		ctx := context.Background()
 
 		store := secrets.NewStore(dataDir)
-		live := &atomic.Pointer[config.Config]{}
-		live.Store(Cfg)
+		live := config.NewLive(Cfg)
 
 		d := &deployer.Deployer{
-			Config:     Cfg,
-			LiveConfig: live,
-			Secrets:    store,
-			Logger:     quietLogger(),
-			DataDir:    dataDir,
-			UI:         ui.NewTTY(os.Stdout),
+			Config:  live,
+			Secrets: store,
+			Logger:  quietLogger(),
+			DataDir: dataDir,
+			UI:      ui.NewTTY(os.Stdout),
 		}
 
 		runner := &maintenance.Runner{
@@ -43,7 +40,7 @@ drift. This is the same pass the daemon runs on startup and on IaC pushes.`,
 			Logger:     quietLogger(),
 			Secrets:    store,
 			Deployer:   d,
-			Live:       live,
+			Config:     live,
 			Reload:     func() (*config.Config, error) { return LoadConfigWithToken(cfgFile, dataDir) },
 			IaCRepo:    getIaCRepo(dataDir),
 			HeraldPort: effectivePort(),

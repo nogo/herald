@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/compose"
@@ -26,13 +25,10 @@ const maxPreviewsPerApp = 10
 
 // PreviewManager manages preview deployment lifecycle.
 type PreviewManager struct {
-	Config  *config.Config
+	Config  *config.Live
 	Secrets *secrets.Store
 	DataDir string
 	Logger  *slog.Logger
-
-	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
-	LiveConfig *atomic.Pointer[config.Config]
 
 	// Limiter bounds actual concurrent deployment work, shared with production
 	// deploys so the two compete for the same fixed pool of capacity. Nil
@@ -112,16 +108,6 @@ func (m *PreviewManager) reservePreviewSlot(appName, id string) (isUpdate bool, 
 	}, nil
 }
 
-// cfg returns the live config snapshot, preferring LiveConfig when set.
-func (m *PreviewManager) cfg() *config.Config {
-	if m.LiveConfig != nil {
-		if c := m.LiveConfig.Load(); c != nil {
-			return c
-		}
-	}
-	return m.Config
-}
-
 // SubdomainFromBranch derives the preview subdomain for a branch name.
 // The previewDomain must contain a wildcard, e.g. "*.preview.basalt.solutions".
 func SubdomainFromBranch(branch, previewDomain string) string {
@@ -179,7 +165,7 @@ func makeID(appName, branch string) string {
 
 // Deploy creates or updates a preview for the given app and branch.
 func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit string) error {
-	app, ok := m.cfg().Stacks[appName]
+	app, ok := m.Config.Load().Stacks[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found in config", appName)
 	}
@@ -189,7 +175,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 
 	id := makeID(appName, branch)
 	domain := SubdomainFromBranch(branch, app.Preview.Domain)
-	inst := deployer.PreviewInstance(m.cfg(), id)
+	inst := deployer.PreviewInstance(m.Config.Load(), id)
 
 	// Serialise this preview's whole operation (git, generated files, compose,
 	// state) against any other Deploy or Remove for the same ID.
@@ -218,7 +204,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		return fmt.Errorf("creating preview dir: %w", err)
 	}
 
-	if err := git.CloneOrFetch(ctx, m.cfg().Server.GithubToken, inst.RepoDir(), git.RepoURL(app.Repo), branch); err != nil {
+	if err := git.CloneOrFetch(ctx, m.Config.Load().Server.GithubToken, inst.RepoDir(), git.RepoURL(app.Repo), branch); err != nil {
 		return fmt.Errorf("git: %w", err)
 	}
 
@@ -367,7 +353,7 @@ func (m *PreviewManager) Cleanup(ctx context.Context) error {
 
 	var removed []string
 	for _, p := range state.Previews {
-		app, ok := m.cfg().Stacks[p.AppName]
+		app, ok := m.Config.Load().Stacks[p.AppName]
 		if !ok {
 			m.Logger.Warn("preview references unknown app, removing", "id", p.ID)
 			if err := m.Remove(ctx, p.ID); err != nil {
@@ -405,7 +391,7 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, bra
 	if err := git.ValidateRef(branch); err != nil {
 		return false, err
 	}
-	cmd := git.CmdWithAuth(ctx, m.cfg().Server.GithubToken, "", "ls-remote", "--heads", git.RepoURL(app.Repo), branch)
+	cmd := git.CmdWithAuth(ctx, m.Config.Load().Server.GithubToken, "", "ls-remote", "--heads", git.RepoURL(app.Repo), branch)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err

@@ -26,16 +26,11 @@ import (
 
 // Deployer executes stack deploys.
 type Deployer struct {
-	Config  *config.Config
+	Config  *config.Live
 	Secrets *secrets.Store
 	Logger  *slog.Logger
 	DataDir string // path to herald data dir (e.g. /etc/herald); IaC repo lives at DataDir/repo
 	UI      ui.UI  // optional; nil defaults to ui.Nop()
-
-	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
-	// The daemon shares one pointer across components and publishes reloads to it,
-	// so reads are race-free under concurrent config swaps. CLI callers leave it nil.
-	LiveConfig *atomic.Pointer[config.Config]
 
 	// Limiter bounds actual concurrent deployment work, shared with preview
 	// deploys and with production deploys dispatched by maintenance. Daemon
@@ -45,16 +40,6 @@ type Deployer struct {
 
 	stackLocks sync.Map // string → *stackLock
 	wg         sync.WaitGroup
-}
-
-// cfg returns the live config snapshot, preferring LiveConfig when set.
-func (d *Deployer) cfg() *config.Config {
-	if d.LiveConfig != nil {
-		if c := d.LiveConfig.Load(); c != nil {
-			return c
-		}
-	}
-	return d.Config
 }
 
 func (d *Deployer) ui() ui.UI {
@@ -110,11 +95,6 @@ func (d *Deployer) DeployAsync(stackName, ref string) bool {
 	return true
 }
 
-// SetConfig updates the static config fallback used when LiveConfig is nil.
-func (d *Deployer) SetConfig(cfg *config.Config) {
-	d.Config = cfg
-}
-
 // Wait blocks until all in-progress deploys finish.
 func (d *Deployer) Wait() {
 	d.wg.Wait()
@@ -134,7 +114,7 @@ func effectiveRef(stack config.Stack, override string) string {
 
 // Deploy executes a full deploy for the named stack.
 func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
-	cfg := d.cfg()
+	cfg := d.Config.Load()
 	stack, ok := cfg.Stacks[stackName]
 	if !ok {
 		return fmt.Errorf("stack %q not found in config", stackName)
@@ -321,7 +301,7 @@ func readDeployedCommit(repoDir string) (string, error) {
 // gitSync clones the repo into repoDir on first deploy or fetch+reset on subsequent ones.
 func (d *Deployer) gitSync(ctx context.Context, repoDir string, stack config.Stack, ref string) error {
 	d.Logger.Info("git sync", "repo", stack.Repo, "ref", ref)
-	return git.CloneOrFetch(ctx, d.cfg().Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
+	return git.CloneOrFetch(ctx, d.Config.Load().Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
 }
 
 // symlinkSource creates <deployDir>/repo as a symlink pointing to <iacRepoDir>/<stack.Path>.
@@ -408,7 +388,7 @@ func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes boo
 		u.Done(stackName, downErr, time.Since(start))
 	}()
 
-	cfg := d.cfg()
+	cfg := d.Config.Load()
 	stack, ok := cfg.Stacks[stackName]
 	if !ok {
 		downErr = fmt.Errorf("stack %q not found in config", stackName)

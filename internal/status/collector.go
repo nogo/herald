@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nogo/herald/internal/caddy"
@@ -24,24 +23,11 @@ import (
 
 // StatusCollector gathers live status from Docker, config, and state files.
 type StatusCollector struct {
-	Config  *config.Config
+	Config  *config.Live
 	DataDir string
 	Logger  *slog.Logger
 	Caddy   *caddy.CaddyManager
 	Preview *preview.PreviewManager
-
-	// LiveConfig, when non-nil, is the authoritative config and overrides Config.
-	LiveConfig *atomic.Pointer[config.Config]
-}
-
-// cfg returns the live config snapshot, preferring LiveConfig when set.
-func (c *StatusCollector) cfg() *config.Config {
-	if c.LiveConfig != nil {
-		if cf := c.LiveConfig.Load(); cf != nil {
-			return cf
-		}
-	}
-	return c.Config
 }
 
 // ServerStatus holds a complete snapshot of the server's runtime state.
@@ -149,7 +135,7 @@ func SaveWebhookState(path string, state *WebhookState) error {
 // Collect gathers live status from all sources concurrently.
 // It completes within 10 seconds even with many services.
 func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
-	cfg := c.cfg()
+	cfg := c.Config.Load()
 	s := &ServerStatus{
 		ServerName: cfg.Server.Name,
 	}
@@ -218,7 +204,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 		s.Source = "repo"
 	}
 
-	inst := deployer.StackInstance(c.cfg(), name)
+	inst := deployer.StackInstance(c.Config.Load(), name)
 	if !inst.Exists() {
 		s.State = "not deployed"
 		return s
@@ -244,7 +230,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 }
 
 func (c *StatusCollector) collectWebhookStatuses() ([]WebhookStatus, time.Time) {
-	repos := uniqueRepos(c.cfg())
+	repos := uniqueRepos(c.Config.Load())
 	wsPath := WebhookStatePath(c.DataDir)
 
 	data, err := os.ReadFile(wsPath)
