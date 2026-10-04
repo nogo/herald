@@ -299,7 +299,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 				fmt.Fprintf(w, "  → %-24s ✗ %v\n", r.Repo, r.Error)
 			}
 		}
-		fmt.Fprintf(w, "  ✓ %d webhook%s registered\n", registered, plural(registered))
+		printWebhookSummary(w, cfg, registered)
 	} else {
 		fmt.Fprintln(w, "  → No GitHub token provided, skipping webhook registration")
 	}
@@ -410,5 +410,13 @@ func printCompletion(w io.Writer, cfg *config.Config, opts Options) {
 		fmt.Fprintf(w, "     herald deploy %s\n", name)
 	}
 	fmt.Fprintln(w, "     # or: herald deploy --all")
+	fmt.Fprintln(w, "  Check that a push landed on this server: herald status")
 	fmt.Fprintln(w, "═══════════════════════════════════════════════════════")
+}
+
+func printWebhookSummary(w io.Writer, cfg *config.Config, registered int) {
+	fmt.Fprintf(w, "  ✓ %d webhook%s registered\n", registered, plural(registered))
+	if registered > 0 {
+		fmt.Fprintf(w, "  Webhook: https://%s/webhook\n", cfg.Server.DeployDomain)
+	}
 }

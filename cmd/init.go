@@ -66,7 +66,7 @@ func initBare(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("locating herald binary for the post-receive hook: %w", err)
 	}
-	return bootstrap.InitBare(ctx, os.Stdout, bootstrap.BareOptions{DataDir: dataDir, HeraldBin: heraldBin})
+	return bootstrap.InitBare(ctx, os.Stdout, bootstrap.BareOptions{DataDir: dataDir, HeraldBin: heraldBin, ServicesDir: initServicesDir})
 }
 
 // resolveGitHubToken tries multiple sources for a GitHub token:

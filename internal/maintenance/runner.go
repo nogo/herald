@@ -9,6 +9,7 @@ package maintenance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"maps"
 	"os"
@@ -111,6 +112,10 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 	configOK := true
 	if newCfg, err := r.Reload(); err != nil {
 		rep.Config.Error = err.Error()
+		r.Logger.Error("configuration reload failed; deploying nothing", "error", err)
+		if errors.Is(err, os.ErrNotExist) {
+			return rep
+		}
 		configOK = false
 	} else {
 		cfg = newCfg

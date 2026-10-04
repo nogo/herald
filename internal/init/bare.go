@@ -8,19 +8,30 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/nogo/herald/internal/secrets"
 )
 
 // BareOptions configures InitBare.
 type BareOptions struct {
-	DataDir   string
-	HeraldBin string // absolute path the post-receive hook runs
+	DataDir     string
+	HeraldBin   string // absolute path the post-receive hook runs
+	ServicesDir string
 }
 
 // InitBare creates <data_dir>/server.git, clones it into <data_dir>/repo and
-// installs a post-receive hook that signals the local daemon. It does nothing
-// when both already exist. The repo is group-shared so the operator can push
+// installs a post-receive hook that signals the local daemon. It preserves existing repositories and initializes
+// the age key if missing. The repo is group-shared so the operator can push
 // and the herald user can read.
 func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
+	absolute, err := filepath.Abs(opts.DataDir)
+	if err != nil {
+		return err
+	}
+	opts.DataDir = absolute
+	if err := secrets.NewStore(opts.DataDir).Init(); err != nil {
+		return err
+	}
 	bareDir := filepath.Join(opts.DataDir, "server.git")
 	repoDir := filepath.Join(opts.DataDir, "repo")
 
@@ -28,6 +39,7 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 	_, cloneErr := os.Stat(filepath.Join(repoDir, ".git"))
 	if bareErr == nil && cloneErr == nil {
 		fmt.Fprintf(w, "Already initialised: %s and %s exist, nothing changed\n", bareDir, repoDir)
+		printBareCompletion(w, opts, LocalRemoteCommands(opts.DataDir))
 		return nil
 	}
 
@@ -48,7 +60,7 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 		return fmt.Errorf("writing post-receive hook: %w", err)
 	}
 
-	fmt.Fprintf(w, "Server repo ready: git push <user>@<host>:%s main\n", bareDir)
+	printBareCompletion(w, opts, LocalRemoteCommands(opts.DataDir))
 	return nil
 }
 
