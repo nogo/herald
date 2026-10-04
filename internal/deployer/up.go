@@ -14,11 +14,13 @@ import (
 
 // UpSpec is what Up needs to know about the stack beyond the instance itself.
 type UpSpec struct {
-	StackName      string            // names the main service when the compose file doesn't
+	StackName      string            // names the main service when no service is explicit and none is named app
 	Domain         string            // routed to the main service by Caddy
 	ComposeFile    string            // absolute path
 	EnvFile        string            // optional env_file from config, layered after the instance's .env
 	DockerSecrets  map[string]string // mounted as docker secrets; their files must already exist
+	Service        string            // explicit routing service; empty to detect
+	Port           string            // explicit container port; empty to detect
 	DefaultPort    string            // container port when the compose file exposes none
 	InlineOverride string            // raw YAML deep-merged into the generated override
 }
@@ -63,6 +65,8 @@ func writeOverride(inst Instance, spec UpSpec) error {
 		ComposeFile:    spec.ComposeFile,
 		EnvFilePaths:   envFiles,
 		DockerSecrets:  spec.DockerSecrets,
+		Service:        spec.Service,
+		Port:           spec.Port,
 		DefaultPort:    spec.DefaultPort,
 		InternalNet:    inst.InternalNetwork(),
 		InlineOverride: spec.InlineOverride,

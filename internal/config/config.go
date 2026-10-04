@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/nogo/herald/internal/compose"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,7 +55,9 @@ type Stack struct {
 	TagPattern string `yaml:"tag_pattern,omitempty"  json:"tag_pattern,omitzero"`
 
 	// Routing
-	Domain string `yaml:"domain" json:"domain"`
+	Domain  string `yaml:"domain"            json:"domain"`
+	Service string `yaml:"service,omitempty" json:"service,omitzero"`
+	Port    string `yaml:"port,omitempty"    json:"port,omitzero"`
 
 	// Compose
 	Compose  string `yaml:"compose,omitempty"  json:"compose,omitzero"`
@@ -245,6 +248,12 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("stack %q: domain %q already used by %s", name, stack.Domain, prev)
 		}
 		domains[stack.Domain] = "stack:" + name
+
+		if stack.Port != "" {
+			if err := compose.ValidatePort(stack.Port); err != nil {
+				return fmt.Errorf("stack %q: %w", name, err)
+			}
+		}
 
 		// Secret validation.
 		for i, sec := range stack.Secrets {

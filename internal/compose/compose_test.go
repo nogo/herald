@@ -29,110 +29,61 @@ func TestPortFromAny(t *testing.T) {
 	}
 }
 
-func TestDetectServiceInfo(t *testing.T) {
-	t.Run("service named app", func(t *testing.T) {
-		content := `
-services:
-  app:
-    expose:
-      - "3000"
-  db:
-    image: postgres
-`
-		name, port := writeComposeAndDetect(t, content, "myapp", "3000")
-		if name != "app" {
-			t.Errorf("service name = %q, want %q", name, "app")
-		}
-		if port != "3000" {
-			t.Errorf("port = %q, want %q", port, "3000")
-		}
-	})
-
-	t.Run("service matches app name", func(t *testing.T) {
-		content := `
-services:
-  budget:
-    ports:
-      - "8080:8080"
-  db:
-    image: postgres
-`
-		name, port := writeComposeAndDetect(t, content, "budget", "3000")
-		if name != "budget" {
-			t.Errorf("service name = %q, want %q", name, "budget")
-		}
-		if port != "8080" {
-			t.Errorf("port = %q, want %q", port, "8080")
-		}
-	})
-
-	t.Run("first service fallback", func(t *testing.T) {
-		content := `
-services:
-  web:
-    expose:
-      - 4000
-  db:
-    image: postgres
-`
-		name, port := writeComposeAndDetect(t, content, "other", "3000")
-		if name != "db" && name != "web" {
-			t.Errorf("service name = %q, want one of [db web]", name)
-		}
-		_ = port
-	})
-
-	t.Run("port from long form", func(t *testing.T) {
-		content := `
-services:
-  app:
-    ports:
-      - target: 5000
-        published: 80
-`
-		_, port := writeComposeAndDetect(t, content, "app", "3000")
-		if port != "5000" {
-			t.Errorf("port = %q, want %q", port, "5000")
-		}
-	})
-
-	t.Run("no port defaults to defaultPort", func(t *testing.T) {
-		content := `
-services:
-  app:
-    image: myapp
-`
-		_, port := writeComposeAndDetect(t, content, "app", "3000")
-		if port != "3000" {
-			t.Errorf("port = %q, want %q", port, "3000")
-		}
-	})
-
-	t.Run("stack default port 80", func(t *testing.T) {
-		content := `
-services:
-  app:
-    image: myapp
-`
-		_, port := writeComposeAndDetect(t, content, "app", "80")
-		if port != "80" {
-			t.Errorf("port = %q, want %q", port, "80")
-		}
-	})
-}
-
-func writeComposeAndDetect(t *testing.T, content, appName, defaultPort string) (name, port string) {
-	t.Helper()
-	dir := t.TempDir()
-	f := filepath.Join(dir, "compose.yml")
-	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
-		t.Fatal(err)
+func TestSelectRoute(t *testing.T) {
+	const webAndDB = "services:\n  db:\n    image: postgres\n  web:\n    expose:\n      - 4000\n"
+	tests := []struct {
+		name, compose, stack, service, port, def string
+		wantService, wantPort                    string
+		wantErr                                  string // substring; empty means success
+	}{
+		{name: "app wins", compose: "services:\n  app:\n    expose: [\"3000\"]\n  db:\n    image: postgres\n", stack: "myapp", def: "3000", wantService: "app", wantPort: "3000"},
+		{name: "app beats stack-named service sorting earlier", compose: "services:\n  app:\n    image: x\n  aaa:\n    image: x\n", stack: "aaa", def: "80", wantService: "app", wantPort: "80"},
+		{name: "stack name", compose: "services:\n  budget:\n    ports: [\"8080:8080\"]\n  db:\n    image: postgres\n", stack: "budget", def: "3000", wantService: "budget", wantPort: "8080"},
+		{name: "sole service", compose: "services:\n  web:\n    image: x\n", stack: "other", def: "3000", wantService: "web", wantPort: "3000"},
+		{name: "web plus database is ambiguous", compose: webAndDB, stack: "shop", def: "3000", wantErr: "set `service:`"},
+		{name: "explicit service", compose: webAndDB, stack: "shop", service: "web", def: "3000", wantService: "web", wantPort: "4000"},
+		{name: "explicit service beats app", compose: "services:\n  app:\n    image: x\n  web:\n    image: x\n", stack: "shop", service: "web", def: "3000", wantService: "web", wantPort: "3000"},
+		{name: "missing explicit service", compose: webAndDB, stack: "shop", service: "api", def: "3000", wantErr: `service "api" not found`},
+		{name: "explicit port", compose: webAndDB, stack: "shop", service: "web", port: "9000", def: "3000", wantService: "web", wantPort: "9000"},
+		{name: "non-numeric port", compose: webAndDB, stack: "shop", service: "web", port: "http", def: "3000", wantErr: `"http"`},
+		{name: "port out of range", compose: webAndDB, stack: "shop", service: "web", port: "70000", def: "3000", wantErr: `"70000"`},
+		{name: "ambiguous ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", stack: "app", def: "3000", wantErr: "set `port:`"},
+		{name: "ambiguous ports resolved by explicit port", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", stack: "app", port: "8080", def: "3000", wantService: "app", wantPort: "8080"},
+		{name: "same target in expose and ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"3000:3000\"]\n", stack: "app", def: "80", wantService: "app", wantPort: "3000"},
+		{name: "long form", compose: "services:\n  app:\n    ports:\n      - target: 5000\n        published: 80\n", stack: "app", def: "3000", wantService: "app", wantPort: "5000"},
+		{name: "protocol suffix", compose: "services:\n  app:\n    ports: [\"8080:3000/tcp\"]\n", stack: "app", def: "80", wantService: "app", wantPort: "3000"},
+		{name: "no services", compose: "services: {}\n", stack: "app", def: "3000", wantErr: "no services"},
+		{name: "malformed yaml", compose: "services: [unclosed", stack: "app", def: "3000", wantErr: "compose.yml"},
 	}
-	name, port, err := DetectServiceInfo(f, appName, defaultPort)
-	if err != nil {
-		t.Fatalf("DetectServiceInfo: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "compose.yml")
+			if err := os.WriteFile(f, []byte(tc.compose), 0644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := SelectRoute(f, tc.stack, tc.service, tc.port, tc.def)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Service != tc.wantService || got.Port != tc.wantPort {
+				t.Errorf("route = %s:%s, want %s:%s", got.Service, got.Port, tc.wantService, tc.wantPort)
+			}
+		})
 	}
-	return name, port
+
+	t.Run("unreadable file names it", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "gone.yml")
+		_, err := SelectRoute(f, "app", "", "", "3000")
+		if err == nil || !strings.Contains(err.Error(), f) {
+			t.Fatalf("err = %v, want it to name %s", err, f)
+		}
+	})
 }
 
 func TestDeepMerge(t *testing.T) {

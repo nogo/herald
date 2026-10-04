@@ -247,6 +247,8 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		ComposeFile:    composeFile,
 		EnvFile:        stack.EnvFile,
 		DockerSecrets:  dockerSecrets,
+		Service:        stack.Service,
+		Port:           stack.Port,
 		DefaultPort:    defaultPort,
 		InlineOverride: stack.Override,
 	}, d.Logger, u)

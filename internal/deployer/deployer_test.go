@@ -199,7 +199,7 @@ func TestDefaultPortPerStackType(t *testing.T) {
 			DeployDir:   dir,
 			StackName:   "myapp",
 			Domain:      "myapp.example.com",
-			ComposeFile: filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			DefaultPort: "3000",
 			InternalNet: "herald-myapp-internal",
 		})
@@ -217,7 +217,7 @@ func TestDefaultPortPerStackType(t *testing.T) {
 			DeployDir:   dir,
 			StackName:   "myservice",
 			Domain:      "myservice.example.com",
-			ComposeFile: filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			DefaultPort: "80",
 			InternalNet: "herald-myservice-internal",
 		})
@@ -236,7 +236,7 @@ func TestDefaultPortPerStackType(t *testing.T) {
 			DeployDir:    dir,
 			StackName:    "myapp",
 			Domain:       "myapp.example.com",
-			ComposeFile:  filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			EnvFilePaths: []string{envPath},
 			DefaultPort:  "3000",
 			InternalNet:  "herald-myapp-internal",

@@ -70,6 +70,8 @@ type OverrideParams struct {
 	ComposeFile    string
 	EnvFilePaths   []string // absolute paths to env files for the override
 	DockerSecrets  map[string]string
+	Service        string // explicit routing service from the stack; empty to detect
+	Port           string // explicit container port from the stack; empty to detect
 	DefaultPort    string // "3000" for repo stacks, "80" for path stacks
 	InternalNet    string // e.g. "herald-myapp-internal"
 	InlineOverride string // raw YAML to deep-merge (from stack.Override)
@@ -78,15 +80,11 @@ type OverrideParams struct {
 // GenerateOverride creates a compose.override.yml for a stack.
 // Returns marshaled YAML bytes; the caller writes them to disk.
 func GenerateOverride(params OverrideParams) ([]byte, error) {
-	mainName, port, allNames, err := compose.DetectServices(params.ComposeFile, params.StackName, params.DefaultPort)
+	route, err := compose.SelectRoute(params.ComposeFile, params.StackName, params.Service, params.Port, params.DefaultPort)
 	if err != nil {
-		mainName = "app"
-		port = params.DefaultPort
-		allNames = []string{mainName}
+		return nil, err
 	}
-	if len(allNames) == 0 {
-		allNames = []string{mainName}
-	}
+	mainName, port, allNames := route.Service, route.Port, route.Services
 
 	svc := compose.ServiceOverride{
 		Labels: map[string]string{

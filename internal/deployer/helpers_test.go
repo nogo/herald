@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nogo/herald/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 func discardLogger() *slog.Logger {
@@ -163,7 +164,7 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:     dir,
 			StackName:     "myapp",
 			Domain:        "myapp.example.com",
-			ComposeFile:   filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile:   writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			DockerSecrets: map[string]string{"DB_PASSWORD": "secret123"},
 			DefaultPort:   "3000",
 			InternalNet:   "herald-myapp-internal",
@@ -190,7 +191,7 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:      dir,
 			StackName:      "myapp",
 			Domain:         "myapp.example.com",
-			ComposeFile:    filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile:    writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			DefaultPort:    "3000",
 			InternalNet:    "herald-myapp-internal",
 			InlineOverride: "services:\n  app:\n    env_file: !override\n      - custom.env\n",
@@ -211,7 +212,7 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:    dir,
 			StackName:    "myapp",
 			Domain:       "myapp.example.com",
-			ComposeFile:  filepath.Join(dir, "nonexistent.yml"),
+			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
 			EnvFilePaths: []string{envPath},
 			DefaultPort:  "3000",
 			InternalNet:  "herald-myapp-internal",
@@ -325,4 +326,88 @@ func TestStackHashStable(t *testing.T) {
 	if s.Hash() == other.Hash() {
 		t.Error("Hash() collides across different domains")
 	}
+}
+
+func writeTestCompose(t *testing.T, dir, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Production and previews both reach GenerateOverride through Up, so the
+// routing decision is tested here once for the shared path.
+func TestGenerateOverrideRouting(t *testing.T) {
+	const webAndDB = "services:\n  db:\n    image: postgres\n  web:\n    ports:\n      - \"8080:8080\"\n"
+	gen := func(t *testing.T, compose, service, port string) ([]byte, error) {
+		dir := t.TempDir()
+		return GenerateOverride(OverrideParams{
+			DeployDir:   dir,
+			StackName:   "shop",
+			Domain:      "shop.example.com",
+			ComposeFile: writeTestCompose(t, dir, compose),
+			Service:     service,
+			Port:        port,
+			DefaultPort: "3000",
+			InternalNet: "herald-shop-internal",
+		})
+	}
+
+	t.Run("web plus database without service fails", func(t *testing.T) {
+		_, err := gen(t, webAndDB, "", "")
+		if err == nil || !strings.Contains(err.Error(), "service:") {
+			t.Fatalf("want error asking for a service, got %v", err)
+		}
+	})
+
+	t.Run("explicit service routes to it and isolates the rest", func(t *testing.T) {
+		data, err := gen(t, webAndDB, "web", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Services map[string]struct {
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Services["web"].Labels["caddy"] != "shop.example.com" ||
+			got.Services["web"].Labels["caddy.reverse_proxy"] != "{{upstreams 8080}}" {
+			t.Errorf("web not routed on 8080:\n%s", data)
+		}
+		if len(got.Services["db"].Labels) != 0 {
+			t.Errorf("db must not carry caddy labels:\n%s", data)
+		}
+	})
+
+	t.Run("explicit port wins", func(t *testing.T) {
+		data, err := gen(t, webAndDB, "web", "9000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "{{upstreams 9000}}") {
+			t.Errorf("want port 9000:\n%s", data)
+		}
+	})
+
+	t.Run("malformed compose names the file", func(t *testing.T) {
+		_, err := gen(t, "services: [unclosed", "", "")
+		if err == nil || !strings.Contains(err.Error(), "compose.yml") {
+			t.Fatalf("want error naming compose.yml, got %v", err)
+		}
+	})
+
+	t.Run("missing compose names the file", func(t *testing.T) {
+		_, err := GenerateOverride(OverrideParams{
+			ComposeFile: filepath.Join(t.TempDir(), "missing.yml"),
+			DefaultPort: "3000",
+		})
+		if err == nil || !strings.Contains(err.Error(), "missing.yml") {
+			t.Fatalf("want error naming missing.yml, got %v", err)
+		}
+	})
 }
