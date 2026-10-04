@@ -147,24 +147,6 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 	return data, nil
 }
 
-// WriteEnvFile writes sorted KEY=VALUE pairs to the given path with 0600 permissions.
-func WriteEnvFile(path string, envMap map[string]string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for _, key := range slices.Sorted(maps.Keys(envMap)) {
-		if strings.ContainsAny(envMap[key], "\r\n") {
-			return fmt.Errorf("env value for %q contains a newline, which cannot be represented in a .env file", key)
-		}
-		if _, err := fmt.Fprintf(f, "%s=%s\n", key, envMap[key]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // WriteDockerSecrets writes each secret value to a file under secretsDir with 0600 permissions.
 func WriteDockerSecrets(secretsDir string, dockerSecrets map[string]string) error {
 	if err := os.MkdirAll(secretsDir, 0700); err != nil {

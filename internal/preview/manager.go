@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nogo/herald/internal/compose"
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	"github.com/nogo/herald/internal/git"
@@ -225,7 +226,7 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 	// untrusted pull request, so production secrets must never be resolved into a
 	// preview environment. Only the non-secret env_file (app.EnvFile) flows in. We
 	// still write an empty .env so the override's env_file reference resolves.
-	if err := deployer.WriteEnvFile(inst.EnvFile(), map[string]string{}); err != nil {
+	if err := writeEmptyEnv(inst.Dir); err != nil {
 		return fmt.Errorf("writing .env: %w", err)
 	}
 
@@ -410,6 +411,15 @@ func (m *PreviewManager) branchExists(ctx context.Context, app config.Stack, bra
 		return false, err
 	}
 	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+func writeEmptyEnv(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return compose.WriteEnvFile(root, nil)
 }
 
 // composeDown removes the preview's containers, volumes and the images compose

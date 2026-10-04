@@ -239,19 +239,8 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		}
 
 		if len(dockerSecrets) > 0 {
-			secretsDir := filepath.Join(deployDir, "secrets")
-			if err := os.MkdirAll(secretsDir, 0700); err != nil {
-				return "", fmt.Errorf("creating secrets dir: %w", err)
-			}
-			secretsRoot, err := deployRoot.OpenRoot("secrets")
-			if err != nil {
-				return "", fmt.Errorf("opening secrets root: %w", err)
-			}
-			defer secretsRoot.Close()
-			for name, val := range dockerSecrets {
-				if err := compose.WriteSecret(secretsRoot, name, val); err != nil {
-					return "", fmt.Errorf("writing docker secret %q: %w", name, err)
-				}
+			if err := WriteDockerSecrets(inst.SecretsDir(), dockerSecrets); err != nil {
+				return "", err
 			}
 		}
 

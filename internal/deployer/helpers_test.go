@@ -226,41 +226,6 @@ func TestGenerateOverride(t *testing.T) {
 	})
 }
 
-func TestWriteEnvFile(t *testing.T) {
-	t.Run("sorted output", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "output.env")
-		envMap := map[string]string{
-			"ZZZ": "last",
-			"AAA": "first",
-			"MMM": "middle",
-		}
-		if err := WriteEnvFile(path, envMap); err != nil {
-			t.Fatal(err)
-		}
-		data, _ := os.ReadFile(path)
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) != 3 {
-			t.Fatalf("expected 3 lines, got %d", len(lines))
-		}
-		if lines[0] != "AAA=first" || lines[1] != "MMM=middle" || lines[2] != "ZZZ=last" {
-			t.Errorf("unexpected output order: %v", lines)
-		}
-	})
-
-	t.Run("0600 permissions", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "output.env")
-		if err := WriteEnvFile(path, map[string]string{"K": "v"}); err != nil {
-			t.Fatal(err)
-		}
-		info, _ := os.Stat(path)
-		if perm := info.Mode().Perm(); perm != 0600 {
-			t.Errorf("expected 0600, got %04o", perm)
-		}
-	})
-}
-
 func TestWriteDockerSecrets(t *testing.T) {
 	t.Run("writes files", func(t *testing.T) {
 		dir := t.TempDir()

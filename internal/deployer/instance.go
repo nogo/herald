@@ -44,6 +44,9 @@ func (i Instance) RepoDir() string { return filepath.Join(i.Dir, "repo") }
 // EnvFile is the generated .env: config file base merged with secrets.
 func (i Instance) EnvFile() string { return filepath.Join(i.Dir, ".env") }
 
+// SecretsDir holds one file per docker secret, mounted by the override.
+func (i Instance) SecretsDir() string { return filepath.Join(i.Dir, "secrets") }
+
 // OverrideFile is the generated compose override: caddy labels, networks, secrets.
 func (i Instance) OverrideFile() string { return filepath.Join(i.Dir, "compose.override.yml") }
 
