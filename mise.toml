@@ -70,14 +70,31 @@ else
 fi
 """
 
-[tasks.check]
-description = "Full local verification: vet, fmt, tidy, test, lint"
-depends = ["vet", "fmt:check", "tidy", "test", "lint"]
-run = 'echo "All checks passed."'
+[tasks.boundaries]
+description = "Fail if supporting packages import each other (see docs/architecture.md)"
+run = """
+# Allowed exception: github -> secrets (OAuth token storage).
+VIOLATIONS=""
+for pkg in compose caddy secrets github; do
+    for other in compose caddy secrets github; do
+        [ "$pkg" = "$other" ] && continue
+        [ "$pkg" = "github" ] && [ "$other" = "secrets" ] && continue
+        if grep -rq "\"github.com/nogo/herald/internal/$other\"" "internal/$pkg/"; then
+            VIOLATIONS="$VIOLATIONS  internal/$pkg imports internal/$other\n"
+        fi
+    done
+done
+if [ -n "$VIOLATIONS" ]; then
+    echo "FAIL: supporting package boundary violations:"
+    printf "$VIOLATIONS"
+    exit 1
+fi
+"""
 
-[tasks.verify]
-description = "Run .forge/verify (authoritative project gate)"
-run = ".forge/verify"
+[tasks.check]
+description = "Full local verification: vet, fmt, tidy, test, lint, boundaries"
+depends = ["vet", "fmt:check", "tidy", "test", "lint", "boundaries"]
+run = 'echo "All checks passed."'
 
 [tasks.release]
 description = "Build and publish a GitHub release for the current tag"
