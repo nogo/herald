@@ -682,3 +682,52 @@ func TestDeployThenTeardown_Serialized(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploy_CreatesPreviewInstance(t *testing.T) {
+	installFakeDocker(t)
+	installFakeGit(t)
+	t.Setenv("HERALD_TEST_DOCKER_FAIL", "0")
+	dockerLog := filepath.Join(t.TempDir(), "docker.log")
+	t.Setenv("HERALD_TEST_DOCKER_LOG", dockerLog)
+
+	servicesDir := t.TempDir()
+	mgr := newTestManager(t)
+	mgr.Config = previewTestApp(t, servicesDir)
+
+	if err := mgr.Deploy(context.Background(), "app", "feature/x", "sha1"); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	id := makeID("app", "feature/x")
+	project := "herald-preview-" + id
+	dir := filepath.Join(servicesDir, "previews", id)
+	previews, err := mgr.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(previews) != 1 || previews[0].Directory != dir || previews[0].ComposeProject != project || previews[0].Commit != "sha1" {
+		t.Fatalf("state = %+v, want one preview in %s as %s at sha1", previews, dir, project)
+	}
+
+	// Previews get no secrets: the .env exists only so the override can reference it.
+	if env, err := os.ReadFile(filepath.Join(dir, ".env")); err != nil || len(env) != 0 {
+		t.Errorf(".env = %q (%v), want an empty file", env, err)
+	}
+	override, err := os.ReadFile(filepath.Join(dir, "compose.override.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"caddy: " + SubdomainFromBranch("feature/x", "*.preview.example.com"), project + "-internal"} {
+		if !strings.Contains(string(override), want) {
+			t.Errorf("override missing %q:\n%s", want, override)
+		}
+	}
+
+	log, err := os.ReadFile(dockerLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "--project-name "+project+" ") || !strings.Contains(string(log), " up -d --build --remove-orphans") {
+		t.Errorf("no compose up for %s in docker calls:\n%s", project, log)
+	}
+}
