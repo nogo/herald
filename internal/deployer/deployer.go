@@ -184,7 +184,8 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		return deployErr
 	}
 
-	deployDir := filepath.Join(cfg.Server.ServicesDir, stackName)
+	inst := StackInstance(cfg, stackName)
+	deployDir := inst.Dir
 	d.Logger.Info("deploy started", "stack", stackName, "dir", deployDir)
 
 	if err := os.MkdirAll(deployDir, 0755); err != nil {
@@ -192,13 +193,11 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		return deployErr
 	}
 
-	repoDir := filepath.Join(deployDir, "repo")
-
 	// Source resolution: git clone/fetch for repo stacks, symlink for path stacks.
 	if stack.Repo != "" {
 		gitRef := effectiveRef(stack, ref)
 		deployErr = step(fmt.Sprintf("Git sync (%s)", gitRef), func() error {
-			return d.gitSync(ctx, deployDir, stack, gitRef)
+			return d.gitSync(ctx, inst.RepoDir(), stack, gitRef)
 		})
 	} else {
 		deployErr = step("Symlink source", func() error {
@@ -271,17 +270,10 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		return deployErr
 	}
 
-	// Resolve compose file path.
-	var composeFile string
-	if stack.Repo != "" {
-		composeFile = resolveComposePath(stack.Compose, repoDir)
-	} else {
-		composeName, err := compose.FindComposeFile(repoDir)
-		if err != nil {
-			deployErr = fmt.Errorf("finding compose file: %w", err)
-			return deployErr
-		}
-		composeFile = filepath.Join(repoDir, composeName)
+	composeFile, err := inst.ComposeFile(stack)
+	if err != nil {
+		deployErr = fmt.Errorf("finding compose file: %w", err)
+		return deployErr
 	}
 
 	defaultPort := "3000"
@@ -297,7 +289,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		}
 		defer deployRoot.Close()
 
-		envFilePaths := []string{filepath.Join(deployDir, ".env")}
+		envFilePaths := []string{inst.EnvFile()}
 		if stack.EnvFile != "" {
 			envFilePaths = append(envFilePaths, stack.EnvFile)
 		}
@@ -309,13 +301,13 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 			EnvFilePaths:   envFilePaths,
 			DockerSecrets:  dockerSecrets,
 			DefaultPort:    defaultPort,
-			InternalNet:    "herald-" + stackName + "-internal",
+			InternalNet:    inst.InternalNetwork(),
 			InlineOverride: stack.Override,
 		})
 		if err != nil {
 			return err
 		}
-		f, err := deployRoot.OpenFile("compose.override.yml", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		f, err := deployRoot.OpenFile(filepath.Base(inst.OverrideFile()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			return err
 		}
@@ -335,7 +327,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 
 	// Compose up.
 	deployErr = step("Compose up", func() error {
-		return d.runCompose(ctx, deployDir, stackName, composeFile)
+		return d.runCompose(ctx, inst, composeFile)
 	})
 	if deployErr != nil {
 		return deployErr
@@ -356,7 +348,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 	// whether the stack's subtree changed.
 	if stack.Repo != "" {
 		deployRef := effectiveRef(stack, ref)
-		if commit, err := readDeployedCommit(repoDir); err == nil {
+		if commit, err := readDeployedCommit(inst.RepoDir()); err == nil {
 			_ = os.WriteFile(filepath.Join(deployDir, "deployed_ref"), []byte(deployRef+"@"+commit), 0644)
 		}
 	} else {
@@ -411,9 +403,8 @@ func readDeployedCommit(repoDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// gitSync clones the repo on first deploy or fetch+reset on subsequent ones.
-func (d *Deployer) gitSync(ctx context.Context, deployDir string, stack config.Stack, ref string) error {
-	repoDir := filepath.Join(deployDir, "repo")
+// gitSync clones the repo into repoDir on first deploy or fetch+reset on subsequent ones.
+func (d *Deployer) gitSync(ctx context.Context, repoDir string, stack config.Stack, ref string) error {
 	d.Logger.Info("git sync", "repo", stack.Repo, "ref", ref)
 	return git.CloneOrFetch(ctx, d.cfg().Server.GithubToken, repoDir, git.RepoURL(stack.Repo), ref)
 }
@@ -429,7 +420,7 @@ func (d *Deployer) symlinkSource(deployDir string, stack config.Stack) error {
 		return fmt.Errorf("path %q not found in IaC repo", stack.Path)
 	}
 
-	repoLink := filepath.Join(deployDir, "repo")
+	repoLink := Instance{Dir: deployDir}.RepoDir()
 
 	// If symlink already points to the right place, skip.
 	if existing, err := os.Readlink(repoLink); err == nil {
@@ -462,7 +453,7 @@ func (d *Deployer) runPostDeployHook(ctx context.Context, stackName string, stac
 		"STACK_DIR="+deployDir,
 		"STACK_DOMAIN="+stack.Domain,
 		"COMPOSE_FILE="+composeFile,
-		"COMPOSE_OVERRIDE_FILE="+filepath.Join(deployDir, "compose.override.yml"),
+		"COMPOSE_OVERRIDE_FILE="+Instance{Dir: deployDir}.OverrideFile(),
 	)
 
 	d.Logger.Info("running post-deploy hook", "stack", stackName, "script", scriptPath)
@@ -502,11 +493,19 @@ func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes boo
 		u.Done(stackName, downErr, time.Since(start))
 	}()
 
-	cctx, err := compose.ResolveStack(d.cfg(), stackName)
+	cfg := d.cfg()
+	stack, ok := cfg.Stacks[stackName]
+	if !ok {
+		downErr = fmt.Errorf("stack %q not found in config", stackName)
+		return downErr
+	}
+	inst := StackInstance(cfg, stackName)
+	composeFile, err := inst.ComposeFile(stack)
 	if err != nil {
 		downErr = err
 		return downErr
 	}
+	cctx := inst.composeContext(composeFile)
 
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "down", "--remove-orphans")
@@ -529,16 +528,10 @@ func (d *Deployer) Down(ctx context.Context, stackName string, removeVolumes boo
 }
 
 // runCompose executes docker compose up -d --build --remove-orphans.
-func (d *Deployer) runCompose(ctx context.Context, deployDir, stackName, composeFile string) error {
-	cctx := compose.Context{
-		ProjectName:  "herald-" + stackName,
-		ComposeFile:  composeFile,
-		OverrideFile: filepath.Join(deployDir, "compose.override.yml"),
-		EnvFile:      filepath.Join(deployDir, ".env"),
-		WorkDir:      filepath.Join(deployDir, "repo"),
-	}
+func (d *Deployer) runCompose(ctx context.Context, inst Instance, composeFile string) error {
+	cctx := inst.composeContext(composeFile)
 
-	d.Logger.Info("compose up", "stack", stackName, "project", cctx.ProjectName)
+	d.Logger.Info("compose up", "project", cctx.ProjectName)
 	args := cctx.BaseArgs()
 	args = append(args, "--progress", "plain", "up", "-d", "--build", "--remove-orphans")
 	stream := d.ui().StreamWriter()

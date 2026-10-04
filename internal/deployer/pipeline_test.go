@@ -352,3 +352,47 @@ func TestDeploy_DaemonLogsComposeOutputOnFailure(t *testing.T) {
 		t.Errorf("compose stderr missing from daemon log:\n%s", logs.String())
 	}
 }
+
+func TestDown_AfterDeploy(t *testing.T) {
+	e := newPipelineEnv(t)
+	stack := repoStack()
+	stack.Secrets = nil
+	d := e.deployer(map[string]config.Stack{"app": stack})
+	if err := d.Deploy(context.Background(), "app", ""); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Down(context.Background(), "app", true); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+
+	dir := filepath.Join(e.servicesDir, "app")
+	calls := e.dockerCalls(t)
+	want := fmt.Sprintf("compose --project-name herald-app --env-file %s -f %s -f %s --progress plain down --remove-orphans --volumes",
+		filepath.Join(dir, ".env"), filepath.Join(dir, "repo", "compose.yml"), filepath.Join(dir, "compose.override.yml"))
+	if got := calls[len(calls)-1]; got != want {
+		t.Errorf("last docker call = %q, want %q", got, want)
+	}
+}
+
+func TestDown_PathStackFindsComposeFile(t *testing.T) {
+	e := newPipelineEnv(t)
+	repoDir := filepath.Join(e.servicesDir, "wiki", "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "compose.yaml"), []byte("services: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	d := e.deployer(map[string]config.Stack{"wiki": {Path: "stacks/wiki", Domain: "wiki.example.com"}})
+
+	if err := d.Down(context.Background(), "wiki", false); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+
+	// Never fully deployed: no .env or override yet, so neither is passed.
+	want := "compose --project-name herald-wiki -f " + filepath.Join(repoDir, "compose.yaml") + " --progress plain down --remove-orphans"
+	if calls := e.dockerCalls(t); len(calls) != 1 || calls[0] != want {
+		t.Errorf("docker calls = %q, want [%q]", calls, want)
+	}
+}
