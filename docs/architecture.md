@@ -48,11 +48,13 @@ Post-deploy hooks (`update:`) run after compose up for stacks that need custom m
 
 **`config`** — The domain model. Defines stacks, secrets, previews, server identity. Innermost package, no outward imports. This is the language of herald.
 
-**`deployer`** — The single deploy orchestrator. Owns the pipeline above. Source resolution is a strategy fork within one `Deploy()` function, not separate packages. Handles deploy serialization (per-stack locking, drop excess).
+**`deployer`** — The single deploy orchestrator. Owns the pipeline above. Source resolution is a strategy fork within one `Deploy()` function, not separate packages. Handles deploy serialization (per-stack locking, drop excess). Owns a deployment's on-disk layout, compose project name and deploy stamps (`Instance`): other packages ask it instead of joining paths or `herald-` prefixes themselves.
 
 **`webhook`** — Translates GitHub events into deploy intents. Matches repo+branch+tag to stacks, routes preview events, verifies HMAC signatures. Herald-specific matching logic that no external tool provides.
 
-**`preview`** — Preview environment lifecycle management. State tracking, subdomain derivation, cleanup of stale environments. Uses deployer for the actual deploy — does not duplicate the pipeline.
+**`preview`** — Preview environment lifecycle management. State tracking, subdomain derivation, cleanup of stale environments. Uses deployer for the actual deploy (`deployer.Up`) — does not duplicate the pipeline. Previews get no secrets.
+
+**`maintenance`** — The one maintenance pass behind `herald sync`, daemon startup and IaC pushes: pull, reload and validate config, ensure Caddy, reconcile webhooks, survey stacks. Reports everything; the only thing it acts on is a changed `auto_deploy` path stack.
 
 ### Supporting — enables core, swappable
 
@@ -66,7 +68,9 @@ Post-deploy hooks (`update:`) run after compose up for stacks that need custom m
 
 **`init`** — Bootstrap orchestration. Clones IaC repo, sets up secrets, starts caddy, registers webhooks. Procedural, runs once.
 
-**`status`** / **`web`** — Read-side observability. Collects state from Docker, git, and config into a unified view. No write-side effects.
+**`status`** / **`web`** — Read-side observability. Collects state from Docker, git, and config into a unified view. No write-side effects. `status` owns what "running" means for a compose project.
+
+**`doctor`** — Live, read-only diagnosis for `herald doctor`, with a fix for every failing check.
 
 ### Generic — could be libraries
 
@@ -75,8 +79,6 @@ Post-deploy hooks (`update:`) run after compose up for stacks that need custom m
 **`git`** — Authenticated git operations. Credential helper injection. No herald concepts.
 
 **`ui`** — Step-based progress output (TTY and nop implementations).
-
-**`systemd`** — Unit file generation.
 
 ## Dependency Graph
 
@@ -138,7 +140,8 @@ Not included: `logs`, `exec`, or anything that's just `docker compose <cmd>` wit
   .env                        generated: config base merged with secrets
   secrets/<name>              docker secret files
   compose.override.yml        generated: caddy labels, networks, secret mounts
-  deployed_ref                last deployed ref (repo-sourced stacks only)
+  deployed_ref                last deployed ref: <ref>@<commit>, or path@<IaC commit>
+  deployed_config             config fingerprint of the last deploy (drift detection)
 
 /opt/deploy/previews/
   <stack>-<branch>/           ephemeral preview environments (same structure)

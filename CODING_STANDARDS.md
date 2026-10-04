@@ -23,6 +23,7 @@ Tools run through `go run` at a pinned version, so nothing needs installing.
 ### Structure
 - A package belongs to one layer in docs/architecture.md: core, supporting or generic. Supporting packages (`compose`, `caddy`, `secrets`, `github`) never import each other, except `github` → `secrets`. Generic packages (`runner`, `git`, `ui`) import nothing from `internal/`.
 - The deploy pipeline lives once, in `deployer`. Preview, webhook and maintenance call into it; they never repeat a stage.
+- A deployment's paths, compose project name and stamps come from `deployer.Instance`. Nothing else joins `"repo"`, `".env"` or `"herald-"`.
 - `cmd/` parses flags, wires dependencies and prints output. Rules about stacks, previews or secrets go in `internal/`.
 - Concrete types by default. An interface is declared by its consumer, holds only the methods that consumer calls, and exists only once a second implementation exists. A test fake counts (`maintenance.stackDeployer`).
 - Dependencies arrive as exported struct fields or constructor arguments. A field that may be nil is documented on the field and falls back in one accessor (`Deployer.ui()` returns `ui.Nop()`).
@@ -42,7 +43,7 @@ Tools run through `go run` at a pinned version, so nothing needs installing.
 - No `panic` except for programmer errors at init: a broken embedded template, a bad `regexp.MustCompile`.
 
 ### Concurrency and state
-- Daemon code reads config through `LiveConfig.Load()`, behind the type's `cfg()` accessor, on every use. Never keep a `*config.Config` that outlives one request or deploy: a reload must reach every component without a restart.
+- A long-running component takes its config as a `*config.Live` and calls `Load()` on every use. Never keep a `*config.Config` that outlives one request or deploy: a reload must reach every component without a restart.
 - Per-key serialisation uses one `sync.Map` of `*sync.Mutex` and `LoadOrStore` (stack locks, preview op locks). A mutex field carries a comment saying what it guards.
 - State files are written to a temp file in the same directory, then `os.Rename`d. Never write the target in place.
 - Every external command gets a context: `exec.CommandContext`. Use `runner.RunCmd` / `RunCmdStream` when output goes to logs or the UI.
