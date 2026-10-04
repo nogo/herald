@@ -315,11 +315,7 @@ func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Opti
 			continue
 		}
 
-		if StackRunning(ctx, inst.Project) {
-			sr.State = "running"
-		} else {
-			sr.State = "stopped"
-		}
+		_, _, sr.State, _ = status.ProjectState(ctx, inst.Project)
 
 		missing, merr := r.Secrets.MissingRequired(stack.Secrets)
 		if merr != nil {
@@ -427,14 +423,6 @@ func asExitError(err error, target **exec.ExitError) bool {
 		return true
 	}
 	return false
-}
-
-// StackRunning reports whether the compose project has running containers.
-func StackRunning(ctx context.Context, project string) bool {
-	out, err := exec.CommandContext(ctx, "docker", "compose",
-		"-p", project, "ps", "--format", "json").Output()
-	trimmed := strings.TrimSpace(string(out))
-	return err == nil && trimmed != "" && trimmed != "[]"
 }
 
 // desiredRepoSet returns the set of repos that should have a Herald webhook:

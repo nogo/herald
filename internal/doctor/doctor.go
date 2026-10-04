@@ -30,6 +30,7 @@ import (
 	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/maintenance"
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/nogo/herald/internal/status"
 )
 
 // Check categories, in display order.
@@ -382,12 +383,19 @@ func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {
 				"config.yml changed this stack since its last deploy", "herald deploy "+name)
 		}
 
-		if maintenance.StackRunning(ctx, inst.Project) {
+		inspect := "docker compose -p " + inst.Project + " ps"
+		switch up, total, state, _ := status.ProjectState(ctx, inst.Project); state {
+		case "running":
 			di.pass(catStacks, name)
-		} else {
+		case "degraded":
+			di.warn(catStacks, name+": degraded",
+				fmt.Sprintf("%d of %d containers running", up, total), inspect)
+		case "stopped":
 			di.warn(catStacks, name+": stopped",
-				"deploy directory exists but no containers are running",
-				"docker compose -p "+inst.Project+" ps")
+				"deploy directory exists but no containers are running", inspect)
+		default:
+			di.warn(catStacks, name+": state unknown",
+				"could not read the compose project's containers", inspect)
 		}
 	}
 }

@@ -231,7 +231,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 		}
 	}
 
-	up, total, state, err := queryDockerCompose(ctx, inst.Project)
+	up, total, state, err := ProjectState(ctx, inst.Project)
 	if err != nil {
 		c.Logger.Warn("docker compose ps failed", "stack", name, "error", err)
 		s.State = "error"
@@ -284,10 +284,12 @@ type containerPS struct {
 	State string `json:"State"`
 }
 
-// queryDockerCompose runs `docker compose -p <project> ps --format json` and
-// returns (running_count, total_count, state_string, error).
-// On Docker error or missing project, returns (0, 0, "stopped", nil).
-func queryDockerCompose(ctx context.Context, project string) (up, total int, state string, err error) {
+// ProjectState is the one definition of whether a compose project is up: it
+// counts the containers `docker compose ps` lists (running and restarting, not
+// exited) and returns "running" when all of them run, "degraded" when some do,
+// "stopped" when none do, or "error" when the output cannot be parsed. Docker
+// being unreachable, or the project not existing, counts as stopped.
+func ProjectState(ctx context.Context, project string) (up, total int, state string, err error) {
 	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "ps", "--format", "json")
 	out, runErr := cmd.Output()
 	if runErr != nil {

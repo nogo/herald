@@ -66,7 +66,7 @@ type WebhookResult struct {
 type StackReport struct {
 	Name   string `json:"name"`
 	Source string `json:"source"` // "repo" or "path"
-	State  string `json:"state"`  // "running", "stopped", "not deployed"
+	State  string `json:"state"`  // "not deployed", or a status.ProjectState state
 	// Action: "redeployed" (confirmed synchronous success), "deploy failed"
 	// (synchronous failure, Detail holds the error), "deploy queued" or
 	// "deploy dropped" (asynchronous submission — result not yet known),
@@ -188,11 +188,13 @@ func (r *Report) Render(w io.Writer) {
 			r.Webhooks.Synced, r.Webhooks.Created, r.Webhooks.Pruned, r.Webhooks.Errors)
 	}
 
-	var running, stopped, notDeployed, redeployed, queued, failed int
+	var running, degraded, stopped, notDeployed, redeployed, queued, failed int
 	for _, s := range r.Stacks {
 		switch s.State {
 		case "running":
 			running++
+		case "degraded":
+			degraded++
 		case "stopped":
 			stopped++
 		case "not deployed":
@@ -207,8 +209,8 @@ func (r *Report) Render(w io.Writer) {
 			failed++
 		}
 	}
-	fmt.Fprintf(w, "  Stacks: %d running, %d stopped, %d not deployed, %d redeployed, %d queued, %d failed\n",
-		running, stopped, notDeployed, redeployed, queued, failed)
+	fmt.Fprintf(w, "  Stacks: %d running, %d degraded, %d stopped, %d not deployed, %d redeployed, %d queued, %d failed\n",
+		running, degraded, stopped, notDeployed, redeployed, queued, failed)
 
 	if len(r.Orphans) > 0 {
 		fmt.Fprintf(w, "  Orphans: %d\n", len(r.Orphans))

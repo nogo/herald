@@ -278,3 +278,35 @@ func TestSameRepoSet(t *testing.T) {
 		}
 	}
 }
+
+// installFakeComposePS puts a fake docker on PATH whose `compose ps` prints out.
+func installFakeComposePS(t *testing.T, out string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncat <<'JSON'\n" + out + "\nJSON\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// A crash-looping service shows up in `compose ps` as "restarting". The pass
+// must judge it the way `herald status` does, not call the stack running.
+func TestSurveyStacksReportsCrashLoopAsDegraded(t *testing.T) {
+	installFakeComposePS(t, `{"Service":"web","State":"running"}
+{"Service":"worker","State":"restarting"}`)
+	cfg, _, _ := autoDeployConfig(t, false)
+	r := &Runner{
+		DataDir:  t.TempDir(),
+		Logger:   discardLogger(t),
+		Secrets:  secrets.NewStore(t.TempDir()),
+		Deployer: &fakeDeployer{},
+	}
+	rep := &Report{}
+
+	r.surveyStacks(context.Background(), cfg, Options{}, true, rep)
+
+	if got := rep.Stacks[0].State; got != "degraded" {
+		t.Errorf("State = %q, want %q", got, "degraded")
+	}
+}
