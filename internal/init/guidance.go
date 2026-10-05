@@ -11,6 +11,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+
+	"github.com/nogo/herald/internal/config"
 )
 
 // LocalRemoteCommands gives the operator one remote command per reachable network.
@@ -77,11 +79,27 @@ func NothingPushed(ctx context.Context, dataDir string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == ""
 }
 
+// defaultServicesDir is where stacks live on a bare-initialised server until
+// the first pushed config.yml says otherwise.
+const defaultServicesDir = "/srv"
+
+// PendingConfig stands in for config.yml on a bare-initialised server that has
+// received no push yet, so herald serve can run and wait for the first one. It
+// is not validated: maintenance stops at the missing config.yml before it
+// starts Caddy or deploys. ok is false once anything has been pushed.
+func PendingConfig(ctx context.Context, dataDir string) (cfg *config.Config, ok bool) {
+	if !NothingPushed(ctx, dataDir) {
+		return nil, false
+	}
+	name, _ := os.Hostname()
+	return &config.Config{Server: config.Server{Name: name, ServicesDir: defaultServicesDir, Port: 9483}}, true
+}
+
 func printBareCompletion(w io.Writer, opts BareOptions, remotes []string) {
 	name, _ := os.Hostname()
 	services := opts.ServicesDir
 	if services == "" {
-		services = "/srv"
+		services = defaultServicesDir
 	}
 	fmt.Fprintln(w, "Herald initialized successfully!\n\nOn your laptop, choose one remote (LAN or NetBird):")
 	for _, command := range remotes {

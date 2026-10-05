@@ -63,14 +63,16 @@ var rootCmd = &cobra.Command{
 		}
 
 		cfg, err := LoadConfigWithToken(cfgFile, dataDir)
-		if err != nil {
-			if cmd.Name() == "serve" && !cmd.Flags().Changed("config") && errors.Is(err, os.ErrNotExist) && bootstrap.NothingPushed(context.Background(), dataDir) {
-				name, _ := os.Hostname()
+		// serve waits for the first push to a bare repo; every other command
+		// needs a real config.
+		if err != nil && cmd.Name() == "serve" && !cmd.Flags().Changed("config") && errors.Is(err, os.ErrNotExist) {
+			if pending, ok := bootstrap.PendingConfig(context.Background(), dataDir); ok {
 				cfgFile = filepath.Join(dataDir, "repo", "config.yml")
-				cfg = &config.Config{Server: config.Server{Name: name, ServicesDir: "/srv", Port: 9483}}
-			} else {
-				return err
+				cfg, err = pending, nil
 			}
+		}
+		if err != nil {
+			return err
 		}
 		Cfg = cfg
 		return nil
