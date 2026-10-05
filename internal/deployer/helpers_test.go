@@ -139,7 +139,6 @@ func TestGenerateOverride(t *testing.T) {
 			StackName:   "myapp",
 			Domain:      "myapp.example.com",
 			ComposeFile: composeFile,
-			DefaultPort: "3000",
 			InternalNet: "herald-myapp-internal",
 		}
 		data, err := GenerateOverride(params)
@@ -164,9 +163,8 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:     dir,
 			StackName:     "myapp",
 			Domain:        "myapp.example.com",
-			ComposeFile:   writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
+			ComposeFile:   writeTestCompose(t, dir, "services:\n  app:\n    expose: [\"3000\"]\n"),
 			DockerSecrets: map[string]string{"DB_PASSWORD": "secret123"},
-			DefaultPort:   "3000",
 			InternalNet:   "herald-myapp-internal",
 		}
 		data, err := GenerateOverride(params)
@@ -191,8 +189,7 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:      dir,
 			StackName:      "myapp",
 			Domain:         "myapp.example.com",
-			ComposeFile:    writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
-			DefaultPort:    "3000",
+			ComposeFile:    writeTestCompose(t, dir, "services:\n  app:\n    expose: [\"3000\"]\n"),
 			InternalNet:    "herald-myapp-internal",
 			InlineOverride: "services:\n  app:\n    env_file: !override\n      - custom.env\n",
 		}
@@ -212,9 +209,8 @@ func TestGenerateOverride(t *testing.T) {
 			DeployDir:    dir,
 			StackName:    "myapp",
 			Domain:       "myapp.example.com",
-			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
+			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    expose: [\"3000\"]\n"),
 			EnvFilePaths: []string{envPath},
-			DefaultPort:  "3000",
 			InternalNet:  "herald-myapp-internal",
 		}
 		data, err := GenerateOverride(params)
@@ -350,7 +346,6 @@ func TestGenerateOverrideRouting(t *testing.T) {
 			ComposeFile: writeTestCompose(t, dir, compose),
 			Service:     service,
 			Port:        port,
-			DefaultPort: "3000",
 			InternalNet: "herald-shop-internal",
 		})
 	}
@@ -404,7 +399,6 @@ func TestGenerateOverrideRouting(t *testing.T) {
 	t.Run("missing compose names the file", func(t *testing.T) {
 		_, err := GenerateOverride(OverrideParams{
 			ComposeFile: filepath.Join(t.TempDir(), "missing.yml"),
-			DefaultPort: "3000",
 		})
 		if err == nil || !strings.Contains(err.Error(), "missing.yml") {
 			t.Fatalf("want error naming missing.yml, got %v", err)
@@ -421,7 +415,6 @@ func TestGenerateOverrideUpstream(t *testing.T) {
 			StackName:      "homeassistant",
 			Domain:         "ha.example.com",
 			ComposeFile:    writeTestCompose(t, dir, hostNet),
-			DefaultPort:    "80",
 			InternalNet:    "herald-homeassistant-internal",
 			Upstream:       upstream,
 			GatewayIP:      "172.17.0.1",
@@ -502,7 +495,6 @@ func TestGenerateOverrideUpstream(t *testing.T) {
 			StackName:   "myapp",
 			Domain:      "myapp.example.com",
 			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    expose:\n      - \"3000\"\n"),
-			DefaultPort: "3000",
 			InternalNet: "herald-myapp-internal",
 		})
 		if err != nil {

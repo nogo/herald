@@ -227,7 +227,6 @@ func (m *PreviewManager) Deploy(ctx context.Context, appName, branch, commit str
 		EnvFile:        app.EnvFile,
 		Service:        app.Service,
 		Port:           app.Port,
-		DefaultPort:    "3000",
 		InlineOverride: app.Override,
 	}, m.Logger, nil)
 	if err != nil {

@@ -73,7 +73,6 @@ type OverrideParams struct {
 	DockerSecrets  map[string]string
 	Service        string // explicit routing service from the stack; empty to detect
 	Port           string // explicit container port from the stack; empty to detect
-	DefaultPort    string // "3000" for repo stacks, "80" for path stacks
 	InternalNet    string // e.g. "herald-myapp-internal"
 	Upstream       string // fixed host:port or ip:port instead of the caddy network; empty to route to the container
 	GatewayIP      string // Docker host address that "host" in Upstream resolves to
@@ -91,7 +90,7 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 			return nil, fmt.Errorf("stack %q: %w", params.StackName, err)
 		}
 	}
-	route, err := compose.SelectRoute(params.ComposeFile, params.Service, port, params.DefaultPort)
+	route, err := compose.SelectRoute(params.ComposeFile, params.Service, port)
 	if err != nil {
 		return nil, err
 	}

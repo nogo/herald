@@ -83,9 +83,9 @@ type Route struct {
 // Without service, it picks the sole service and otherwise fails asking for
 // one: no service name is special, so a stack with several services always
 // says which one serves its domain. Without port, it uses the service's single
-// expose/ports target, defaultPort when it declares none, and fails when it
-// declares several distinct targets. Errors name filePath.
-func SelectRoute(filePath, service, port, defaultPort string) (Route, error) {
+// expose/ports target and fails when it declares none or several: no port is
+// assumed. Errors name filePath.
+func SelectRoute(filePath, service, port string) (Route, error) {
 	if port != "" {
 		if err := ValidatePort(port); err != nil {
 			return Route{}, err
@@ -120,7 +120,7 @@ func SelectRoute(filePath, service, port, defaultPort string) (Route, error) {
 		targets := declaredPorts(mc.Services[service])
 		switch len(targets) {
 		case 0:
-			port = defaultPort
+			return Route{}, fmt.Errorf("compose file %s: service %q declares no container port (expose or ports): set `port:` on the stack to the one to route to", filePath, service)
 		case 1:
 			port = targets[0]
 		default:

@@ -32,26 +32,28 @@ func TestPortFromAny(t *testing.T) {
 func TestSelectRoute(t *testing.T) {
 	const webAndDB = "services:\n  db:\n    image: postgres\n  web:\n    expose:\n      - 4000\n"
 	tests := []struct {
-		name, compose, service, port, def string
-		wantService, wantPort             string
-		wantErr                           string // substring; empty means success
+		name, compose, service, port string
+		wantService, wantPort        string
+		wantErr                      string // substring; empty means success
 	}{
-		{name: "a service named app is not special", compose: "services:\n  app:\n    expose: [\"3000\"]\n  db:\n    image: postgres\n", def: "3000", wantErr: "set `service:`"},
-		{name: "a service named after the stack is not special", compose: "services:\n  budget:\n    ports: [\"8080:8080\"]\n  db:\n    image: postgres\n", def: "3000", wantErr: "set `service:`"},
-		{name: "sole service", compose: "services:\n  web:\n    image: x\n", def: "3000", wantService: "web", wantPort: "3000"},
-		{name: "web plus database is ambiguous", compose: webAndDB, def: "3000", wantErr: "set `service:`"},
-		{name: "explicit service", compose: webAndDB, service: "web", def: "3000", wantService: "web", wantPort: "4000"},
-		{name: "missing explicit service", compose: webAndDB, service: "api", def: "3000", wantErr: `service "api" not found`},
-		{name: "explicit port", compose: webAndDB, service: "web", port: "9000", def: "3000", wantService: "web", wantPort: "9000"},
-		{name: "non-numeric port", compose: webAndDB, service: "web", port: "http", def: "3000", wantErr: `"http"`},
-		{name: "port out of range", compose: webAndDB, service: "web", port: "70000", def: "3000", wantErr: `"70000"`},
-		{name: "ambiguous ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", def: "3000", wantErr: "set `port:`"},
-		{name: "ambiguous ports resolved by explicit port", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", port: "8080", def: "3000", wantService: "app", wantPort: "8080"},
-		{name: "same target in expose and ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"3000:3000\"]\n", def: "80", wantService: "app", wantPort: "3000"},
-		{name: "long form", compose: "services:\n  app:\n    ports:\n      - target: 5000\n        published: 80\n", def: "3000", wantService: "app", wantPort: "5000"},
-		{name: "protocol suffix", compose: "services:\n  app:\n    ports: [\"8080:3000/tcp\"]\n", def: "80", wantService: "app", wantPort: "3000"},
-		{name: "no services", compose: "services: {}\n", def: "3000", wantErr: "no services"},
-		{name: "malformed yaml", compose: "services: [unclosed", def: "3000", wantErr: "compose.yml"},
+		{name: "a service named app is not special", compose: "services:\n  app:\n    expose: [\"3000\"]\n  db:\n    image: postgres\n", wantErr: "set `service:`"},
+		{name: "a service named after the stack is not special", compose: "services:\n  budget:\n    ports: [\"8080:8080\"]\n  db:\n    image: postgres\n", wantErr: "set `service:`"},
+		{name: "sole service", compose: "services:\n  web:\n    expose: [\"3000\"]\n", wantService: "web", wantPort: "3000"},
+		{name: "no declared port is not guessed", compose: "services:\n  web:\n    image: x\n", wantErr: "set `port:`"},
+		{name: "no declared port resolved by explicit port", compose: "services:\n  web:\n    image: x\n", port: "80", wantService: "web", wantPort: "80"},
+		{name: "web plus database is ambiguous", compose: webAndDB, wantErr: "set `service:`"},
+		{name: "explicit service", compose: webAndDB, service: "web", wantService: "web", wantPort: "4000"},
+		{name: "missing explicit service", compose: webAndDB, service: "api", wantErr: `service "api" not found`},
+		{name: "explicit port", compose: webAndDB, service: "web", port: "9000", wantService: "web", wantPort: "9000"},
+		{name: "non-numeric port", compose: webAndDB, service: "web", port: "http", wantErr: `"http"`},
+		{name: "port out of range", compose: webAndDB, service: "web", port: "70000", wantErr: `"70000"`},
+		{name: "ambiguous ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", wantErr: "set `port:`"},
+		{name: "ambiguous ports resolved by explicit port", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"80:8080\"]\n", port: "8080", wantService: "app", wantPort: "8080"},
+		{name: "same target in expose and ports", compose: "services:\n  app:\n    expose: [\"3000\"]\n    ports: [\"3000:3000\"]\n", wantService: "app", wantPort: "3000"},
+		{name: "long form", compose: "services:\n  app:\n    ports:\n      - target: 5000\n        published: 80\n", wantService: "app", wantPort: "5000"},
+		{name: "protocol suffix", compose: "services:\n  app:\n    ports: [\"8080:3000/tcp\"]\n", wantService: "app", wantPort: "3000"},
+		{name: "no services", compose: "services: {}\n", wantErr: "no services"},
+		{name: "malformed yaml", compose: "services: [unclosed", wantErr: "compose.yml"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,7 +61,7 @@ func TestSelectRoute(t *testing.T) {
 			if err := os.WriteFile(f, []byte(tc.compose), 0644); err != nil {
 				t.Fatal(err)
 			}
-			got, err := SelectRoute(f, tc.service, tc.port, tc.def)
+			got, err := SelectRoute(f, tc.service, tc.port)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
@@ -77,7 +79,7 @@ func TestSelectRoute(t *testing.T) {
 
 	t.Run("unreadable file names it", func(t *testing.T) {
 		f := filepath.Join(t.TempDir(), "gone.yml")
-		_, err := SelectRoute(f, "", "", "3000")
+		_, err := SelectRoute(f, "", "")
 		if err == nil || !strings.Contains(err.Error(), f) {
 			t.Fatalf("err = %v, want it to name %s", err, f)
 		}

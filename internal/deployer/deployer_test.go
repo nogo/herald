@@ -190,45 +190,9 @@ func TestResolveComposePath(t *testing.T) {
 	})
 }
 
-// TestDefaultPortPerStackType verifies that Deploy selects port 3000 for repo
-// stacks and port 80 for path stacks when passing params to GenerateOverride.
-func TestDefaultPortPerStackType(t *testing.T) {
-	t.Run("repo stack uses port 3000", func(t *testing.T) {
-		dir := t.TempDir()
-		data, err := GenerateOverride(OverrideParams{
-			DeployDir:   dir,
-			StackName:   "myapp",
-			Domain:      "myapp.example.com",
-			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
-			DefaultPort: "3000",
-			InternalNet: "herald-myapp-internal",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "3000") {
-			t.Errorf("expected port 3000 in repo stack override:\n%s", data)
-		}
-	})
-
-	t.Run("path stack uses port 80", func(t *testing.T) {
-		dir := t.TempDir()
-		data, err := GenerateOverride(OverrideParams{
-			DeployDir:   dir,
-			StackName:   "myservice",
-			Domain:      "myservice.example.com",
-			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
-			DefaultPort: "80",
-			InternalNet: "herald-myservice-internal",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "80") {
-			t.Errorf("expected port 80 in path stack override:\n%s", data)
-		}
-	})
-
+// TestGenerateOverride_EnvFile verifies the deploy dir's .env reaches the
+// routed service as an env_file.
+func TestGenerateOverride_EnvFile(t *testing.T) {
 	t.Run("env_file includes deployDir/.env", func(t *testing.T) {
 		dir := t.TempDir()
 		envPath := filepath.Join(dir, ".env")
@@ -236,9 +200,8 @@ func TestDefaultPortPerStackType(t *testing.T) {
 			DeployDir:    dir,
 			StackName:    "myapp",
 			Domain:       "myapp.example.com",
-			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    image: x\n"),
+			ComposeFile:  writeTestCompose(t, dir, "services:\n  app:\n    expose: [\"3000\"]\n"),
 			EnvFilePaths: []string{envPath},
-			DefaultPort:  "3000",
 			InternalNet:  "herald-myapp-internal",
 		})
 		if err != nil {

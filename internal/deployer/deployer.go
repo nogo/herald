@@ -236,11 +236,6 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		return deployErr
 	}
 
-	defaultPort := "3000"
-	if stack.Path != "" {
-		defaultPort = "80"
-	}
-
 	deployErr = Up(ctx, inst, UpSpec{
 		StackName:      stackName,
 		Domain:         stack.Domain,
@@ -250,7 +245,6 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		Service:        stack.Service,
 		Port:           stack.Port,
 		Upstream:       stack.Upstream,
-		DefaultPort:    defaultPort,
 		InlineOverride: stack.Override,
 	}, d.Logger, u)
 	if deployErr != nil {

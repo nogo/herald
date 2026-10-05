@@ -167,7 +167,7 @@ func TestStateAtomicWrite(t *testing.T) {
 
 func makeTestComposeFile(t *testing.T, dir string) string {
 	t.Helper()
-	composeContent := "services:\n  app:\n    image: myapp:latest\n"
+	composeContent := "services:\n  app:\n    image: myapp:latest\n    expose: [\"3000\"]\n"
 	path := filepath.Join(dir, "compose.yml")
 	if err := os.WriteFile(path, []byte(composeContent), 0644); err != nil {
 		t.Fatal(err)
@@ -183,7 +183,6 @@ func makeTestOverrideData(t *testing.T, dir, composeFile, inlineOverride string)
 		Domain:         "feature-test.preview.example.com",
 		ComposeFile:    composeFile,
 		EnvFilePaths:   []string{filepath.Join(dir, ".env")},
-		DefaultPort:    "3000",
 		InternalNet:    "herald-preview-myapp-feature-test-internal",
 		InlineOverride: inlineOverride,
 	})
