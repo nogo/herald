@@ -267,15 +267,6 @@ If you already run your own proxy and certificates and want more forges or hosts
 
 **Trade-offs:** GitHub or a bare repo on the server, no other forge. One server only. No web UI for config. No app marketplace. New project.
 
-## Roadmap
-
-Near-term direction:
-
-- add availability badges (`/badge`, SVG) and append-only JSONL history behind the public status page, no database
-- optionally let a stack expose more on the public page (e.g. domain link, HTTP health check) as explicit opt-ins
-
-Done recently: the daemon runs the full maintenance path on server-repo pushes and startup; `herald doctor` gives actionable private diagnosis; the web surface is a single public availability page showing only `up`/`degraded`/`down`/`unknown` for opted-in services.
-
 ## Architecture
 
 ```
