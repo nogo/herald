@@ -69,6 +69,11 @@ type Runner struct {
 	IaCRepo    string                         // GitHub full name of the server IaC repo, or ""
 	HeraldPort int
 
+	// PostCommitStatus reports the outcome of a pass that moved the server repo
+	// to a new commit back to that commit (a GitHub commit status), so the
+	// pusher sees it. Nil when the server repo is not on GitHub.
+	PostCommitStatus func(ctx context.Context, sha, state, description string) error
+
 	mu sync.Mutex
 }
 
@@ -81,14 +86,14 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 	defer r.mu.Unlock()
 
 	rep := &Report{StartedAt: time.Now().UTC()}
+	repoDir := config.DataDir(r.DataDir).Repo()
 	defer func() {
 		rep.FinishedAt = time.Now().UTC()
 		if err := rep.Write(r.DataDir); err != nil {
 			r.Logger.Warn("writing maintenance report", "error", err)
 		}
+		r.postCommitStatus(ctx, rep, repoDir)
 	}()
-
-	repoDir := config.DataDir(r.DataDir).Repo()
 
 	// Phase A1: pull the IaC repo (recovery — the daemon may have missed pushes).
 	rep.IaC.OldHEAD = gitHEAD(ctx, repoDir)
@@ -147,6 +152,19 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 	rep.Orphans = DetectOrphans(ctx, cfg)
 
 	return rep
+}
+
+// postCommitStatus is best-effort: the pass already happened, and a GitHub
+// outage must not turn into a maintenance failure. The report and log keep the
+// outcome either way.
+func (r *Runner) postCommitStatus(ctx context.Context, rep *Report, repoDir string) {
+	if r.PostCommitStatus == nil || rep.IaC.NewHEAD == "" || rep.IaC.NewHEAD == rep.IaC.OldHEAD {
+		return
+	}
+	state, description := rep.CommitOutcome(repoDir)
+	if err := r.PostCommitStatus(ctx, rep.IaC.NewHEAD, state, description); err != nil {
+		r.Logger.Warn("posting commit status", "commit", rep.IaC.NewHEAD, "error", err)
+	}
 }
 
 // token resolves the GitHub token from the live config, falling back to the

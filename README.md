@@ -126,6 +126,8 @@ Herald registers webhooks on your app repos and on the server repo via the GitHu
 
 Everything Herald manages is a stack: a Docker Compose project with a domain, secrets, and a source.
 
+A config push that would leave a stack without a route (no `service:` among several services, no declared or explicit `port:`) is rejected as a whole: the daemon keeps the previous config and deploys nothing. On a GitHub server repo the commit gets a ✗ status naming the stack; `herald init` without a repo installs a `pre-receive` hook that rejects such a push before it lands, so `git push` prints the error.
+
 For a server repo with a local bare repo or non-GitHub `origin`, a git
 `post-receive` hook can send the daemon a sync signal with:
 
@@ -226,20 +228,26 @@ The web surface is a single public availability page: it shows only the up/degra
 
 ## Comparison
 
-| | Herald | Coolify | Dokploy | Dokku | Kamal |
+As of October 2026, ordered from least to most moving parts:
+
+| | Database | On the server | Config lives in | Deploys on | TLS |
 |---|---|---|---|---|---|
-| Database | **None** | PostgreSQL+Redis | PostgreSQL+Redis | None | None |
-| Config | YAML in git | Web UI | Web UI | CLI | YAML |
-| Deploy trigger | Webhook | Webhook | Webhook | git push | CLI push |
-| Reverse proxy | Caddy | Traefik | Traefik | Nginx/Caddy | kamal-proxy |
-| Auto TLS | Yes | Yes | Yes | Plugin | Yes |
-| Preview envs | Yes | Yes | No | No | No |
-| Same repo, N deploys | Yes | No | No | No | Partial |
-| RAM | ~10 MB | ~500 MB | ~400 MB | ~20 MB | 0 |
+| **Herald** | **None** | One daemon | YAML in a server repo | Webhook, git push | Caddy |
+| [doco-cd](https://github.com/kimdre/doco-cd) | None | One daemon | YAML in each repo | Webhook, polling | Bring your own |
+| [Kamal](https://kamal-deploy.org) | None | Proxy only | YAML in the app repo | CLI over SSH | kamal-proxy |
+| [Dokku](https://dokku.com) | None | Git hooks, plugins | CLI commands | git push | Plugin |
+| [Haloy](https://haloy.dev) | SQLite | Daemon + proxy | YAML in the app repo | CLI | Built in |
+| [Disco](https://disco.cloud) | SQL, via migrations | Daemon | Dashboard, CLI | Webhook | Built in |
+| [Uncloud](https://github.com/psviderski/uncloud) | Distributed SQLite | Daemon per machine | Compose + CLI | CLI over SSH | Caddy |
+| [Komodo](https://komo.do) | MongoDB or FerretDB | Core + agent | Web UI, TOML sync | Webhook, polling | Bring your own |
+| [Dokploy](https://dokploy.com) | PostgreSQL + Redis | Platform | Web UI | Webhook | Traefik |
+| [Coolify](https://coolify.io) | PostgreSQL + Redis | Platform | Web UI | Webhook | Traefik or Caddy |
+
+Closest neighbour: doco-cd, also a daemon that applies compose files from git. It leaves routing, certificates and previews to you; Herald wires those from the same config. Of the others, Coolify, Dokploy (apps only, not compose) and Disco also run preview environments.
 
 **Why Herald?** GitHub-native deploy automation for one VPS. One server repo drives wiring. One app repo can deploy N times. No PostgreSQL/Redis tax.
 
-**Trade-offs:** GitHub only. One server only. No web UI for config. No app marketplace. New project.
+**Trade-offs:** GitHub or a bare repo on the server, no other forge. One server only. No web UI for config. No app marketplace. New project.
 
 ## Roadmap
 

@@ -337,3 +337,37 @@ func TestEnsureCaddy_ReappliesDNSSetupWhileRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestCommitOutcome(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	cases := []struct {
+		name      string
+		rep       Report
+		wantState string
+		wantDesc  string
+	}{
+		{"rejected config names paths relative to the repo",
+			Report{Config: ConfigResult{Error: "stack \"shop\": compose file /data/repo/shop/compose.yml has\nseveral services"}},
+			"failure", `config rejected, nothing deployed: stack "shop": compose file shop/compose.yml has several services`},
+		{"failed deploy",
+			Report{Config: ConfigResult{Loaded: true}, Stacks: []StackReport{{Name: "wiki", Action: "none"}, {Name: "shop", Action: "deploy failed", Detail: "image not found"}}},
+			"failure", `stack "shop": deploy failed: image not found`},
+		{"applied with queued deploys",
+			Report{Config: ConfigResult{Loaded: true}, Stacks: []StackReport{{Action: "deploy queued"}, {Action: "redeployed"}, {Action: "none"}}},
+			"success", "config applied, 2 stack(s) redeploying"},
+		{"applied without deploys", Report{Config: ConfigResult{Loaded: true}}, "success", "config applied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, desc := tc.rep.CommitOutcome("/data/repo")
+			if state != tc.wantState || desc != tc.wantDesc {
+				t.Errorf("CommitOutcome = %q, %q; want %q, %q", state, desc, tc.wantState, tc.wantDesc)
+			}
+		})
+	}
+
+	_, desc := (&Report{Config: ConfigResult{Error: long}}).CommitOutcome("/data/repo")
+	if n := len([]rune(desc)); n != 140 || !strings.HasSuffix(desc, "…") {
+		t.Errorf("long description: %d runes, ends %q; want 140 ending in …", n, desc[len(desc)-5:])
+	}
+}

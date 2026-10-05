@@ -60,6 +60,11 @@ esac
 			return &updated, nil
 		},
 	}
+	var posted []string
+	r.PostCommitStatus = func(_ context.Context, sha, state, description string) error {
+		posted = append(posted, sha+" "+state+" "+description)
+		return nil
+	}
 	done := make(chan *Report, 1)
 	s := &webhook.Server{OnIaCPush: func() {
 		done <- r.Run(context.Background(), Options{Pull: true, Webhooks: ReconcileDelta, RedeployChanged: true})
@@ -81,6 +86,9 @@ esac
 		}
 		if len(fd.asyncCalls) != 1 || fd.asyncCalls[0] != name {
 			t.Fatalf("deploys = %v", fd.asyncCalls)
+		}
+		if want := "new success config applied, 1 stack(s) redeploying"; len(posted) != 1 || posted[0] != want {
+			t.Fatalf("commit statuses = %q, want [%q]", posted, want)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("signal did not complete maintenance")
@@ -143,7 +151,11 @@ func TestUnroutableStackRejectsConfig(t *testing.T) {
 	live := config.NewLive(old)
 	fd := &fakeDeployer{}
 	r := &Runner{DataDir: dir, Logger: discardLogger(t), Secrets: secrets.NewStore(dir), Config: live, Deployer: fd,
-		Reload: func() (*config.Config, error) { return pushed, nil }}
+		Reload: func() (*config.Config, error) { return pushed, nil },
+		PostCommitStatus: func(context.Context, string, string, string) error {
+			t.Error("posted a commit status although the server repo did not move")
+			return nil
+		}}
 
 	rep := r.Run(context.Background(), Options{RedeployChanged: true})
 

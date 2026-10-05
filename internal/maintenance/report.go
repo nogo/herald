@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -93,6 +94,46 @@ func (r *Report) Failed() bool {
 		}
 	}
 	return false
+}
+
+// statusLimit is GitHub's maximum commit status description length.
+const statusLimit = 140
+
+// CommitOutcome summarises the pass for the server-repo commit it applied, as a
+// commit status state ("success" or "failure") and a one-line description of at
+// most 140 characters. It fails when the config was rejected or a deploy
+// failed; queued deploys count as success, since their result is not known yet.
+// Paths under repoDir are shown relative to it, as the pusher knows them.
+func (r *Report) CommitOutcome(repoDir string) (state, description string) {
+	state, description = "failure", ""
+	switch {
+	case r.Config.Error != "":
+		description = "config rejected, nothing deployed: " + r.Config.Error
+	case r.Failed():
+		for _, s := range r.Stacks {
+			if s.Action == "deploy failed" {
+				description = fmt.Sprintf("stack %q: deploy failed: %s", s.Name, s.Detail)
+				break
+			}
+		}
+	default:
+		state, description = "success", "config applied"
+		var redeployed int
+		for _, s := range r.Stacks {
+			if s.Action == "redeployed" || s.Action == "deploy queued" {
+				redeployed++
+			}
+		}
+		if redeployed > 0 {
+			description += fmt.Sprintf(", %d stack(s) redeploying", redeployed)
+		}
+	}
+	description = strings.ReplaceAll(description, repoDir+string(filepath.Separator), "")
+	description = strings.Join(strings.Fields(description), " ")
+	if runes := []rune(description); len(runes) > statusLimit {
+		description = string(runes[:statusLimit-1]) + "…"
+	}
+	return state, description
 }
 
 // LoadReport reads the last persisted maintenance report from

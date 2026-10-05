@@ -18,6 +18,7 @@ import (
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/deployer"
 	githelper "github.com/nogo/herald/internal/git"
+	"github.com/nogo/herald/internal/github"
 	"github.com/nogo/herald/internal/maintenance"
 	"github.com/nogo/herald/internal/preview"
 	"github.com/nogo/herald/internal/secrets"
@@ -103,6 +104,16 @@ var serveCmd = &cobra.Command{
 			Reload:     func() (*config.Config, error) { return LoadConfigWithToken(cfgFile, dataDir) },
 			IaCRepo:    getIaCRepo(dataDir),
 			HeraldPort: listenPort,
+		}
+		if runner.IaCRepo != "" {
+			runner.PostCommitStatus = func(ctx context.Context, sha, state, description string) error {
+				cfg := live.Load()
+				if cfg.Server.GithubToken == "" {
+					return nil
+				}
+				client := github.NewGitHubClient(cfg.Server.GithubToken, slog.Default())
+				return client.SetCommitStatus(ctx, runner.IaCRepo, sha, github.CommitStatus{State: state, Description: description, Context: "herald/" + cfg.Server.Name})
+			}
 		}
 
 		srv := &webhook.Server{
