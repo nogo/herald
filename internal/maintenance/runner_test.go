@@ -83,24 +83,6 @@ func TestPathStackChanged(t *testing.T) {
 	}
 }
 
-func TestDesiredRepoSet(t *testing.T) {
-	cfg := mustConfig(t, map[string]string{"a": "nogo/app", "b": "nogo/app", "c": "nogo/other"})
-	set := desiredRepoSet(cfg, "nogo/iac")
-	for _, want := range []string{"nogo/app", "nogo/other", "nogo/iac"} {
-		if !set[want] {
-			t.Errorf("desiredRepoSet missing %q: %v", want, set)
-		}
-	}
-	if len(set) != 3 {
-		t.Errorf("desiredRepoSet size = %d, want 3: %v", len(set), set)
-	}
-
-	// No IaC repo: only stack repos.
-	if got := desiredRepoSet(cfg, ""); len(got) != 2 {
-		t.Errorf("without IaC repo, size = %d, want 2: %v", len(got), got)
-	}
-}
-
 // fakeDeployer is a stackDeployer test double: it records what was requested
 // and lets the test dictate the outcome, so surveyStacks' handling of deploy
 // results can be tested without a real Docker host.
@@ -259,7 +241,7 @@ func TestSurveyStacksAsyncDropped(t *testing.T) {
 }
 
 func TestSameRepoSet(t *testing.T) {
-	desired := map[string]bool{"a": true, "b": true}
+	desired := []string{"a", "b"}
 	cases := []struct {
 		name  string
 		known map[string]int64

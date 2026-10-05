@@ -194,7 +194,11 @@ func (di *Diagnosis) checkConfigAndRepo(ctx context.Context, d Deps) {
 }
 
 func (di *Diagnosis) checkGitHub(ctx context.Context, d Deps) {
-	if d.IaCRepo == "" && (d.Config == nil || !hasRepoStacks(d.Config)) {
+	usesGitHub := d.IaCRepo != ""
+	if d.Config != nil {
+		usesGitHub = len(d.Config.GitHubRepos(d.IaCRepo)) > 0
+	}
+	if !usesGitHub {
 		return
 	}
 	if d.Token == "" {
@@ -447,13 +451,4 @@ func (di *Diagnosis) buildInventory(d Deps) {
 		}
 		di.Stacks = append(di.Stacks, inv)
 	}
-}
-
-func hasRepoStacks(cfg *config.Config) bool {
-	for _, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			return true
-		}
-	}
-	return false
 }

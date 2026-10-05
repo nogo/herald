@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -225,22 +223,6 @@ func (c *GitHubClient) DeleteWebhook(ctx context.Context, owner, repo string, id
 	return err
 }
 
-// uniqueRepos returns a sorted, deduplicated list of repos referenced by repo
-// stacks. If iacRepo is non-empty it is included in the set so the server's
-// own IaC repo gets a webhook reconciled alongside stack repos.
-func uniqueRepos(cfg *config.Config, iacRepo string) []string {
-	repoSet := make(map[string]struct{})
-	for _, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			repoSet[stack.Repo] = struct{}{}
-		}
-	}
-	if iacRepo != "" {
-		repoSet[iacRepo] = struct{}{}
-	}
-	return slices.Sorted(maps.Keys(repoSet))
-}
-
 // splitRepo splits "owner/repo" into its two components.
 func splitRepo(fullRepo string) (string, string, error) {
 	parts := strings.SplitN(fullRepo, "/", 2)
@@ -286,7 +268,7 @@ func SyncWebhooks(ctx context.Context, cfg *config.Config, store *secrets.Store,
 	}
 
 	targetURL := webhookURL(cfg)
-	repos := uniqueRepos(cfg, iacRepo)
+	repos := cfg.GitHubRepos(iacRepo)
 
 	results := make([]SyncResult, 0, len(repos))
 	for _, repoFull := range repos {
@@ -309,7 +291,7 @@ func ReconcileWebhooks(ctx context.Context, cfg *config.Config, store *secrets.S
 	}
 
 	targetURL := webhookURL(cfg)
-	desired := uniqueRepos(cfg, iacRepo)
+	desired := cfg.GitHubRepos(iacRepo)
 	desiredSet := make(map[string]bool, len(desired))
 
 	results := make([]SyncResult, 0, len(desired))
@@ -389,7 +371,7 @@ func syncRepo(ctx context.Context, cfg *config.Config, client *GitHubClient, rep
 // iacRepo, if non-empty, is included so the server's own IaC repo appears in the listing.
 func ListWebhookStatuses(ctx context.Context, cfg *config.Config, client *GitHubClient, iacRepo string) []WebhookStatus {
 	targetURL := webhookURL(cfg)
-	repos := uniqueRepos(cfg, iacRepo)
+	repos := cfg.GitHubRepos(iacRepo)
 
 	statuses := make([]WebhookStatus, 0, len(repos))
 	for _, repoFull := range repos {

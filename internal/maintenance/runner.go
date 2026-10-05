@@ -248,7 +248,8 @@ func surveyCertificates(ctx context.Context) CertResult {
 }
 
 func (r *Runner) reconcileWebhooks(ctx context.Context, cfg *config.Config, opts Options, rep *Report) {
-	if opts.Webhooks == ReconcileOff || cfg.Server.GithubToken == "" || len(desiredRepoSet(cfg, r.IaCRepo)) == 0 {
+	desired := cfg.GitHubRepos(r.IaCRepo)
+	if opts.Webhooks == ReconcileOff || cfg.Server.GithubToken == "" || len(desired) == 0 {
 		rep.Webhooks.Skipped = true
 		return
 	}
@@ -264,7 +265,6 @@ func (r *Runner) reconcileWebhooks(ctx context.Context, cfg *config.Config, opts
 		known[repo] = e.ID
 	}
 
-	desired := desiredRepoSet(cfg, r.IaCRepo)
 	if opts.Webhooks == ReconcileDelta && sameRepoSet(known, desired) {
 		rep.Webhooks.Skipped = true
 		return
@@ -428,26 +428,11 @@ func asExitError(err error, target **exec.ExitError) bool {
 	return false
 }
 
-// desiredRepoSet returns the set of repos that should have a Herald webhook:
-// every repo-sourced stack plus the IaC repo.
-func desiredRepoSet(cfg *config.Config, iacRepo string) map[string]bool {
-	set := map[string]bool{}
-	for _, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			set[stack.Repo] = true
-		}
-	}
-	if iacRepo != "" {
-		set[iacRepo] = true
-	}
-	return set
-}
-
-func sameRepoSet(known map[string]int64, desired map[string]bool) bool {
+func sameRepoSet(known map[string]int64, desired []string) bool {
 	if len(known) != len(desired) {
 		return false
 	}
-	for repo := range desired {
+	for _, repo := range desired {
 		if _, ok := known[repo]; !ok {
 			return false
 		}
