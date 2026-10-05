@@ -305,3 +305,35 @@ func TestRunWarnsMissingDNSToken(t *testing.T) {
 		t.Fatal("missing DNS token blocked deployment")
 	}
 }
+
+func TestEnsureCaddy_ReappliesDNSSetupWhileRunning(t *testing.T) {
+	cases := []struct {
+		name    string
+		tls     *config.TLSConfig
+		want    string
+		applied bool
+	}{
+		{"stock Caddy is left alone", nil, "running", false},
+		{"DNS-01 is re-applied", &config.TLSConfig{DNS: "hetzner"}, "started", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			applied := filepath.Join(dir, "applied")
+			script := "#!/bin/sh\ncase \"$1\" in\n ps) echo abc123 ;;\n compose) touch " + applied + " ;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+			r := &Runner{Logger: discardLogger(t), HeraldPort: 9483, Secrets: secrets.NewStore(dir)}
+			cfg := &config.Config{Server: config.Server{ServicesDir: dir, TLS: tc.tls}}
+			if got := r.ensureCaddy(context.Background(), cfg); got != tc.want {
+				t.Errorf("ensureCaddy = %q, want %q", got, tc.want)
+			}
+			if _, err := os.Stat(applied); (err == nil) != tc.applied {
+				t.Errorf("compose up ran = %v, want %v", err == nil, tc.applied)
+			}
+		})
+	}
+}
