@@ -80,11 +80,12 @@ type Route struct {
 // SelectRoute is the one place that decides where a stack's domain is routed.
 // service and port are the stack's explicit choices and may be empty.
 //
-// Without service, it picks "app", then stackName, then the sole service, and
-// otherwise fails asking for one. Without port, it uses the service's single
+// Without service, it picks the sole service and otherwise fails asking for
+// one: no service name is special, so a stack with several services always
+// says which one serves its domain. Without port, it uses the service's single
 // expose/ports target, defaultPort when it declares none, and fails when it
 // declares several distinct targets. Errors name filePath.
-func SelectRoute(filePath, stackName, service, port, defaultPort string) (Route, error) {
+func SelectRoute(filePath, service, port, defaultPort string) (Route, error) {
 	if port != "" {
 		if err := ValidatePort(port); err != nil {
 			return Route{}, err
@@ -109,14 +110,10 @@ func SelectRoute(filePath, stackName, service, port, defaultPort string) (Route,
 		if _, ok := mc.Services[service]; !ok {
 			return Route{}, fmt.Errorf("compose file %s: service %q not found (services: %s)", filePath, service, strings.Join(names, ", "))
 		}
-	case slices.Contains(names, "app"):
-		service = "app"
-	case slices.Contains(names, stackName):
-		service = stackName
 	case len(names) == 1:
 		service = names[0]
 	default:
-		return Route{}, fmt.Errorf("compose file %s has several services (%s) and none is named \"app\" or %q: set `service:` on the stack to the one to route the domain to", filePath, strings.Join(names, ", "), stackName)
+		return Route{}, fmt.Errorf("compose file %s has several services (%s): set `service:` on the stack to the one to route the domain to", filePath, strings.Join(names, ", "))
 	}
 
 	if port == "" {

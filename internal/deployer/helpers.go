@@ -91,7 +91,7 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 			return nil, fmt.Errorf("stack %q: %w", params.StackName, err)
 		}
 	}
-	route, err := compose.SelectRoute(params.ComposeFile, params.StackName, params.Service, port, params.DefaultPort)
+	route, err := compose.SelectRoute(params.ComposeFile, params.Service, port, params.DefaultPort)
 	if err != nil {
 		return nil, err
 	}

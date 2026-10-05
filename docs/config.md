@@ -157,13 +157,13 @@ stacks:
     port: 8080     # container port (not the published host port)
 ```
 
-Without `service`, herald picks the service named `app`, then the one named after the stack, then the only service. If none applies — say `web` and `db` with a stack called `shop` — the deploy fails and asks for `service`.
+Without `service`, herald routes to the only service. With several — say `web` and `db` — the deploy fails and asks for `service`. No service name is special: a service called `app` or named after the stack still needs `service` when it has company.
 
 Without `port`, herald uses the service's `expose` / `ports` container port. With none declared it falls back to 3000 for `repo` stacks and 80 for `path` stacks. If the service declares several distinct container ports, the deploy fails and asks for `port`. Port entries that are ranges or use `${VAR}` are not read; set `port` for those.
 
 A compose file herald cannot read or parse fails the deploy with the file's name; it is never replaced with a guessed `app` service. Previews use the same `service` and `port` as their stack.
 
-**Migrating:** earlier versions picked the alphabetically first service when nothing matched, and fell back to `app` on a bad compose file. If a deploy now fails with "set `service:`" or "set `port:`", add that field to the stack.
+**Migrating:** earlier versions guessed: they preferred a service named `app` or named after the stack, picked the alphabetically first service when nothing matched, and fell back to `app` on a bad compose file. If a deploy now fails with "set `service:`" or "set `port:`", add that field to the stack.
 
 ### `upstream` — services on the host network
 
