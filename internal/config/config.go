@@ -45,6 +45,16 @@ type Server struct {
 	Bind string `yaml:"bind,omitempty" json:"bind,omitzero"`
 }
 
+// RequireDeployDomain reports a missing deploy_domain when a GitHub token is
+// set: GitHub webhooks need a public Herald site. Call it again after filling
+// the token from somewhere other than the config file.
+func (s Server) RequireDeployDomain() error {
+	if s.DeployDomain == "" && s.GithubToken != "" {
+		return errors.New("server.deploy_domain is required when server.github_token is set")
+	}
+	return nil
+}
+
 type TLSConfig struct {
 	DNS      string `yaml:"dns" json:"dns"`
 	Wildcard string `yaml:"wildcard,omitempty" json:"wildcard,omitzero"`
@@ -226,8 +236,8 @@ func validate(cfg *Config) error {
 	if cfg.Server.Name == "" {
 		return errors.New("server.name is required")
 	}
-	if cfg.Server.DeployDomain == "" && cfg.Server.GithubToken != "" {
-		return errors.New("server.deploy_domain is required when server.github_token is set")
+	if err := cfg.Server.RequireDeployDomain(); err != nil {
+		return err
 	}
 	if cfg.Server.ServicesDir == "" {
 		return errors.New("server.services_dir is required")

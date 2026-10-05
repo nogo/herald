@@ -89,6 +89,9 @@ func LoadConfigWithToken(cfgPath, dDir string) (*config.Config, error) {
 		store := secrets.NewStore(dDir)
 		if token, err := store.Get("herald/github_token"); err == nil && token != "" {
 			cfg.Server.GithubToken = token
+			if err := cfg.Server.RequireDeployDomain(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return cfg, nil
