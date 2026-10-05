@@ -284,7 +284,7 @@ cat <<EOF
     # 1. Bootstrap from your server repo (handles auth, secrets, webhooks):
     sudo -iu $USER herald init <your-org/server-repo>
 
-    # ...or, without GitHub, create a bare server repo to `git push` to:
+    # ...or, without GitHub, create a bare server repo to \`git push\` to:
     sudo -iu $USER herald init
 
     # 2. Start the daemon (wires Caddy + webhooks on first start):
