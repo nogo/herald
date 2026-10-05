@@ -55,10 +55,13 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 		}
 	}
 
-	hook := fmt.Sprintf("#!/bin/sh\nexec %s signal --data-dir %s\n", shellQuote(opts.HeraldBin), shellQuote(opts.DataDir))
-	hookPath := layout.PostReceiveHook()
-	if err := os.WriteFile(hookPath, []byte(hook), 0755); err != nil {
-		return fmt.Errorf("writing post-receive hook: %w", err)
+	// pre-receive rejects a push the daemon would refuse; post-receive tells the
+	// daemon about an accepted one.
+	for path, command := range map[string]string{layout.PreReceiveHook(): "check-push", layout.PostReceiveHook(): "signal"} {
+		hook := fmt.Sprintf("#!/bin/sh\nexec %s %s --data-dir %s\n", shellQuote(opts.HeraldBin), command, shellQuote(opts.DataDir))
+		if err := os.WriteFile(path, []byte(hook), 0755); err != nil {
+			return fmt.Errorf("writing %s hook: %w", filepath.Base(path), err)
+		}
 	}
 
 	printBareCompletion(w, opts, LocalRemoteCommands(opts.DataDir))

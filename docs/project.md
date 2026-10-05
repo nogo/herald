@@ -49,7 +49,7 @@ Herald manages one VPS. Multi-server orchestration is out of scope. If you need 
 Herald runs in one of two modes, chosen by `herald init`:
 
 - **GitHub** (`herald init owner/repo`): GitHub is the event source. Webhook integration is GitHub-specific (HMAC-SHA256 signatures, GitHub event payloads, GitHub OAuth device flow). Requires `server.deploy_domain`.
-- **Bare repo** (`herald init`): the server repo is `<data_dir>/server.git`, cloned to `<data_dir>/repo`. A `post-receive` hook runs `herald signal` to sync the local daemon. Pushing to it is root-equivalent through Docker, so the operator's own SSH key is the only access control; the repo is group-shared (`core.sharedRepository=group`) so the operator pushes and `herald` reads. `repo:` stacks still clone from GitHub.
+- **Bare repo** (`herald init`): the server repo is `<data_dir>/server.git`, cloned to `<data_dir>/repo`. A `pre-receive` hook rejects a push the daemon would refuse — invalid config, or a stack without a route — so the error appears in the pusher's terminal; a `post-receive` hook runs `herald signal` to sync the local daemon. Pushing to it is root-equivalent through Docker, so the operator's own SSH key is the only access control; the repo is group-shared (`core.sharedRepository=group`) so the operator pushes and `herald` reads. `repo:` stacks still clone from GitHub.
 
 Other forges (Gitea, GitLab) are possible later, but not until these two are excellent.
 

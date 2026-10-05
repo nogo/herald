@@ -18,6 +18,12 @@ func (d DataDir) ConfigFile() string { return filepath.Join(d.Repo(), "config.ym
 // on this server instead of GitHub.
 func (d DataDir) BareRepo() string { return filepath.Join(string(d), "server.git") }
 
+// PreReceiveHook is the hook in BareRepo that rejects a push the daemon would
+// refuse.
+func (d DataDir) PreReceiveHook() string {
+	return filepath.Join(d.BareRepo(), "hooks", "pre-receive")
+}
+
 // PostReceiveHook is the hook in BareRepo that signals the daemon on a push.
 func (d DataDir) PostReceiveHook() string {
 	return filepath.Join(d.BareRepo(), "hooks", "post-receive")
