@@ -161,6 +161,10 @@ func (r *Runner) ensureCaddy(ctx context.Context, cfg *config.Config) string {
 	if err != nil {
 		return "error checking: " + err.Error()
 	}
+	// With server.tls, re-apply even while running so a Hetzner token stored or
+	// removed since the last pass switches Caddy between DNS-01 and stock. When
+	// nothing changed, the pinned image build is cached and compose leaves the
+	// container running, so this is cheap.
 	if running && cfg.Server.TLS == nil {
 		return "running"
 	}
