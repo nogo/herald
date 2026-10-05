@@ -82,17 +82,9 @@ type OverrideParams struct {
 // GenerateOverride creates a compose.override.yml for a stack.
 // Returns marshaled YAML bytes; the caller writes them to disk.
 func GenerateOverride(params OverrideParams) ([]byte, error) {
-	port := params.Port
-	var upstreamHost string
-	if params.Upstream != "" {
-		var err error
-		if upstreamHost, port, err = compose.ParseUpstream(params.Upstream); err != nil {
-			return nil, fmt.Errorf("stack %q: %w", params.StackName, err)
-		}
-	}
-	route, err := compose.SelectRoute(params.ComposeFile, params.Service, port)
+	route, upstreamHost, err := selectStackRoute(params.ComposeFile, params.Service, params.Port, params.Upstream)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stack %q: %w", params.StackName, err)
 	}
 	mainName, allNames := route.Service, route.Services
 

@@ -117,6 +117,12 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 			return rep
 		}
 		configOK = false
+	} else if err := deployer.CheckPathRoutes(newCfg, repoDir); err != nil {
+		// A stack that cannot route rejects the whole config, the same way the
+		// bare repo's pre-receive hook rejects the push that carries it.
+		rep.Config.Error = err.Error()
+		r.Logger.Error("configuration leaves a stack without a route; keeping the previous config", "error", err)
+		configOK = false
 	} else {
 		cfg = newCfg
 		r.Config.Store(newCfg)

@@ -31,6 +31,10 @@ func TestLocalSignalPullReloadRedeployChanged(t *testing.T) {
 		}
 	}
 	write(filepath.Join(repo, "head"), "old\n", 0644)
+	if err := os.MkdirAll(filepath.Join(repo, "app"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(repo, "app", "compose.yml"), "services:\n  app:\n    expose: [\"80\"]\n", 0644)
 	write(filepath.Join(cfg.Server.ServicesDir, name, "deployed_ref"), "path@old\n", 0644)
 	write(filepath.Join(dir, "git"), `#!/bin/sh
 shift 4
@@ -122,5 +126,34 @@ func TestMissingConfigBlocksDeploysAndLogsPath(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), path) || !strings.Contains(logs.String(), "deploying nothing") {
 		t.Fatal(logs.String())
+	}
+}
+
+func TestUnroutableStackRejectsConfig(t *testing.T) {
+	dir := t.TempDir()
+	shop := filepath.Join(config.DataDir(dir).Repo(), "shop")
+	if err := os.MkdirAll(shop, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shop, "compose.yml"), []byte("services:\n  web:\n    expose: [\"3000\"]\n  db:\n    image: postgres\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := &config.Config{Server: config.Server{ServicesDir: dir}}
+	pushed := &config.Config{Server: config.Server{ServicesDir: dir}, Stacks: map[string]config.Stack{"shop": {Path: "shop", Domain: "shop.example.com"}}}
+	live := config.NewLive(old)
+	fd := &fakeDeployer{}
+	r := &Runner{DataDir: dir, Logger: discardLogger(t), Secrets: secrets.NewStore(dir), Config: live, Deployer: fd,
+		Reload: func() (*config.Config, error) { return pushed, nil }}
+
+	rep := r.Run(context.Background(), Options{RedeployChanged: true})
+
+	if rep.Config.Loaded || !strings.Contains(rep.Config.Error, `stack "shop"`) || !strings.Contains(rep.Config.Error, "set `service:`") {
+		t.Fatalf("config = %+v, want an error naming stack shop and service:", rep.Config)
+	}
+	if live.Load() != old {
+		t.Fatal("unroutable config replaced the live config")
+	}
+	if len(fd.asyncCalls) != 0 || len(fd.deployCalls) != 0 {
+		t.Fatalf("deploys = %+v", fd)
 	}
 }
