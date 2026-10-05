@@ -44,7 +44,10 @@ else
 fi
 cd ..
 
-# Publish
-gh release create "$TAG" "${DIST}"/*.tar.gz "${DIST}/checksums.txt" \
-	--generate-notes \
-	--verify-tag
+# Publish. An annotated tag's message goes above the generated notes, so an
+# upgrade notice travels with the tag: git tag -a v4.0.0 -F notes.md
+set -- "${DIST}"/*.tar.gz "${DIST}/checksums.txt" --generate-notes --verify-tag
+if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+	set -- "$@" --notes "$(git tag -l --format='%(contents)' "$TAG")"
+fi
+gh release create "$TAG" "$@"
