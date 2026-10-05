@@ -46,8 +46,8 @@ Herald should also not become Dokku, Coolify, or a generic Docker control panel.
 The useful distinction:
 
 ```text
-Terraform/OpenTofu: create the VPS and cloud resources
-Herald: keep the VPS deploying the right stacks
+Terraform/OpenTofu: create the server and cloud resources
+Herald: keep the server deploying the right stacks
 
 Dokku/Coolify: operate an app platform
 Herald: make a server repo and GitHub pushes drive Docker Compose deployments
@@ -55,7 +55,7 @@ Herald: make a server repo and GitHub pushes drive Docker Compose deployments
 
 The strongest USP:
 
-> Herald is a single-binary GitHub-to-Docker-Compose deployment daemon for one VPS. Install it once; after that, git pushes, webhooks, secrets, and TLS wiring are handled on the server.
+> Herald is a single-binary GitHub-to-Docker-Compose deployment daemon for one server. Install it once; after that, git pushes, webhooks, secrets, and TLS wiring are handled on the server.
 
 Shorter:
 

@@ -1,6 +1,6 @@
 # Herald
 
-One VPS. One server repo. GitHub pushes make it live.
+Your repo. Your server. Herald in between.
 
 Herald is a single-binary deployment daemon for one Docker Compose server. It reacts to GitHub webhooks, deploys stacks, wires Caddy TLS, resolves encrypted secrets, and keeps the server reproducible from a git repo.
 
@@ -245,7 +245,7 @@ As of October 2026, ordered from least to most moving parts:
 
 Closest neighbour: doco-cd, also a daemon that applies compose files from git. It leaves routing, certificates and previews to you; Herald wires those from the same config. Of the others, Coolify, Dokploy (apps only, not compose) and Disco also run preview environments.
 
-**Why Herald?** GitHub-native deploy automation for one VPS. One server repo drives wiring. One app repo can deploy N times. No PostgreSQL/Redis tax.
+**Why Herald?** GitHub-native deploy automation for one server. One server repo drives wiring. One app repo can deploy N times. No PostgreSQL/Redis tax.
 
 **Trade-offs:** GitHub or a bare repo on the server, no other forge. One server only. No web UI for config. No app marketplace. New project.
 

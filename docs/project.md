@@ -2,15 +2,15 @@
 
 ## Goal
 
-One VPS. One server repo. GitHub pushes make it live.
+Your repo. Your server. Herald in between.
 
-Herald turns a single VPS into a GitHub-driven Docker Compose deploy target. App repo pushes deploy stacks. Server repo pushes update deployment wiring. Herald handles the glue between GitHub, Docker Compose, Caddy TLS, encrypted secrets, preview environments, and operational status.
+Herald turns a single server into a GitHub-driven Docker Compose deploy target. App repo pushes deploy stacks. Server repo pushes update deployment wiring. Herald handles the glue between GitHub, Docker Compose, Caddy TLS, encrypted secrets, preview environments, and operational status.
 
 Without GitHub, the server repo is a bare repo on the server itself (`herald init` with no argument). The operator's `git push` over SSH is the deploy path; no GitHub token or `deploy_domain` is needed.
 
 ## Outcome
 
-A single-binary daemon that runs on one VPS and reacts to GitHub events. Push app code, and the matching stack deploys. Push server config, and Herald pulls the server repo, reloads config, keeps webhooks and Caddy wiring current, and deploys path-sourced stacks that opted into auto-deploy. Secrets are encrypted. TLS is automatic. The server is reproducible from one repo.
+A single-binary daemon that runs on one server and reacts to GitHub events. Push app code, and the matching stack deploys. Push server config, and Herald pulls the server repo, reloads config, keeps webhooks and Caddy wiring current, and deploys path-sourced stacks that opted into auto-deploy. Secrets are encrypted. TLS is automatic. The server is reproducible from one repo.
 
 Everything herald manages is a **stack** — a compose project with a domain, secrets, and a source. Whether it's your app from GitHub or Nextcloud from your IaC repo, it's the same concept, same config, same deploy command.
 
@@ -22,7 +22,7 @@ Herald's value is the wiring you'd never want to do by hand:
 
 2. **Server repo automation** — The server repo is also webhook-driven. Changing `config.yml` should not require SSHing into the box to refresh deployment wiring.
 
-3. **Config-as-code without Terraform semantics** — One `config.yml` per server, versioned in git. No database, no web UI state, no provider graph, no remote state. The repo describes what should run on this VPS; Herald operates it.
+3. **Config-as-code without Terraform semantics** — One `config.yml` per server, versioned in git. No database, no web UI state, no provider graph, no remote state. The repo describes what should run on this server; Herald operates it.
 
 4. **Secrets management** — Age-encrypted at rest, auto-generated on first deploy, resolved at deploy time into env files and Docker secrets. No external vault needed for single-server setups.
 
@@ -41,8 +41,8 @@ Herald is **not** a Docker Compose wrapper. If the user is running `herald` comm
 ### Single binary, no database
 Herald stores state in files and git repos. No PostgreSQL, no Redis, no SQLite. Config lives in a git repo. Secrets live in an age-encrypted file. Runtime state is the filesystem and Docker itself.
 
-### One VPS
-Herald manages one VPS. Multi-server orchestration is out of scope. If you need that, use Kubernetes or Nomad.
+### One server
+Herald manages one server. Multi-server orchestration is out of scope. If you need that, use Kubernetes or Nomad.
 
 ### GitHub-native
 
