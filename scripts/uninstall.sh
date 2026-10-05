@@ -87,6 +87,10 @@ fi
 if [ "$PURGE" = true ]; then
     rm -rf "$DATA_DIR" "$DEPLOY_DIR"
     ok "Removed $DATA_DIR and $DEPLOY_DIR"
+    # install.sh trusted the bare server repo system-wide; the repo is gone now.
+    if command -v git >/dev/null 2>&1; then
+        git config --system --fixed-value --unset-all safe.directory "$DATA_DIR/server.git" 2>/dev/null || true
+    fi
     if id "$USER" >/dev/null 2>&1; then
         userdel "$USER" 2>/dev/null || true
         ok "Removed user '$USER'"

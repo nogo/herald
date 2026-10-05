@@ -257,6 +257,21 @@ install -d -o "$USER" -g "$GIT_GROUP" -m 2710 "$DATA_DIR"
 install -d -o "$USER" -g "$USER" -m 755 "$DEPLOY_DIR"
 ok "Directories ready"
 
+# The operator's clone and push run git as the operator, but server.git belongs
+# to herald, and git refuses a repo another user owns — group membership does
+# not count. Trust exactly this repo, system-wide. Its hooks then run as the
+# pusher; herald can edit them, but herald is in the docker group and already
+# root-equivalent.
+BARE_REPO="$DATA_DIR/server.git"
+if command -v git >/dev/null 2>&1; then
+    if ! git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$BARE_REPO"; then
+        git config --system --add safe.directory "$BARE_REPO"
+    fi
+    ok "git trusts $BARE_REPO for pushes"
+else
+    warn "git not found — install it, then run: git config --system --add safe.directory $BARE_REPO"
+fi
+
 # Install binary
 install -m 755 "$BINARY" "$INSTALL_DIR/herald"
 ok "Installed to $INSTALL_DIR/herald"
