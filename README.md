@@ -20,6 +20,10 @@ wget -qO- https://raw.githubusercontent.com/nogo/herald/main/scripts/install.sh 
 
 This creates a `herald` user, downloads the latest binary, and sets up directories. Run as root.
 
+### Upgrading
+
+Run the same install command; it replaces the binary and restarts a running daemon. Coming from 3.x, read [docs/migration.md](docs/migration.md) first: 4.0 needs `service:` or `port:` on some stacks.
+
 ### From source
 
 ```sh
