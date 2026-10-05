@@ -28,7 +28,7 @@ type Options struct {
 	GitHubToken string
 	DataDir     string
 	ServicesDir string // Override services dir from config
-	HeraldPort  int    // Port herald listens on (default 9483)
+	HeraldPort  int    // Port herald listens on (default config.DefaultPort)
 }
 
 // CheckPrerequisites verifies all system prerequisites are met.
@@ -160,7 +160,7 @@ func CheckDataDir(dataDir string) error {
 // Bootstrap runs the full server initialisation sequence.
 func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	if opts.HeraldPort == 0 {
-		opts.HeraldPort = 9483
+		opts.HeraldPort = config.DefaultPort
 	}
 
 	// Step 1: Clone server IaC repo

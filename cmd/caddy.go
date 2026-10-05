@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nogo/herald/internal/caddy"
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/secrets"
 	"github.com/spf13/cobra"
 )
@@ -82,7 +83,7 @@ var caddyStatusCmd = &cobra.Command{
 }
 
 func init() {
-	caddyStartCmd.Flags().Int("herald-port", 9483, "Port where herald's webhook server is running")
+	caddyStartCmd.Flags().Int("herald-port", config.DefaultPort, "Port where herald's webhook server is running")
 	caddyCmd.AddCommand(caddyStartCmd, caddyStopCmd, caddyStatusCmd)
 	caddyCmd.GroupID = "infra"
 	rootCmd.AddCommand(caddyCmd)

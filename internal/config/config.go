@@ -151,6 +151,10 @@ type PreviewConfig struct {
 	Domain  string `yaml:"domain,omitempty" json:"domain,omitzero"`
 }
 
+// DefaultPort is where herald serve listens when server.port is unset, and
+// where the CLI commands that talk to the daemon look for it.
+const DefaultPort = 9483
+
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // Load reads the YAML config file at path, applies defaults, expands env vars,
@@ -182,7 +186,7 @@ func Load(path string) (*Config, error) {
 
 	// Default port.
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 9483
+		cfg.Server.Port = DefaultPort
 	}
 
 	// Apply defaults for repo stacks.

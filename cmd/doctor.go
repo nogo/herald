@@ -27,7 +27,7 @@ var doctorCmd = &cobra.Command{
 
 		store := secrets.NewStore(dataDir)
 
-		heraldPort := 9483
+		heraldPort := config.DefaultPort
 		token := ""
 		if cfg != nil {
 			if cfg.Server.Port > 0 {

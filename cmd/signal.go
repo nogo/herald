@@ -39,7 +39,7 @@ var signalCmd = &cobra.Command{
 func daemonPort(dataDir string) int {
 	cfg, err := config.Load(filepath.Join(dataDir, "repo", "config.yml"))
 	if err != nil {
-		return 9483
+		return config.DefaultPort
 	}
 	return cfg.Server.Port
 }
@@ -76,5 +76,5 @@ func signalSync(ctx context.Context, port int) error {
 func init() {
 	signalCmd.GroupID = "daemon"
 	rootCmd.AddCommand(signalCmd)
-	signalCmd.Flags().IntVar(&signalPort, "port", 0, "Local daemon port (default: server.port from the server repo's config.yml, else 9483)")
+	signalCmd.Flags().IntVar(&signalPort, "port", 0, fmt.Sprintf("Local daemon port (default: server.port from the server repo's config.yml, else %d)", config.DefaultPort))
 }

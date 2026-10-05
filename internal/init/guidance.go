@@ -92,7 +92,7 @@ func PendingConfig(ctx context.Context, dataDir string) (cfg *config.Config, ok 
 		return nil, false
 	}
 	name, _ := os.Hostname()
-	return &config.Config{Server: config.Server{Name: name, ServicesDir: defaultServicesDir, Port: 9483}}, true
+	return &config.Config{Server: config.Server{Name: name, ServicesDir: defaultServicesDir, Port: config.DefaultPort}}, true
 }
 
 func printBareCompletion(w io.Writer, opts BareOptions, remotes []string) {

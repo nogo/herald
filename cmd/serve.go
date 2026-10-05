@@ -243,11 +243,11 @@ func effectivePort() int {
 	if Cfg != nil && Cfg.Server.Port != 0 {
 		return Cfg.Server.Port
 	}
-	return 9483
+	return config.DefaultPort
 }
 
 func init() {
 	serveCmd.GroupID = "daemon"
 	rootCmd.AddCommand(serveCmd)
-	serveCmd.Flags().IntVar(&port, "port", 9483, "Port to listen on")
+	serveCmd.Flags().IntVar(&port, "port", config.DefaultPort, "Port to listen on")
 }
