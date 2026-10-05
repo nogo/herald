@@ -106,3 +106,27 @@ func TestRemoteCommandsUseCurrentUserWithoutSudo(t *testing.T) {
 		t.Fatalf("commands = %v", commands)
 	}
 }
+
+func TestPendingConfig(t *testing.T) {
+	ctx := context.Background()
+	if _, ok := PendingConfig(ctx, t.TempDir()); ok {
+		t.Error("no bare repo: PendingConfig ok = true, want false")
+	}
+
+	dataDir := t.TempDir()
+	if err := InitBare(ctx, &bytes.Buffer{}, BareOptions{DataDir: dataDir, HeraldBin: "/bin/true"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := PendingConfig(ctx, dataDir)
+	if !ok || cfg.Server.ServicesDir != "/srv" || cfg.Server.Port != 9483 {
+		t.Fatalf("empty bare repo: PendingConfig = %+v, %v; want /srv on 9483", cfg, ok)
+	}
+
+	work := t.TempDir()
+	gitRun(t, work, "init", "-b", "main")
+	gitRun(t, work, "-c", "user.email=op@example.com", "-c", "user.name=op", "commit", "--allow-empty", "-m", "first")
+	gitRun(t, work, "push", filepath.Join(dataDir, "server.git"), "main")
+	if _, ok := PendingConfig(ctx, dataDir); ok {
+		t.Error("after a push: PendingConfig ok = true, want false")
+	}
+}
