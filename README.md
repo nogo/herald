@@ -34,7 +34,7 @@ git clone https://github.com/nogo/herald.git && cd herald && make
 
 ```sh
 # 1. Install the binary, create the herald user, and install the systemd unit (root)
-curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/install.sh | sudo sh
 
 # 2. Bootstrap from your server's IaC repo (handles auth, secrets, webhooks)
 sudo -iu herald herald init myorg/my-server
@@ -51,11 +51,11 @@ sudo -iu herald herald deploy myapp
 
 ```sh
 # Remove the service and binary. Data, secrets, and deployed stacks are KEPT.
-curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/uninstall.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/uninstall.sh | sudo sh
 
 # Full cleanup: also delete the herald user, /etc/herald (age key + secrets),
 # and /opt/deploy. Prompts you with exactly what will be deleted before doing it.
-curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/uninstall.sh | sudo sh -s -- --purge
+curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/uninstall.sh | sudo sh -s -- --purge
 ```
 
 | Removed | default | `--purge` |

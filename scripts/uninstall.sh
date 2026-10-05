@@ -3,7 +3,7 @@ set -eu
 
 # Herald uninstall script
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/uninstall.sh | sudo sh
+#   curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/uninstall.sh | sudo sh
 #   curl -fsSL .../uninstall.sh | sudo sh -s -- --purge        # also delete data + user
 #   curl -fsSL .../uninstall.sh | sudo sh -s -- --purge --yes  # skip confirmation
 #
@@ -35,7 +35,7 @@ for arg in "$@"; do
 done
 
 if [ "$(id -u)" -ne 0 ]; then
-    die "This script must be run as root. Try: sudo sh uninstall.sh"
+    die "This script must be run as root. Try: curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/uninstall.sh | sudo sh"
 fi
 
 # --- confirm purge up front, before removing anything ---
@@ -97,7 +97,7 @@ if [ "$PURGE" = true ]; then
     fi
 else
     info "Preserved: $DATA_DIR (age key, secrets, config) and $DEPLOY_DIR (stacks)"
-    info "To remove everything: sudo sh uninstall.sh --purge"
+    info "To remove everything: curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/uninstall.sh | sudo sh -s -- --purge"
 fi
 
 # --- Docker leftovers (this script never touches Docker) ---

@@ -2,7 +2,7 @@
 set -eu
 
 # Herald install/update script
-# Usage: curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/nogo/herald/main/scripts/install.sh | sh
 #
 # Fresh install: creates user, directories, downloads binary
 # Update:        downloads new binary, restarts service if running
@@ -246,7 +246,7 @@ getent group "$GIT_GROUP" >/dev/null 2>&1 || groupadd "$GIT_GROUP"
 usermod -aG "$GIT_GROUP" "$USER"
 OPERATOR="${SUDO_USER:-}"
 if [ -z "$OPERATOR" ] || [ "$OPERATOR" = "root" ]; then
-    warn "No sudo user detected — add the operator to group '$GIT_GROUP' by hand to push to the server repo"
+    warn "No sudo user detected — to push to the server repo, add your user: usermod -aG $GIT_GROUP <user>"
 else
     usermod -aG "$GIT_GROUP" "$OPERATOR"
     ok "User '$OPERATOR' added to group '$GIT_GROUP' (log in again to pick it up)"
@@ -308,7 +308,8 @@ cat <<EOF
   Set any required app secrets with:
     sudo -iu $USER herald secret set <stack>/<key>
 
-  Uninstall later with: sudo sh uninstall.sh
+  Uninstall later with:
+    curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/uninstall.sh | sudo sh
 
   ──────────────────────────────────────
 EOF
