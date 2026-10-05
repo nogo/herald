@@ -34,7 +34,8 @@ services:
 {{- if .DNS}}
       caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"
 {{- if .Wildcard}}
-      caddy.auto_https: "prefer_wildcard"
+      # Caddy 2.11 serves a name an automated wildcard covers from that
+      # wildcard; it removed auto_https prefer_wildcard, which now fails to parse.
       caddy_1: "{{.Wildcard}}"
       caddy_1.respond: "404"
 {{- end}}

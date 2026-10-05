@@ -66,7 +66,7 @@ project with no servers and grant the token write access for DNS challenges.
 Herald does not create application DNS records.
 
 With the token available, Herald builds a local Caddy image using the embedded
-Dockerfile, pinned to Caddy 2.10.2, caddy-docker-proxy v2.10.0, and Hetzner v2.0.0-preview-3.
+Dockerfile, pinned to Caddy 2.11.4, caddy-docker-proxy v2.13.1, and Hetzner v2.0.0.
 The first start needs network access to build it. Run `herald sync` or
 `herald caddy start` after configuring TLS or changing the token.
 

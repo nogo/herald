@@ -65,7 +65,7 @@ esac
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(string(built), "github.com/caddy-dns/hetzner/v2@v2.0.0-preview-3") || strings.Contains(string(built), token) {
+				if !strings.Contains(string(built), "github.com/caddy-dns/hetzner/v2@v2.0.0\n") || strings.Contains(string(built), token) {
 					t.Fatal("wrong Dockerfile")
 				}
 				if m.DNSWarning() != "" {

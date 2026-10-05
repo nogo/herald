@@ -148,10 +148,14 @@ func TestGenerateDNSCompose(t *testing.T) {
 				t.Fatal("DNS compose uses stock image")
 			}
 			if wildcard != "" {
-				if !strings.Contains(content, `caddy_1: "*.example.com"`) || !strings.Contains(content, `caddy.auto_https: "prefer_wildcard"`) {
+				if !strings.Contains(content, `caddy_1: "*.example.com"`) {
 					t.Fatal("wildcard configuration missing")
 				}
-			} else if strings.Contains(content, "prefer_wildcard") || strings.Contains(content, "caddy_1:") {
+				// Caddy 2.11 rejects auto_https prefer_wildcard and drops every global option with it.
+				if strings.Contains(content, "caddy.auto_https") {
+					t.Fatal("compose sets auto_https, which Caddy 2.11 rejects")
+				}
+			} else if strings.Contains(content, "caddy_1:") {
 				t.Fatal("unexpected wildcard")
 			}
 		})
