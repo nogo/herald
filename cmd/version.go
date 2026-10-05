@@ -29,7 +29,14 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// shortVersion is the version a bare `herald` shows next to the banner.
+func shortVersion() string {
+	if tag != "" {
+		return tag
+	}
+	return "dev"
+}
+
 func init() {
-	versionCmd.GroupID = "auth"
 	rootCmd.AddCommand(versionCmd)
 }

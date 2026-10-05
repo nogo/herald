@@ -143,6 +143,10 @@ var secretListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if len(keys) == 0 {
+			// stderr: scripts read the key list from stdout.
+			fmt.Fprintln(cmd.ErrOrStderr(), "no secrets yet: set one with herald secret set <key>, or add generate: to a secret in config.yml")
+		}
 		for _, k := range keys {
 			fmt.Fprintln(cmd.OutOrStdout(), k)
 		}

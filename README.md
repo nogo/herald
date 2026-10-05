@@ -151,6 +151,8 @@ and remote hosts are rejected regardless of forwarding headers.
 
 ## Commands
 
+Run `herald` on its own to see where setup stands and the command to run next.
+
 **Daemon**
 ```
 herald serve                Start webhook listener (runs as the systemd service)
