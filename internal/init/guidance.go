@@ -80,8 +80,10 @@ func NothingPushed(ctx context.Context, dataDir string) bool {
 }
 
 // defaultServicesDir is where stacks live on a bare-initialised server until
-// the first pushed config.yml says otherwise.
-const defaultServicesDir = "/srv"
+// the first pushed config.yml says otherwise. It is DEPLOY_DIR in
+// scripts/install.sh: the systemd unit lets Herald write only there and in the
+// data dir, so any other default fails the first deploy.
+const defaultServicesDir = "/opt/deploy"
 
 // PendingConfig stands in for config.yml on a bare-initialised server that has
 // received no push yet, so herald serve can run and wait for the first one. It

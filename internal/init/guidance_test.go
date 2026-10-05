@@ -118,8 +118,10 @@ func TestPendingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, ok := PendingConfig(ctx, dataDir)
-	if !ok || cfg.Server.ServicesDir != "/srv" || cfg.Server.Port != 9483 {
-		t.Fatalf("empty bare repo: PendingConfig = %+v, %v; want /srv on 9483", cfg, ok)
+	// /opt/deploy is the only stack directory the installed systemd unit lets
+	// Herald write; /srv fails the first deploy on a read-only filesystem.
+	if !ok || cfg.Server.ServicesDir != "/opt/deploy" || cfg.Server.Port != 9483 {
+		t.Fatalf("empty bare repo: PendingConfig = %+v, %v; want /opt/deploy on 9483", cfg, ok)
 	}
 
 	work := t.TempDir()
