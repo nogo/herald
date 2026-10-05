@@ -32,7 +32,14 @@ services:
       caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
 {{- end}}
 {{- if .DNS}}
-      caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"
+      # One explicit issuer instead of acme_dns: Caddy fills acme_dns into an
+      # issuer by replacing its DNS challenge config, which drops resolvers.
+      # email and acme_ca still fill in from the globals above.
+      caddy.cert_issuer: "acme"
+      caddy.cert_issuer.dns: "hetzner {env.HETZNER_API_TOKEN}"
+{{- if .Resolvers}}
+      caddy.cert_issuer.resolvers: "{{.Resolvers}}"
+{{- end}}
 {{- if .Wildcard}}
       # Caddy 2.11 serves a name an automated wildcard covers from that
       # wildcard; it removed auto_https prefer_wildcard, which now fails to parse.

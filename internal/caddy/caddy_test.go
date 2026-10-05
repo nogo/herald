@@ -139,7 +139,9 @@ func TestGenerateDNSCompose(t *testing.T) {
 	for _, wildcard := range []string{"", "*.example.com"} {
 		t.Run(wildcard, func(t *testing.T) {
 			content := generateComposeContent("ops@example.com", "", "deploy.example.com", 9483, &config.TLSConfig{DNS: "hetzner", Wildcard: wildcard})
-			for _, want := range []string{"build: .", "HETZNER_API_TOKEN=${HERALD_HETZNER_TOKEN:?}", `caddy.acme_dns: "hetzner {env.HETZNER_API_TOKEN}"`} {
+			// The provider sits in cert_issuer, not acme_dns: Caddy replaces an
+			// issuer's whole DNS challenge config with acme_dns, dropping resolvers.
+			for _, want := range []string{"build: .", "HETZNER_API_TOKEN=${HERALD_HETZNER_TOKEN:?}", `caddy.cert_issuer: "acme"`, `caddy.cert_issuer.dns: "hetzner {env.HETZNER_API_TOKEN}"`} {
 				if !strings.Contains(content, want) {
 					t.Errorf("missing %q", want)
 				}
@@ -159,6 +161,17 @@ func TestGenerateDNSCompose(t *testing.T) {
 				t.Fatal("unexpected wildcard")
 			}
 		})
+	}
+}
+
+func TestGenerateDNSComposeResolvers(t *testing.T) {
+	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"})
+	if strings.Contains(without, "caddy.cert_issuer.resolvers") || strings.Contains(without, "caddy.acme_dns") {
+		t.Fatalf("compose without resolvers:\n%s", without)
+	}
+	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", Resolvers: []string{"1.1.1.1", "9.9.9.9"}})
+	if !strings.Contains(with, `caddy.cert_issuer.resolvers: "1.1.1.1 9.9.9.9"`) {
+		t.Fatalf("resolvers missing:\n%s", with)
 	}
 }
 

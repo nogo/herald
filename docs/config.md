@@ -50,6 +50,7 @@ server:
   tls:
     dns: hetzner
     wildcard: "*.home.example.com"
+    resolvers: [1.1.1.1, 9.9.9.9]
 ```
 
 `dns` must be `hetzner`. `wildcard` is optional and must be a wildcard domain.
@@ -57,6 +58,10 @@ With a wildcard, Caddy prefers its certificate for matching stack domains;
 stack routing labels remain unchanged. A wildcard covers one subdomain level,
 not the parent domain or deeper names. Covered stack names need no individual
 certificate and therefore do not appear individually in Certificate Transparency.
+
+`resolvers` is optional: IP addresses, or `IP:port`, that Caddy asks while it waits for the challenge record to appear. Set it when the server's own resolver answers the zone locally — split-horizon DNS, such as Unbound serving `home.example.com` — because that resolver never shows the record Hetzner published, and the certificate is never issued. Public resolvers like `1.1.1.1` and `9.9.9.9` see the real zone.
+
+With DNS-01, Caddy uses one ACME issuer: `acme_ca`, or Let's Encrypt when it is empty. There is no ZeroSSL fallback.
 
 Store a Hetzner Cloud API token with `herald secret set herald/hetzner_token`.
 Herald passes it only to the Caddy container through an environment variable,

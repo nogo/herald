@@ -277,6 +277,7 @@ func formatUptime(startedAt string) string {
 type composeData struct {
 	DNS          bool
 	Wildcard     string
+	Resolvers    string // space-separated, as Caddy's resolvers directive takes them
 	AcmeEmail    string
 	AcmeCA       string
 	DeployDomain string
@@ -296,6 +297,7 @@ func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort i
 	if tls != nil {
 		data.DNS = true
 		data.Wildcard = tls.Wildcard
+		data.Resolvers = strings.Join(tls.Resolvers, " ")
 	}
 	if err := composeTmpl.Execute(&buf, data); err != nil {
 		// Template is embedded and tested — this should never fail.

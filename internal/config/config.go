@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -74,6 +75,10 @@ func (c *Config) GitHubRepos(iacRepo string) []string {
 type TLSConfig struct {
 	DNS      string `yaml:"dns" json:"dns"`
 	Wildcard string `yaml:"wildcard,omitempty" json:"wildcard,omitzero"`
+	// Resolvers are the DNS servers Caddy asks while it waits for the challenge
+	// record. Set them when the server's own resolver answers the zone locally
+	// (split-horizon DNS): it would never show the record Hetzner published.
+	Resolvers []string `yaml:"resolvers,omitempty" json:"resolvers,omitempty"`
 }
 
 type Stack struct {
@@ -251,6 +256,14 @@ func validate(cfg *Config) error {
 		}
 		if tls.Wildcard != "" && !regexp.MustCompile(`^\*\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`).MatchString(tls.Wildcard) {
 			return errors.New("server.tls.wildcard must be a wildcard domain such as *.example.com")
+		}
+		for _, r := range tls.Resolvers {
+			if _, err := netip.ParseAddr(r); err == nil {
+				continue
+			}
+			if _, err := netip.ParseAddrPort(r); err != nil {
+				return fmt.Errorf("server.tls.resolvers: %q is not an IP address or IP:port", r)
+			}
 		}
 	}
 	if cfg.Server.Name == "" {

@@ -906,6 +906,9 @@ func TestLoadTLS(t *testing.T) {
 		{"  tls:\n    dns: other\n", "server.tls.dns"},
 		{"  tls:\n    wildcard: '*.example.com'\n", "server.tls.dns"},
 		{"  tls:\n    dns: hetzner\n    wildcard: example.com\n", "server.tls.wildcard"},
+		{"  tls:\n    dns: hetzner\n    resolvers: [1.1.1.1, '9.9.9.9:53', '2606:4700:4700::1111']\n", ""},
+		{"  tls:\n    dns: hetzner\n    resolvers: [dns.example.com]\n", "server.tls.resolvers"},
+		{"  tls:\n    dns: hetzner\n    resolvers: ['']\n", "server.tls.resolvers"},
 	} {
 		t.Run(tc.tls, func(t *testing.T) {
 			_, err := config.Load(writeTempConfig(t, "server:\n  name: test\n  deploy_domain: deploy.example.com\n  services_dir: /srv\n  acme_email: ops@example.com\n"+tc.tls))
