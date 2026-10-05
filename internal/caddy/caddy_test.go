@@ -62,9 +62,9 @@ func TestGenerateComposeContentPort(t *testing.T) {
 
 func TestGetDockerGatewayIPFallback(t *testing.T) {
 	// On CI/test environments without Docker, should return the fallback
-	ip := getDockerGatewayIP()
+	ip := DockerGatewayIP()
 	if ip == "" {
-		t.Error("getDockerGatewayIP returned empty string")
+		t.Error("DockerGatewayIP returned empty string")
 	}
 }
 
@@ -125,7 +125,7 @@ func TestStockComposeUnchanged(t *testing.T) {
 	}
 	tmpl := template.Must(template.New("stock").Parse(string(original)))
 	var want bytes.Buffer
-	err = tmpl.Execute(&want, composeData{AcmeEmail: "ops@example.com", AcmeCA: "https://ca.example.com", DeployDomain: "deploy.example.com", GatewayIP: getDockerGatewayIP(), HeraldPort: 9483})
+	err = tmpl.Execute(&want, composeData{AcmeEmail: "ops@example.com", AcmeCA: "https://ca.example.com", DeployDomain: "deploy.example.com", GatewayIP: DockerGatewayIP(), HeraldPort: 9483})
 	if err != nil {
 		t.Fatal(err)
 	}

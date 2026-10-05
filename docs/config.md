@@ -165,6 +165,37 @@ A compose file herald cannot read or parse fails the deploy with the file's name
 
 **Migrating:** earlier versions picked the alphabetically first service when nothing matched, and fell back to `app` on a bad compose file. If a deploy now fails with "set `service:`" or "set `port:`", add that field to the stack.
 
+### `upstream` — services on the host network
+
+A service with `network_mode: host` cannot join the `caddy` network, so herald cannot reach it by container. Name a fixed upstream instead and herald adds no networks to the service:
+
+```yaml
+stacks:
+  homeassistant:
+    path: stacks/homeassistant
+    domain: ha.example.com
+    upstream: host:8123
+```
+
+`host:<port>` routes to the Docker gateway IP (the address containers use to reach the host); `<ip>:<port>` routes to that address. Anything else fails config validation, naming the stack. `service` still picks the compose service that carries the labels. A host firewall that blocks container-to-host traffic also blocks Caddy, so allow the Docker bridge to reach the port.
+
+Labels from `override:` are merged on top. For a backend that serves HTTPS with a self-signed certificate, such as Omada, switch the transport and skip verification:
+
+```yaml
+stacks:
+  omada:
+    path: stacks/omada
+    domain: omada.example.com
+    upstream: host:8043
+    override: |
+      services:
+        omada:
+          labels:
+            caddy.reverse_proxy.transport: http
+            caddy.reverse_proxy.transport.tls: ""
+            caddy.reverse_proxy.transport.tls_insecure_skip_verify: ""
+```
+
 ### `config` — non-secret base layer
 
 Points to a committed env file in your IaC repo containing non-secret configuration: hostnames, feature flags, log levels, etc.

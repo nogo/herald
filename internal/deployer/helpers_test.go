@@ -411,3 +411,118 @@ func TestGenerateOverrideRouting(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerateOverrideUpstream(t *testing.T) {
+	const hostNet = "services:\n  homeassistant:\n    image: ha\n    network_mode: host\n"
+	gen := func(t *testing.T, upstream, inline string) ([]byte, error) {
+		dir := t.TempDir()
+		return GenerateOverride(OverrideParams{
+			DeployDir:      dir,
+			StackName:      "homeassistant",
+			Domain:         "ha.example.com",
+			ComposeFile:    writeTestCompose(t, dir, hostNet),
+			DefaultPort:    "80",
+			InternalNet:    "herald-homeassistant-internal",
+			Upstream:       upstream,
+			GatewayIP:      "172.17.0.1",
+			InlineOverride: inline,
+		})
+	}
+	parse := func(t *testing.T, data []byte) (map[string]string, []string) {
+		t.Helper()
+		var got struct {
+			Services map[string]struct {
+				Labels   map[string]string `yaml:"labels"`
+				Networks []string          `yaml:"networks"`
+			} `yaml:"services"`
+			Networks map[string]any `yaml:"networks"`
+		}
+		if err := yaml.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got.Networks["caddy"]; ok {
+			t.Errorf("caddy network must not be declared:\n%s", data)
+		}
+		return got.Services["homeassistant"].Labels, got.Services["homeassistant"].Networks
+	}
+
+	t.Run("host upstream resolves to the gateway", func(t *testing.T) {
+		data, err := gen(t, "host:8123", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		labels, networks := parse(t, data)
+		if labels["caddy"] != "ha.example.com" || labels["caddy.reverse_proxy"] != "172.17.0.1:8123" {
+			t.Errorf("labels = %v", labels)
+		}
+		if len(networks) != 0 {
+			t.Errorf("networks = %v, want none", networks)
+		}
+	})
+
+	t.Run("ip upstream is used as given", func(t *testing.T) {
+		data, err := gen(t, "192.168.42.10:8043", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		labels, _ := parse(t, data)
+		if labels["caddy.reverse_proxy"] != "192.168.42.10:8043" {
+			t.Errorf("labels = %v", labels)
+		}
+	})
+
+	t.Run("override labels merge on top", func(t *testing.T) {
+		inline := "services:\n  homeassistant:\n    labels:\n      caddy.reverse_proxy.transport: http\n      caddy.reverse_proxy.transport.tls_insecure_skip_verify: \"\"\n"
+		data, err := gen(t, "host:8043", inline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		labels, _ := parse(t, data)
+		if labels["caddy.reverse_proxy"] != "172.17.0.1:8043" || labels["caddy.reverse_proxy.transport"] != "http" {
+			t.Errorf("labels = %v", labels)
+		}
+		if _, ok := labels["caddy.reverse_proxy.transport.tls_insecure_skip_verify"]; !ok {
+			t.Errorf("merged label missing: %v", labels)
+		}
+	})
+
+	t.Run("invalid upstream names the stack", func(t *testing.T) {
+		for _, bad := range []string{"8123", "host", "host:0", "host:http", "example.com:80", "localhost:80"} {
+			_, err := gen(t, bad, "")
+			if err == nil || !strings.Contains(err.Error(), `stack "homeassistant"`) {
+				t.Errorf("upstream %q: want error naming the stack, got %v", bad, err)
+			}
+		}
+	})
+
+	t.Run("without upstream the override is unchanged", func(t *testing.T) {
+		dir := t.TempDir()
+		data, err := GenerateOverride(OverrideParams{
+			DeployDir:   dir,
+			StackName:   "myapp",
+			Domain:      "myapp.example.com",
+			ComposeFile: writeTestCompose(t, dir, "services:\n  app:\n    expose:\n      - \"3000\"\n"),
+			DefaultPort: "3000",
+			InternalNet: "herald-myapp-internal",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `services:
+    app:
+        labels:
+            caddy: myapp.example.com
+            caddy.reverse_proxy: '{{upstreams 3000}}'
+        networks: !override
+            - caddy
+            - herald-myapp-internal
+networks:
+    caddy:
+        external: true
+    herald-myapp-internal: {}
+`
+		if string(data) != want {
+			t.Errorf("override changed:\n%s", data)
+		}
+	})
+}

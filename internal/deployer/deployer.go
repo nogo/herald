@@ -249,6 +249,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		DockerSecrets:  dockerSecrets,
 		Service:        stack.Service,
 		Port:           stack.Port,
+		Upstream:       stack.Upstream,
 		DefaultPort:    defaultPort,
 		InlineOverride: stack.Override,
 	}, d.Logger, u)

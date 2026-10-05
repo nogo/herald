@@ -4,6 +4,7 @@ package compose
 import (
 	"fmt"
 	"maps"
+	"net"
 	"os"
 	"slices"
 	"strconv"
@@ -130,6 +131,25 @@ func SelectRoute(filePath, stackName, service, port, defaultPort string) (Route,
 		}
 	}
 	return Route{Service: service, Port: port, Services: names}, nil
+}
+
+// HostUpstream is the upstream host that means "the Docker host", as in `host:8123`.
+const HostUpstream = "host"
+
+// ParseUpstream splits a stack's `upstream:` into its host and port. The host is
+// HostUpstream or an IP address; the port is numeric, 1-65535.
+func ParseUpstream(upstream string) (host, port string, err error) {
+	host, port, err = net.SplitHostPort(upstream)
+	if err != nil {
+		return "", "", fmt.Errorf("upstream %q must be host:<port> or <ip>:<port>", upstream)
+	}
+	if host != HostUpstream && net.ParseIP(host) == nil {
+		return "", "", fmt.Errorf("upstream %q: host must be %q or an IP address", upstream, HostUpstream)
+	}
+	if err := ValidatePort(port); err != nil {
+		return "", "", fmt.Errorf("upstream %q: %w", upstream, err)
+	}
+	return host, port, nil
 }
 
 // ValidatePort reports whether p is a numeric container port, 1-65535.

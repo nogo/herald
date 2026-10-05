@@ -65,6 +65,10 @@ type Stack struct {
 	Service string `yaml:"service,omitempty" json:"service,omitzero"`
 	Port    string `yaml:"port,omitempty"    json:"port,omitzero"`
 
+	// Upstream routes the domain to a fixed host:port instead of a container
+	// on the caddy network, for services with network_mode: host.
+	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitzero"`
+
 	// Compose
 	Compose  string `yaml:"compose,omitempty"  json:"compose,omitzero"`
 	Override string `yaml:"override,omitempty" json:"override,omitzero"`
@@ -265,6 +269,12 @@ func validate(cfg *Config) error {
 
 		if stack.Port != "" {
 			if err := compose.ValidatePort(stack.Port); err != nil {
+				return fmt.Errorf("stack %q: %w", name, err)
+			}
+		}
+
+		if stack.Upstream != "" {
+			if _, _, err := compose.ParseUpstream(stack.Upstream); err != nil {
 				return fmt.Errorf("stack %q: %w", name, err)
 			}
 		}
