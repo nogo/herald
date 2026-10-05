@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,5 +47,33 @@ func TestSignalSyncDaemonNotRunning(t *testing.T) {
 	err = signalSync(context.Background(), p)
 	if err == nil || !strings.Contains(err.Error(), "connection refused") || !strings.Contains(err.Error(), "herald serve") {
 		t.Fatalf("error = %v, want actionable connection failure", err)
+	}
+}
+
+func TestSignal_UsesServerPortFromConfig(t *testing.T) {
+	signalled := make(chan struct{}, 1)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		signalled <- struct{}{}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer s.Close()
+	p := s.Listener.Addr().(*net.TCPAddr).Port
+
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dataDir, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("server:\n  name: pi\n  services_dir: /srv\n  acme_email: ops@example.com\n  port: %d\n", p)
+	if err := os.WriteFile(filepath.Join(dataDir, "repo", "config.yml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := heraldProcess(t, "signal", "--data-dir", dataDir).CombinedOutput(); err != nil {
+		t.Fatalf("herald signal: %v: %s", err, out)
+	}
+	select {
+	case <-signalled:
+	default:
+		t.Fatalf("daemon on server.port %d was not signalled", p)
 	}
 }

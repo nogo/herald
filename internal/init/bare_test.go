@@ -53,7 +53,7 @@ func TestInitBareHookFiresOnPush(t *testing.T) {
 	gitRun(t, work, "commit", "-m", "config")
 	gitRun(t, work, "push", bare, "main")
 
-	if got, err := os.ReadFile(marker); err != nil || strings.TrimSpace(string(got)) != "signal" {
+	if got, err := os.ReadFile(marker); err != nil || strings.TrimSpace(string(got)) != "signal --data-dir "+dataDir {
 		t.Fatalf("hook did not run herald signal: %q, %v", got, err)
 	}
 

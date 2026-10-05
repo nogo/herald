@@ -54,7 +54,7 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 		}
 	}
 
-	hook := fmt.Sprintf("#!/bin/sh\nexec %s signal\n", shellQuote(opts.HeraldBin))
+	hook := fmt.Sprintf("#!/bin/sh\nexec %s signal --data-dir %s\n", shellQuote(opts.HeraldBin), shellQuote(opts.DataDir))
 	hookPath := filepath.Join(bareDir, "hooks", "post-receive")
 	if err := os.WriteFile(hookPath, []byte(hook), 0755); err != nil {
 		return fmt.Errorf("writing post-receive hook: %w", err)
