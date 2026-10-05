@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,24 +75,46 @@ type OverrideParams struct {
 	Port           string // explicit container port from the stack; empty to detect
 	DefaultPort    string // "3000" for repo stacks, "80" for path stacks
 	InternalNet    string // e.g. "herald-myapp-internal"
+	Upstream       string // fixed host:port or ip:port instead of the caddy network; empty to route to the container
+	GatewayIP      string // Docker host address that "host" in Upstream resolves to
 	InlineOverride string // raw YAML to deep-merge (from stack.Override)
 }
 
 // GenerateOverride creates a compose.override.yml for a stack.
 // Returns marshaled YAML bytes; the caller writes them to disk.
 func GenerateOverride(params OverrideParams) ([]byte, error) {
-	route, err := compose.SelectRoute(params.ComposeFile, params.StackName, params.Service, params.Port, params.DefaultPort)
+	port := params.Port
+	var upstreamHost string
+	if params.Upstream != "" {
+		var err error
+		if upstreamHost, port, err = compose.ParseUpstream(params.Upstream); err != nil {
+			return nil, fmt.Errorf("stack %q: %w", params.StackName, err)
+		}
+	}
+	route, err := compose.SelectRoute(params.ComposeFile, params.StackName, params.Service, port, params.DefaultPort)
 	if err != nil {
 		return nil, err
 	}
-	mainName, port, allNames := route.Service, route.Port, route.Services
+	mainName, allNames := route.Service, route.Services
 
 	svc := compose.ServiceOverride{
 		Labels: map[string]string{
 			"caddy":               params.Domain,
-			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", port),
+			"caddy.reverse_proxy": fmt.Sprintf("{{upstreams %s}}", route.Port),
 		},
 		Networks: compose.OverrideList{"caddy", params.InternalNet},
+	}
+	networks := map[string]compose.NetworkDef{
+		"caddy":            {External: true},
+		params.InternalNet: {},
+	}
+	if params.Upstream != "" {
+		if upstreamHost == compose.HostUpstream {
+			upstreamHost = params.GatewayIP
+		}
+		svc.Labels["caddy.reverse_proxy"] = net.JoinHostPort(upstreamHost, route.Port)
+		svc.Networks = nil
+		delete(networks, "caddy")
 	}
 
 	if len(params.EnvFilePaths) > 0 {
@@ -115,10 +138,7 @@ func GenerateOverride(params OverrideParams) ([]byte, error) {
 
 	override := compose.Override{
 		Services: services,
-		Networks: map[string]compose.NetworkDef{
-			"caddy":            {External: true},
-			params.InternalNet: {},
-		},
+		Networks: networks,
 	}
 
 	if len(secretNames) > 0 {

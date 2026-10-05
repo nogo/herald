@@ -22,6 +22,7 @@ type UpSpec struct {
 	Service        string            // explicit routing service; empty to detect
 	Port           string            // explicit container port; empty to detect
 	DefaultPort    string            // container port when the compose file exposes none
+	Upstream       string            // fixed host:port or ip:port instead of the caddy network
 	InlineOverride string            // raw YAML deep-merged into the generated override
 }
 
@@ -69,6 +70,8 @@ func writeOverride(inst Instance, spec UpSpec) error {
 		Port:           spec.Port,
 		DefaultPort:    spec.DefaultPort,
 		InternalNet:    inst.InternalNetwork(),
+		Upstream:       spec.Upstream,
+		GatewayIP:      caddy.DockerGatewayIP(),
 		InlineOverride: spec.InlineOverride,
 	})
 	if err != nil {

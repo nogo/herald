@@ -725,6 +725,28 @@ server:
 			wantErr: "server.services_dir",
 		},
 		{
+			name: "invalid upstream",
+			yaml: serverBlock + `
+stacks:
+  ha:
+    path: stacks/ha
+    domain: ha.example.com
+    upstream: 8123
+`,
+			wantErr: `stack "ha": upstream "8123"`,
+		},
+		{
+			name: "upstream host must be host or an IP",
+			yaml: serverBlock + `
+stacks:
+  ha:
+    path: stacks/ha
+    domain: ha.example.com
+    upstream: example.com:8123
+`,
+			wantErr: `stack "ha": upstream "example.com:8123"`,
+		},
+		{
 			name: "non-numeric routing port",
 			yaml: serverBlock + `
 stacks:

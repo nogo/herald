@@ -290,7 +290,7 @@ func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort i
 		AcmeEmail:    acmeEmail,
 		AcmeCA:       acmeCA,
 		DeployDomain: deployDomain,
-		GatewayIP:    getDockerGatewayIP(),
+		GatewayIP:    DockerGatewayIP(),
 		HeraldPort:   heraldPort,
 	}
 	if tls != nil {
@@ -323,9 +323,9 @@ func (m *CaddyManager) DNSWarning() string {
 	return ""
 }
 
-// getDockerGatewayIP returns the gateway IP of the default Docker bridge network.
+// DockerGatewayIP returns the gateway IP of the default Docker bridge network.
 // This is the IP containers use to reach services on the host.
-func getDockerGatewayIP() string {
+func DockerGatewayIP() string {
 	out, err := exec.Command("docker", "network", "inspect", "bridge",
 		"--format", "{{range .IPAM.Config}}{{.Gateway}}{{end}}").Output()
 	if err == nil {
