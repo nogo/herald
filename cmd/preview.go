@@ -16,6 +16,7 @@ import (
 var previewCmd = &cobra.Command{
 	Use:   "preview",
 	Short: "Manage preview deployments",
+	Args:  cobra.NoArgs,
 	Long: `Manage preview deployments.
 
 Preview deployments are created automatically when a feature branch is pushed
@@ -31,6 +32,7 @@ DNS requirement: add a wildcard record pointing to this server's IP, e.g.
 var previewListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active preview deployments",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		mgr := newPreviewManager()
@@ -70,6 +72,7 @@ var previewRemoveCmd = &cobra.Command{
 var previewCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
 	Short: "Remove previews for branches that no longer exist on the remote",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		return newPreviewManager().Cleanup(cmd.Context())

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nogo/herald/internal/secrets"
+	"github.com/spf13/cobra"
 )
 
 func TestLoadConfigWithStoredTokenRequiresDeployDomain(t *testing.T) {
@@ -31,4 +32,19 @@ func TestLoadConfigWithStoredTokenRequiresDeployDomain(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "server.deploy_domain") {
 		t.Fatalf("with a stored token: err = %v, want one naming server.deploy_domain", err)
 	}
+}
+
+// A command without an Args rule accepts any extra words and ignores them, so
+// `herald deploy a b` would deploy a. Every runnable subcommand declares one.
+func TestEveryCommandDeclaresItsArguments(t *testing.T) {
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		if c.HasParent() && c.Runnable() && c.Args == nil && c.Name() != "help" && !strings.HasPrefix(c.CommandPath(), "herald completion") {
+			t.Errorf("%s has no Args rule", c.CommandPath())
+		}
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(rootCmd)
 }

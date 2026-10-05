@@ -24,6 +24,7 @@ var statusJSON bool
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show all services, domains, and health",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

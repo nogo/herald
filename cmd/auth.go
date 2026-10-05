@@ -20,6 +20,7 @@ var authCmd = &cobra.Command{
 var authLoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with GitHub using device flow",
+	Args:  cobra.NoArgs,
 	Long: `Authenticate with GitHub using the OAuth Device Flow.
 
 Opens a URL you paste into any browser (phone, laptop).
@@ -68,6 +69,7 @@ To create a GitHub OAuth App:
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current GitHub authentication status",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -96,6 +98,7 @@ var authStatusCmd = &cobra.Command{
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Remove stored GitHub token",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

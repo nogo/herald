@@ -20,6 +20,7 @@ var deployAll bool
 var deployCmd = &cobra.Command{
 	Use:   "deploy [stack]",
 	Short: "Deploy a stack",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

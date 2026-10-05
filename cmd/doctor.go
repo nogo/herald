@@ -13,6 +13,7 @@ import (
 var doctorCmd = &cobra.Command{
 	Use:     "doctor",
 	Short:   "Diagnose why the server is not deploying itself correctly",
+	Args:    cobra.NoArgs,
 	GroupID: "daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true

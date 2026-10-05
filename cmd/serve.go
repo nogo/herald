@@ -33,6 +33,7 @@ var port int
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start webhook listener and deploy daemon",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

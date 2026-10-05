@@ -20,6 +20,7 @@ var caddyCmd = &cobra.Command{
 var caddyStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Caddy reverse proxy",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		heraldPort, _ := cmd.Flags().GetInt("herald-port")
@@ -36,6 +37,7 @@ var caddyStartCmd = &cobra.Command{
 var caddyStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the Caddy reverse proxy",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		m := &caddy.CaddyManager{
@@ -49,6 +51,7 @@ var caddyStopCmd = &cobra.Command{
 var caddyStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Caddy status and proxied domains",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		m := &caddy.CaddyManager{

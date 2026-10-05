@@ -15,6 +15,7 @@ var (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print herald version",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		switch {
 		case tag != "" && commit != "unknown":

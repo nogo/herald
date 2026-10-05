@@ -16,6 +16,7 @@ import (
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Reconcile config with running state",
+	Args:  cobra.NoArgs,
 	Long: `Run a maintenance pass: pull the IaC repo, reload and validate config,
 ensure Caddy is running, reconcile GitHub webhooks (create, repair, and prune
 stale hooks), survey stacks, redeploy changed auto_deploy path stacks, and report

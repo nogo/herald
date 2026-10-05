@@ -14,6 +14,7 @@ import (
 var secretCmd = &cobra.Command{
 	Use:   "secret",
 	Short: "Manage encrypted secrets",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
