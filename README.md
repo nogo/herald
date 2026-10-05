@@ -245,7 +245,23 @@ As of October 2026, ordered from least to most moving parts:
 | [Dokploy](https://dokploy.com) | PostgreSQL + Redis | Platform | Web UI | Webhook | Traefik |
 | [Coolify](https://coolify.io) | PostgreSQL + Redis | Platform | Web UI | Webhook | Traefik or Caddy |
 
-Closest neighbour: doco-cd, also a daemon that applies compose files from git. It leaves routing, certificates and previews to you; Herald wires those from the same config. Of the others, Coolify, Dokploy (apps only, not compose) and Disco also run preview environments.
+Of the others, Coolify, Dokploy (apps only, not compose) and Disco also run preview environments.
+
+### Herald and doco-cd
+
+doco-cd is the closest neighbour: also one daemon, also no database, also compose files from git. It has more features, and that is fine. Herald is built for what its author needs, not to match a feature list.
+
+doco-cd does more: GitLab, Gitea and other forges, Docker Swarm, several hosts, polling and sync windows, notifications, Prometheus metrics, a REST API, and secrets from external providers or SOPS.
+
+Herald covers the whole path from push to a live HTTPS URL, from one `config.yml`:
+
+- **Routing and TLS.** A domain is one line; Caddy gets the certificate. doco-cd leaves the reverse proxy to you.
+- **Generated secrets.** `generate:` creates a password on first deploy and keeps it age-encrypted on the server. Nobody types or sees it.
+- **Preview environments.** Each branch gets a subdomain, with no secrets and no previews from forks.
+- **Webhooks registered for you.** Herald creates and prunes them through the GitHub API.
+- **Guidance.** A bare `herald` says where setup stands and what to run next; `herald doctor` prints the fix.
+
+If you already run your own proxy and certificates and want more forges or hosts, doco-cd is the better fit.
 
 **Why Herald?** GitHub-native deploy automation for one server. One server repo drives wiring. One app repo can deploy N times. No PostgreSQL/Redis tax.
 
