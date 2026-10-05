@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/nogo/herald/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -19,12 +21,27 @@ var signalCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
-		if err := signalSync(cmd.Context(), signalPort); err != nil {
+		port := signalPort
+		if !cmd.Flags().Changed("port") {
+			port = daemonPort(dataDir)
+		}
+		if err := signalSync(cmd.Context(), port); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "sync submitted")
 		return nil
 	},
+}
+
+// daemonPort returns server.port from the server clone's config.yml, the file
+// the daemon loaded at startup. A missing or invalid config falls back to the
+// default port, so the hook still reaches a daemon that runs without one.
+func daemonPort(dataDir string) int {
+	cfg, err := config.Load(filepath.Join(dataDir, "repo", "config.yml"))
+	if err != nil {
+		return 9483
+	}
+	return cfg.Server.Port
 }
 
 // signalSync bypasses HTTP proxies: a post-receive hook must reach the daemon
@@ -59,5 +76,5 @@ func signalSync(ctx context.Context, port int) error {
 func init() {
 	signalCmd.GroupID = "daemon"
 	rootCmd.AddCommand(signalCmd)
-	signalCmd.Flags().IntVar(&signalPort, "port", 9483, "Local daemon port (must match herald serve)")
+	signalCmd.Flags().IntVar(&signalPort, "port", 0, "Local daemon port (default: server.port from the server repo's config.yml, else 9483)")
 }

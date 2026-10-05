@@ -133,8 +133,9 @@ For a server repo with a local bare repo or non-GitHub `origin`, a git
 herald signal
 ```
 
-Run it as the operator who runs Herald. Use `--port <port>` if the daemon uses
-a port other than 9483. The command needs no config and bypasses HTTP proxies.
+Run it as the operator who runs Herald. It signals `server.port` from
+`<data-dir>/repo/config.yml` (9483 without one); `--port <port>` overrides
+that. A missing or invalid config is no error, and it bypasses HTTP proxies.
 It exits non-zero with a diagnostic if the daemon is unreachable or rejects the
 signal. Success means maintenance was submitted: the daemon pulls its
 `<data-dir>/repo` clone, reloads config, and redeploys changed `auto_deploy` path
