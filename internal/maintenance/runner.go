@@ -88,7 +88,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) *Report {
 		}
 	}()
 
-	repoDir := filepath.Join(r.DataDir, "repo")
+	repoDir := config.DataDir(r.DataDir).Repo()
 
 	// Phase A1: pull the IaC repo (recovery — the daemon may have missed pushes).
 	rep.IaC.OldHEAD = gitHEAD(ctx, repoDir)
@@ -305,7 +305,7 @@ func (r *Runner) reconcileWebhooks(ctx context.Context, cfg *config.Config, opts
 }
 
 func (r *Runner) surveyStacks(ctx context.Context, cfg *config.Config, opts Options, configOK bool, rep *Report) {
-	repoDir := filepath.Join(r.DataDir, "repo")
+	repoDir := config.DataDir(r.DataDir).Repo()
 	missingByStack := map[string][]string{}
 
 	for _, name := range slices.Sorted(maps.Keys(cfg.Stacks)) {

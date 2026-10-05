@@ -142,7 +142,7 @@ func (c *StatusCollector) Collect(ctx context.Context) (*ServerStatus, error) {
 	}
 
 	// The server clone is the source of truth after a maintenance pull.
-	s.IaCCommit, _ = readGitHead(ctx, filepath.Join(c.DataDir, "repo"))
+	s.IaCCommit, _ = readGitHead(ctx, config.DataDir(c.DataDir).Repo())
 
 	// Caddy status.
 	if c.Caddy != nil {

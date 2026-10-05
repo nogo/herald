@@ -24,6 +24,7 @@ Tools run through `go run` at a pinned version, so nothing needs installing.
 - A package belongs to one layer in docs/architecture.md: core, supporting or generic. Supporting packages (`compose`, `caddy`, `secrets`, `github`) never import each other, except `github` → `secrets`. Generic packages (`runner`, `git`, `ui`) import nothing from `internal/`.
 - The deploy pipeline lives once, in `deployer`. Preview, webhook and maintenance call into it; they never repeat a stage.
 - A deployment's paths, compose project name and stamps come from `deployer.Instance`. Nothing else joins `"repo"`, `".env"` or `"herald-"`.
+- The data dir's paths (server repo clone, its `config.yml`, bare repo, post-receive hook) come from `config.DataDir`. Nothing else joins `"repo"` or `"server.git"` onto the data dir.
 - `cmd/` parses flags, wires dependencies and prints output. Rules about stacks, previews or secrets go in `internal/`.
 - Concrete types by default. An interface is declared by its consumer, holds only the methods that consumer calls, and exists only once a second implementation exists. A test fake counts (`maintenance.stackDeployer`).
 - Dependencies arrive as exported struct fields or constructor arguments. A field that may be nil is documented on the field and falls back in one accessor (`Deployer.ui()` returns `ui.Nop()`).

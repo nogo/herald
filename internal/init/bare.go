@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/secrets"
 )
 
@@ -32,8 +33,8 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 	if err := secrets.NewStore(opts.DataDir).Init(); err != nil {
 		return err
 	}
-	bareDir := filepath.Join(opts.DataDir, "server.git")
-	repoDir := filepath.Join(opts.DataDir, "repo")
+	layout := config.DataDir(opts.DataDir)
+	bareDir, repoDir := layout.BareRepo(), layout.Repo()
 
 	_, bareErr := os.Stat(filepath.Join(bareDir, "HEAD"))
 	_, cloneErr := os.Stat(filepath.Join(repoDir, ".git"))
@@ -55,7 +56,7 @@ func InitBare(ctx context.Context, w io.Writer, opts BareOptions) error {
 	}
 
 	hook := fmt.Sprintf("#!/bin/sh\nexec %s signal --data-dir %s\n", shellQuote(opts.HeraldBin), shellQuote(opts.DataDir))
-	hookPath := filepath.Join(bareDir, "hooks", "post-receive")
+	hookPath := layout.PostReceiveHook()
 	if err := os.WriteFile(hookPath, []byte(hook), 0755); err != nil {
 		return fmt.Errorf("writing post-receive hook: %w", err)
 	}

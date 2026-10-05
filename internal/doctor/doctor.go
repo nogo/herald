@@ -176,7 +176,7 @@ func (di *Diagnosis) checkConfigAndRepo(ctx context.Context, d Deps) {
 		di.pass(catRepo, "nothing pushed yet; on your laptop: "+strings.Join(bootstrap.LocalRemoteCommands(d.DataDir), " or "))
 		return
 	}
-	repoDir := filepath.Join(d.DataDir, "repo")
+	repoDir := config.DataDir(d.DataDir).Repo()
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		di.fail(catRepo, "server repo", "no git clone at "+repoDir, "herald init <server-repo>")
 	} else if err := githelper.CmdWithAuth(ctx, d.Token, repoDir, "ls-remote", "--quiet", "origin", "HEAD").Run(); err != nil {

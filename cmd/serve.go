@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -215,7 +214,7 @@ var serveCmd = &cobra.Command{
 // getIaCRepo reads the git remote URL from the IaC repo clone and returns the
 // GitHub full name (e.g. "nogo/srv2"), or "" if unavailable.
 func getIaCRepo(dataDir string) string {
-	repoDir := filepath.Join(dataDir, "repo")
+	repoDir := config.DataDir(dataDir).Repo()
 	cmd := githelper.CmdWithAuth(context.Background(), "", repoDir, "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/nogo/herald/internal/config"
 	bootstrap "github.com/nogo/herald/internal/init"
@@ -56,7 +55,7 @@ var rootCmd = &cobra.Command{
 		// Auto-detect config from <data-dir>/repo/config.yml if --config was not
 		// explicitly provided and the default path doesn't exist.
 		if !cmd.Flags().Changed("config") {
-			autoPath := filepath.Join(filepath.Clean(dataDir), "repo", "config.yml")
+			autoPath := config.DataDir(dataDir).ConfigFile()
 			if _, err := os.Stat(autoPath); err == nil {
 				cfgFile = autoPath
 			}
@@ -67,7 +66,7 @@ var rootCmd = &cobra.Command{
 		// needs a real config.
 		if err != nil && cmd.Name() == "serve" && !cmd.Flags().Changed("config") && errors.Is(err, os.ErrNotExist) {
 			if pending, ok := bootstrap.PendingConfig(context.Background(), dataDir); ok {
-				cfgFile = filepath.Join(dataDir, "repo", "config.yml")
+				cfgFile = config.DataDir(dataDir).ConfigFile()
 				cfg, err = pending, nil
 			}
 		}

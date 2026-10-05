@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"github.com/nogo/herald/internal/config"
 	"github.com/nogo/herald/internal/doctor"
@@ -65,7 +64,7 @@ func resolveConfigPath() string {
 	if rootCmd.PersistentFlags().Changed("config") {
 		return cfgFile
 	}
-	autoPath := filepath.Join(filepath.Clean(dataDir), "repo", "config.yml")
+	autoPath := config.DataDir(dataDir).ConfigFile()
 	if _, err := os.Stat(autoPath); err == nil {
 		return autoPath
 	}

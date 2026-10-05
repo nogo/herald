@@ -164,7 +164,7 @@ func Bootstrap(ctx context.Context, w io.Writer, opts Options) error {
 	}
 
 	// Step 1: Clone server IaC repo
-	repoDir := filepath.Join(opts.DataDir, "repo")
+	repoDir := config.DataDir(opts.DataDir).Repo()
 	configPath := filepath.Join(repoDir, "config.yml")
 
 	fmt.Fprintln(w, "\nCloning server repository...")
@@ -394,7 +394,7 @@ func printCompletion(w io.Writer, cfg *config.Config, opts Options) {
 	fmt.Fprintln(w, "Herald initialized successfully!")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Server:     %s\n", cfg.Server.Name)
-	fmt.Fprintf(w, "Config:     %s\n", filepath.Join(opts.DataDir, "repo", "config.yml"))
+	fmt.Fprintf(w, "Config:     %s\n", config.DataDir(opts.DataDir).ConfigFile())
 	fmt.Fprintf(w, "Data:       %s\n", opts.DataDir)
 	fmt.Fprintf(w, "Services:   %s\n", cfg.Server.ServicesDir)
 	fmt.Fprintln(w)

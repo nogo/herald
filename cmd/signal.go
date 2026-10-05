@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,7 +36,7 @@ var signalCmd = &cobra.Command{
 // the daemon loaded at startup. A missing or invalid config falls back to the
 // default port, so the hook still reaches a daemon that runs without one.
 func daemonPort(dataDir string) int {
-	cfg, err := config.Load(filepath.Join(dataDir, "repo", "config.yml"))
+	cfg, err := config.Load(config.DataDir(dataDir).ConfigFile())
 	if err != nil {
 		return config.DefaultPort
 	}

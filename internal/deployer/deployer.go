@@ -209,7 +209,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 		}
 		defer deployRoot.Close()
 
-		iacRepoDir := filepath.Join(d.DataDir, "repo")
+		iacRepoDir := config.DataDir(d.DataDir).Repo()
 		merged, err := BuildEnvMap(stack.ConfigFile, iacRepoDir, envVars, d.Logger)
 		if err != nil {
 			return "", fmt.Errorf("building env map: %w", err)
@@ -276,7 +276,7 @@ func (d *Deployer) Deploy(ctx context.Context, stackName, ref string) error {
 			inst.recordRef(deployRef, commit)
 		}
 	} else {
-		iacRepoDir := filepath.Join(d.DataDir, "repo")
+		iacRepoDir := config.DataDir(d.DataDir).Repo()
 		if commit, err := readDeployedCommit(iacRepoDir); err == nil {
 			inst.recordRef("path", commit)
 		}
@@ -311,7 +311,7 @@ func (d *Deployer) gitSync(ctx context.Context, repoDir string, stack config.Sta
 // If the symlink already exists and points to the right place, it is a no-op.
 // If it points elsewhere (stale), it is removed and recreated.
 func (d *Deployer) symlinkSource(deployDir string, stack config.Stack) error {
-	iacRepoDir := filepath.Join(d.DataDir, "repo")
+	iacRepoDir := config.DataDir(d.DataDir).Repo()
 	target := filepath.Join(iacRepoDir, stack.Path)
 
 	if _, err := os.Stat(target); err != nil {
@@ -341,7 +341,7 @@ func (d *Deployer) symlinkSource(deployDir string, stack config.Stack) error {
 // runPostDeployHook runs stack.UpdateScript as a post-deploy hook after compose up.
 // The script path is resolved relative to the IaC repo root.
 func (d *Deployer) runPostDeployHook(ctx context.Context, stackName string, stack config.Stack, deployDir, composeFile string) error {
-	scriptPath := filepath.Join(d.DataDir, "repo", stack.UpdateScript)
+	scriptPath := filepath.Join(config.DataDir(d.DataDir).Repo(), stack.UpdateScript)
 	if _, err := os.Stat(scriptPath); err != nil {
 		return fmt.Errorf("update script %q not found in IaC repo", stack.UpdateScript)
 	}

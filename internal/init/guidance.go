@@ -60,7 +60,7 @@ func remoteHosts(name string, interfaces []net.Interface, addresses func(net.Int
 }
 
 func remoteCommands(name, operator, dataDir string, hosts []string) []string {
-	absolute, _ := filepath.Abs(filepath.Join(dataDir, "server.git"))
+	absolute, _ := filepath.Abs(config.DataDir(dataDir).BareRepo())
 	commands := []string{}
 	for _, host := range hosts {
 		remote := url.URL{Scheme: "ssh", User: url.User(operator), Host: host, Path: absolute}
@@ -71,7 +71,7 @@ func remoteCommands(name, operator, dataDir string, hosts []string) []string {
 
 // NothingPushed checks the bare repo itself, rather than a clone that may be stale.
 func NothingPushed(ctx context.Context, dataDir string) bool {
-	bare := filepath.Join(dataDir, "server.git")
+	bare := config.DataDir(dataDir).BareRepo()
 	if _, err := os.Stat(filepath.Join(bare, "HEAD")); err != nil {
 		return false
 	}
@@ -111,5 +111,5 @@ func printBareCompletion(w io.Writer, opts BareOptions, remotes []string) {
 	fmt.Fprintln(w, "  # Run one of the git remote add commands above here.")
 	fmt.Fprintf(w, "  git add config.yml\n  git commit -m 'Configure server'\n  git push %s HEAD:main\n", name)
 	fmt.Fprintln(w, "\nOn this server, start the daemon before pushing:\n  sudo systemctl enable --now herald\nCheck that a push landed:\n  herald status")
-	fmt.Fprintf(w, "\nOnly on-server copies to add to backups:\n  Bare repo: %s\n  Age store: %s and %s (keep the key with the encrypted store)\n", filepath.Join(opts.DataDir, "server.git"), filepath.Join(opts.DataDir, "age.key"), filepath.Join(opts.DataDir, "secrets.age"))
+	fmt.Fprintf(w, "\nOnly on-server copies to add to backups:\n  Bare repo: %s\n  Age store: %s and %s (keep the key with the encrypted store)\n", config.DataDir(opts.DataDir).BareRepo(), filepath.Join(opts.DataDir, "age.key"), filepath.Join(opts.DataDir, "secrets.age"))
 }
