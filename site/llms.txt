@@ -1,0 +1,76 @@
+# Herald
+
+> Herald turns one server (a VPS, a Raspberry Pi, any Linux box with Docker) into a git-driven Docker Compose host. A push to an app repo deploys its stack. A push to the server repo reloads config and redeploys what changed. One `config.yml` in git describes everything that runs on the server.
+
+Herald is a single Go binary that runs as a systemd service. It has no database and no web UI for configuration. It reacts to GitHub webhooks, or to `git push` into a bare repo on the server. It wires Caddy for TLS and routing, resolves age-encrypted secrets, and runs `docker compose up`. Docker owns the runtime; Herald owns the path from push to running containers.
+
+## Model
+
+- Everything Herald manages is a **stack**: a Docker Compose project with a domain, secrets, and one source.
+- The source is either `repo:` (a GitHub repo, `owner/name`) or `path:` (a directory in the server repo that contains a `compose.yml`). Never both.
+- Repo stacks track `branch:` (default `main`) or a fixed `tag:`, never both. `tag_pattern:` auto-deploys matching tag pushes and needs `branch:`.
+- Path stacks redeploy on a server repo push only with `auto_deploy: true`, and only when their directory changed. `update:` runs a script after `compose up`.
+- `preview:` works on repo stacks only and needs a wildcard domain. Previews get no secrets. Pull requests from forks never start a preview.
+- The same repo can be deployed several times under different stack names, branches, tags, or domains.
+- Containers are named `herald-<stack>`. Use plain `docker compose` / `docker logs` for logs and exec; Herald does not wrap them.
+
+## Minimal config
+
+```yaml
+server:
+  name: srv1
+  deploy_domain: deploy.example.com   # only needed with GitHub webhooks
+  services_dir: /opt/deploy
+  acme_email: ops@example.com
+
+stacks:
+  myapp:
+    repo: myorg/myapp
+    branch: main
+    domain: myapp.example.com
+    secrets:
+      - key: myapp/db_password
+        target: DB_PASSWORD
+        type: env
+        generate: alphanumeric        # created on the server at first deploy
+    preview:
+      enabled: true
+      domain: "*.preview.myapp.example.com"
+
+  nextcloud:
+    path: stacks/nextcloud
+    domain: cloud.example.com
+    auto_deploy: true
+```
+
+## Secrets
+
+- Secrets live age-encrypted on the server, never in the repo. Config only names them by `key`.
+- `generate:` lets the server create a value on first deploy, so nobody has to see or type it.
+- Otherwise an operator sets it on the server: `herald secret set <key>`.
+- `type: env` puts the value in the stack's `.env`. `type: docker-secret` writes a Docker secret file.
+
+## Commands
+
+```
+herald                      Where setup stands and the command to run next
+herald init [owner/repo]    Bootstrap from a server repo (no argument: bare repo on the box)
+herald deploy <stack>|--all Deploy stacks
+herald down <stack>         Stop and remove a stack's containers
+herald sync                 Pull server repo, reconcile config and webhooks
+herald status               Stacks, domains, health
+herald doctor               Diagnose problems, print fix commands
+herald secret set|list      Manage secrets
+herald preview list|remove|cleanup
+```
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/nogo/herald/main/README.md): install, setup, commands, comparison
+- [Config reference](https://raw.githubusercontent.com/nogo/herald/main/docs/config.md): every field, routing, secrets, previews
+- [Security model](https://raw.githubusercontent.com/nogo/herald/main/SECURITY.md): what is encrypted, isolated, and exposed
+
+## Optional
+
+- [Project goals and non-goals](https://raw.githubusercontent.com/nogo/herald/main/docs/project.md)
+- [Architecture](https://raw.githubusercontent.com/nogo/herald/main/docs/architecture.md)

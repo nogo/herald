@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Herald</title>
+  <style>
+    .t { fill: #f49752; }
+    .b { fill: #f49752; }
+    .h { fill: #0c1014; }
+  </style>
+  <!-- mouthpiece, tube and bell of the herald's trumpet -->
+  <rect class="t" x="1" y="7" width="3" height="5" rx="1"/>
+  <rect class="t" x="3" y="8.5" width="19" height="2"/>
+  <path class="t" d="M21 9.5 L31 3 L31 16 Z"/>
+  <!-- the banner hanging from the tube, with a notched hem -->
+  <path class="b" d="M7 10.5 H19 V27 L13 23.5 L7 27 Z"/>
+  <!-- H on the banner -->
+  <rect class="h" x="10" y="13.5" width="1.6" height="7"/>
+  <rect class="h" x="14.4" y="13.5" width="1.6" height="7"/>
+  <rect class="h" x="10" y="16.2" width="6" height="1.6"/>
+</svg>

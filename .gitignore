@@ -26,3 +26,6 @@ age.key
 .env
 .env.*
 
+
+# Pages: docs are copied in at deploy
+site/docs/
