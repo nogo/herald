@@ -55,6 +55,22 @@ func (s Server) RequireDeployDomain() error {
 	return nil
 }
 
+// GitHubRepos lists the GitHub repos this server depends on, sorted and
+// deduplicated: every repo: stack, plus iacRepo when the server repo itself is
+// on GitHub (pass "" otherwise). Empty means Herald runs without GitHub.
+func (c *Config) GitHubRepos(iacRepo string) []string {
+	set := map[string]struct{}{}
+	for _, stack := range c.Stacks {
+		if stack.Repo != "" {
+			set[stack.Repo] = struct{}{}
+		}
+	}
+	if iacRepo != "" {
+		set[iacRepo] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
 type TLSConfig struct {
 	DNS      string `yaml:"dns" json:"dns"`
 	Wildcard string `yaml:"wildcard,omitempty" json:"wildcard,omitzero"`

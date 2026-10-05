@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -928,5 +929,32 @@ server:
 `)
 	if _, err := config.Load(path); err != nil {
 		t.Fatalf("config without deploy_domain and github_token should validate: %v", err)
+	}
+}
+
+func TestGitHubRepos(t *testing.T) {
+	cfg := &config.Config{Stacks: map[string]config.Stack{
+		"budget":   {Repo: "nogo/budget-app"},
+		"tracker":  {Repo: "nogo/budget-app"},
+		"sidenote": {Repo: "nogo/sidenote"},
+		"klimpern": {Path: "klimpern"},
+	}}
+	cases := []struct {
+		iacRepo string
+		want    []string
+	}{
+		{"", []string{"nogo/budget-app", "nogo/sidenote"}},
+		{"nogo/srv1", []string{"nogo/budget-app", "nogo/sidenote", "nogo/srv1"}},
+		{"nogo/budget-app", []string{"nogo/budget-app", "nogo/sidenote"}},
+	}
+	for _, tc := range cases {
+		if got := cfg.GitHubRepos(tc.iacRepo); !slices.Equal(got, tc.want) {
+			t.Errorf("GitHubRepos(%q) = %v, want %v", tc.iacRepo, got, tc.want)
+		}
+	}
+
+	pathOnly := &config.Config{Stacks: map[string]config.Stack{"klimpern": {Path: "klimpern"}}}
+	if got := pathOnly.GitHubRepos(""); len(got) != 0 {
+		t.Errorf("path stacks and a local server repo: GitHubRepos = %v, want none", got)
 	}
 }

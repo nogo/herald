@@ -234,7 +234,7 @@ func (c *StatusCollector) collectStackStatus(ctx context.Context, name string, s
 }
 
 func (c *StatusCollector) collectWebhookStatuses() ([]WebhookStatus, time.Time) {
-	repos := uniqueRepos(c.Config.Load())
+	repos := c.Config.Load().GitHubRepos("")
 	wsPath := WebhookStatePath(c.DataDir)
 
 	data, err := os.ReadFile(wsPath)
@@ -361,17 +361,6 @@ func readGitHead(ctx context.Context, repoDir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// uniqueRepos returns sorted, deduplicated repos from config.Stacks (repo stacks only).
-func uniqueRepos(cfg *config.Config) []string {
-	seen := make(map[string]struct{})
-	for _, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			seen[stack.Repo] = struct{}{}
-		}
-	}
-	return slices.Sorted(maps.Keys(seen))
 }
 
 // formatAge formats a duration as a short human-readable age string.

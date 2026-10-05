@@ -194,41 +194,6 @@ func TestDeleteWebhook_Error(t *testing.T) {
 	}
 }
 
-func TestUniqueRepos(t *testing.T) {
-	cfg := &config.Config{
-		Stacks: map[string]config.Stack{
-			"budget":   {Repo: "nogo/budget-app"},
-			"tracker":  {Repo: "nogo/budget-app"}, // duplicate
-			"sidenote": {Repo: "nogo/sidenote"},
-		},
-	}
-
-	repos := uniqueRepos(cfg, "")
-	if len(repos) != 2 {
-		t.Errorf("got %d repos, want 2: %v", len(repos), repos)
-	}
-	// Verify both unique repos are present.
-	found := make(map[string]bool)
-	for _, r := range repos {
-		found[r] = true
-	}
-	if !found["nogo/budget-app"] || !found["nogo/sidenote"] {
-		t.Errorf("missing expected repos, got %v", repos)
-	}
-
-	// IaC repo distinct from any stack repo: included.
-	repos = uniqueRepos(cfg, "nogo/srv1")
-	if len(repos) != 3 {
-		t.Errorf("with iacRepo: got %d repos, want 3: %v", len(repos), repos)
-	}
-
-	// IaC repo overlapping a stack repo: deduped.
-	repos = uniqueRepos(cfg, "nogo/budget-app")
-	if len(repos) != 2 {
-		t.Errorf("overlapping iacRepo: got %d repos, want 2: %v", len(repos), repos)
-	}
-}
-
 func TestEventsForRepo(t *testing.T) {
 	cfg := &config.Config{
 		Stacks: map[string]config.Stack{

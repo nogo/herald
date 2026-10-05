@@ -44,7 +44,7 @@ var serveCmd = &cobra.Command{
 
 		store := secrets.NewStore(dataDir)
 		secret, err := store.Get("herald/webhook_secret")
-		if err != nil && needsWebhooks(Cfg, getIaCRepo(dataDir)) {
+		if err != nil && len(Cfg.GitHubRepos(getIaCRepo(dataDir))) > 0 {
 			return fmt.Errorf("webhook secret not configured. Run: herald secret set herald/webhook_secret")
 		}
 
@@ -222,19 +222,6 @@ func getIaCRepo(dataDir string) string {
 		return ""
 	}
 	return parseGitHubRepo(strings.TrimSpace(string(out)))
-}
-
-// needsWebhooks includes app repos even when the server repo is hosted locally.
-func needsWebhooks(cfg *config.Config, iacRepo string) bool {
-	if iacRepo != "" {
-		return true
-	}
-	for _, stack := range cfg.Stacks {
-		if stack.Repo != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // parseGitHubRepo extracts "owner/repo" from a GitHub clone URL.
