@@ -45,7 +45,9 @@ fi
 cd ..
 
 # Publish. An annotated tag's message goes above the generated notes, so an
-# upgrade notice travels with the tag: git tag -a v4.0.0 -F notes.md
+# upgrade notice travels with the tag. --cleanup=verbatim keeps markdown
+# headings, which git would otherwise strip as comments:
+#   git tag -a --cleanup=verbatim v4.0.0 -F notes.md
 set -- "${DIST}"/*.tar.gz "${DIST}/checksums.txt" --generate-notes --verify-tag
 if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
 	set -- "$@" --notes "$(git tag -l --format='%(contents)' "$TAG")"
