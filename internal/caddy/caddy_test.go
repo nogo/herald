@@ -175,6 +175,17 @@ func TestGenerateDNSComposeResolvers(t *testing.T) {
 	}
 }
 
+func TestGenerateDNSComposePropagationDelay(t *testing.T) {
+	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"})
+	if strings.Contains(without, "propagation_delay") {
+		t.Fatalf("compose without propagation_delay:\n%s", without)
+	}
+	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", PropagationDelay: "30s"})
+	if !strings.Contains(with, `caddy.cert_issuer.propagation_delay: "30s"`) {
+		t.Fatalf("propagation_delay missing:\n%s", with)
+	}
+}
+
 func TestComposeOmitsHeraldSiteWithoutDeployDomain(t *testing.T) {
 	got := generateComposeContent("ops@example.com", "", "", 9483, nil)
 	if strings.Contains(got, "caddy_0") {

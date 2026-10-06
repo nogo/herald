@@ -909,6 +909,9 @@ func TestLoadTLS(t *testing.T) {
 		{"  tls:\n    dns: hetzner\n    resolvers: [1.1.1.1, '9.9.9.9:53', '2606:4700:4700::1111']\n", ""},
 		{"  tls:\n    dns: hetzner\n    resolvers: [dns.example.com]\n", "server.tls.resolvers"},
 		{"  tls:\n    dns: hetzner\n    resolvers: ['']\n", "server.tls.resolvers"},
+		{"  tls:\n    dns: hetzner\n    propagation_delay: 30s\n", ""},
+		{"  tls:\n    dns: hetzner\n    propagation_delay: '30'\n", "server.tls.propagation_delay"},
+		{"  tls:\n    dns: hetzner\n    propagation_delay: -5s\n", "server.tls.propagation_delay"},
 	} {
 		t.Run(tc.tls, func(t *testing.T) {
 			_, err := config.Load(writeTempConfig(t, "server:\n  name: test\n  deploy_domain: deploy.example.com\n  services_dir: /srv\n  acme_email: ops@example.com\n"+tc.tls))

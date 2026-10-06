@@ -40,6 +40,9 @@ services:
 {{- if .Resolvers}}
       caddy.cert_issuer.resolvers: "{{.Resolvers}}"
 {{- end}}
+{{- if .PropagationDelay}}
+      caddy.cert_issuer.propagation_delay: "{{.PropagationDelay}}"
+{{- end}}
 {{- if .Wildcard}}
       # Caddy 2.11 serves a name an automated wildcard covers from that
       # wildcard; it removed auto_https prefer_wildcard, which now fails to parse.

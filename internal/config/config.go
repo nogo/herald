@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nogo/herald/internal/compose"
 	"gopkg.in/yaml.v3"
@@ -79,6 +80,10 @@ type TLSConfig struct {
 	// record. Set them when the server's own resolver answers the zone locally
 	// (split-horizon DNS): it would never show the record Hetzner published.
 	Resolvers []string `yaml:"resolvers,omitempty" json:"resolvers,omitempty"`
+	// PropagationDelay is how long Caddy waits after publishing the challenge
+	// record before asking the CA to check it, as a Go duration such as "30s".
+	// Set it when the CA queries secondary nameservers that lag behind.
+	PropagationDelay string `yaml:"propagation_delay,omitempty" json:"propagation_delay,omitzero"`
 }
 
 type Stack struct {
@@ -263,6 +268,11 @@ func validate(cfg *Config) error {
 			}
 			if _, err := netip.ParseAddrPort(r); err != nil {
 				return fmt.Errorf("server.tls.resolvers: %q is not an IP address or IP:port", r)
+			}
+		}
+		if tls.PropagationDelay != "" {
+			if d, err := time.ParseDuration(tls.PropagationDelay); err != nil || d <= 0 {
+				return fmt.Errorf("server.tls.propagation_delay: %q is not a positive duration such as 30s", tls.PropagationDelay)
 			}
 		}
 	}

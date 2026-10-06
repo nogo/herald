@@ -51,6 +51,7 @@ server:
     dns: hetzner
     wildcard: "*.home.example.com"
     resolvers: [1.1.1.1, 9.9.9.9]
+    propagation_delay: 30s
 ```
 
 `dns` must be `hetzner`. `wildcard` is optional and must be a wildcard domain.
@@ -60,6 +61,8 @@ not the parent domain or deeper names. Covered stack names need no individual
 certificate and therefore do not appear individually in Certificate Transparency.
 
 `resolvers` is optional: IP addresses, or `IP:port`, that Caddy asks while it waits for the challenge record to appear. Set it when the server's own resolver answers the zone locally — split-horizon DNS, such as Unbound serving `home.example.com` — because that resolver never shows the record Hetzner published, and the certificate is never issued. Public resolvers like `1.1.1.1` and `9.9.9.9` see the real zone.
+
+`propagation_delay` is optional: how long Caddy waits after publishing the challenge record before it asks the CA to check it, as a duration such as `30s`. Set it when issuance fails with `NXDOMAIN looking up TXT for _acme-challenge…` although the record was published: the CA asks a secondary nameserver that has not caught up yet.
 
 With DNS-01, Caddy uses one ACME issuer: `acme_ca`, or Let's Encrypt when it is empty. There is no ZeroSSL fallback.
 
