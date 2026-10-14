@@ -964,3 +964,49 @@ func TestGitHubRepos(t *testing.T) {
 		t.Errorf("path stacks and a local server repo: GitHubRepos = %v, want none", got)
 	}
 }
+
+func TestLoad_Routes(t *testing.T) {
+	const head = `
+server:
+  name: test
+  deploy_domain: deploy.example.com
+  acme_email: ops@example.com
+  services_dir: /opt/deploy
+stacks:
+  app:
+    path: stacks/app
+    domain: app.example.com
+`
+	tests := []struct {
+		name    string
+		routes  string
+		wantErr string // empty means valid
+	}{
+		{"valid", "routes:\n  sidenote:\n    domain: note.example.com\n    upstream: 192.168.42.12:7300\n", ""},
+		{"missing domain", "routes:\n  sidenote:\n    upstream: 192.168.42.12:7300\n", `route "sidenote": domain is required`},
+		{"missing upstream", "routes:\n  sidenote:\n    domain: note.example.com\n", `route "sidenote"`},
+		{"invalid upstream", "routes:\n  sidenote:\n    domain: note.example.com\n    upstream: friday:7300\n", `route "sidenote"`},
+		{"bad port", "routes:\n  sidenote:\n    domain: note.example.com\n    upstream: 192.168.42.12:99999\n", `route "sidenote"`},
+		{"host upstream", "routes:\n  sidenote:\n    domain: note.example.com\n    upstream: host:7300\n", `route "sidenote"`},
+		{"domain of a stack", "routes:\n  sidenote:\n    domain: app.example.com\n    upstream: 192.168.42.12:7300\n", `route "sidenote": domain "app.example.com" already used by stack:app`},
+		{"domain of a route", "routes:\n  a:\n    domain: x.example.com\n    upstream: 192.168.42.12:1\n  b:\n    domain: x.example.com\n    upstream: 192.168.42.12:2\n", `route "b": domain "x.example.com" already used by route:a`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := config.Load(writeTempConfig(t, head+tt.routes))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := cfg.Routes["sidenote"].Upstream; got != "192.168.42.12:7300" {
+					t.Errorf("upstream = %q", got)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			assertContains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

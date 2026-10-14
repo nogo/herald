@@ -24,6 +24,7 @@ import (
 type Config struct {
 	Server Server           `yaml:"server"           json:"server"`
 	Stacks map[string]Stack `yaml:"stacks,omitempty" json:"stacks,omitempty"`
+	Routes map[string]Route `yaml:"routes,omitempty" json:"routes,omitempty"`
 }
 
 type Server struct {
@@ -71,6 +72,13 @@ func (c *Config) GitHubRepos(iacRepo string) []string {
 		set[iacRepo] = struct{}{}
 	}
 	return slices.Sorted(maps.Keys(set))
+}
+
+// Route sends a domain through the server's Caddy to a service on another
+// machine of the network. It deploys nothing.
+type Route struct {
+	Domain   string `yaml:"domain"   json:"domain"`
+	Upstream string `yaml:"upstream" json:"upstream"` // <ip>:<port>
 }
 
 type TLSConfig struct {
@@ -388,6 +396,27 @@ func validate(cfg *Config) error {
 			if stack.Compose != "" {
 				return fmt.Errorf("stack %q: compose is not valid for path stacks", name)
 			}
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(cfg.Routes)) {
+		route := cfg.Routes[name]
+		if !stackNameRe.MatchString(name) {
+			return fmt.Errorf("route %q: name must match %s (lowercase alphanumeric, '-', '_')", name, stackNameRe.String())
+		}
+		if route.Domain == "" {
+			return fmt.Errorf("route %q: domain is required", name)
+		}
+		if prev, exists := domains[route.Domain]; exists {
+			return fmt.Errorf("route %q: domain %q already used by %s", name, route.Domain, prev)
+		}
+		domains[route.Domain] = "route:" + name
+		host, _, err := compose.ParseUpstream(route.Upstream)
+		if err != nil {
+			return fmt.Errorf("route %q: %w", name, err)
+		}
+		if host == compose.HostUpstream {
+			return fmt.Errorf("route %q: upstream %q must be <ip>:<port>; the Docker host is not another machine", name, route.Upstream)
 		}
 	}
 

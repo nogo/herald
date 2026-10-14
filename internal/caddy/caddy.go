@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -88,6 +90,26 @@ func (m *CaddyManager) EnsureNetwork(ctx context.Context) error {
 	return EnsureNetwork(ctx, m.Logger)
 }
 
+// composeContent renders the compose file for the current config, and returns
+// the DNS token it needs ("" for the stock image).
+func (m *CaddyManager) composeContent() (content, token string) {
+	token = m.dnsToken()
+	var tls *config.TLSConfig
+	if token != "" {
+		tls = m.Config.Server.TLS
+	}
+	return generateComposeContent(m.Config.Server.AcmeEmail, m.Config.Server.AcmeCA,
+		m.Config.Server.DeployDomain, m.HeraldPort, tls, m.Config.Routes), token
+}
+
+// ComposeStale reports whether the compose file on disk differs from the one the
+// current config renders, so a running Caddy needs Start to pick up the change.
+func (m *CaddyManager) ComposeStale() bool {
+	want, _ := m.composeContent()
+	have, err := os.ReadFile(m.composeFilePath())
+	return err != nil || string(have) != want
+}
+
 // Start ensures the network exists, writes the compose file, and starts Caddy.
 func (m *CaddyManager) Start(ctx context.Context) error {
 	if err := m.EnsureNetwork(ctx); err != nil {
@@ -99,13 +121,7 @@ func (m *CaddyManager) Start(ctx context.Context) error {
 		return fmt.Errorf("creating caddy dir: %w", err)
 	}
 
-	token := m.dnsToken()
-	var tls *config.TLSConfig
-	if token != "" {
-		tls = m.Config.Server.TLS
-	}
-	content := generateComposeContent(m.Config.Server.AcmeEmail, m.Config.Server.AcmeCA,
-		m.Config.Server.DeployDomain, m.HeraldPort, tls)
+	content, token := m.composeContent()
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
@@ -274,6 +290,16 @@ func formatUptime(startedAt string) string {
 	}
 }
 
+// firstRouteLabel is the first caddy_N index for routes: caddy_0 is the Herald
+// site and caddy_1 the wildcard.
+const firstRouteLabel = 2
+
+type composeRoute struct {
+	Index    int
+	Domain   string
+	Upstream string
+}
+
 type composeData struct {
 	DNS              bool
 	Wildcard         string
@@ -284,9 +310,19 @@ type composeData struct {
 	DeployDomain     string
 	GatewayIP        string
 	HeraldPort       int
+	Routes           []composeRoute
 }
 
-func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort int, tls *config.TLSConfig) string {
+// composeRoutes numbers routes in name order, so the labels stay stable between syncs.
+func composeRoutes(routes map[string]config.Route) []composeRoute {
+	var out []composeRoute
+	for i, name := range slices.Sorted(maps.Keys(routes)) {
+		out = append(out, composeRoute{Index: firstRouteLabel + i, Domain: routes[name].Domain, Upstream: routes[name].Upstream})
+	}
+	return out
+}
+
+func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort int, tls *config.TLSConfig, routes map[string]config.Route) string {
 	var buf bytes.Buffer
 	data := composeData{
 		AcmeEmail:    acmeEmail,
@@ -294,6 +330,7 @@ func generateComposeContent(acmeEmail, acmeCA, deployDomain string, heraldPort i
 		DeployDomain: deployDomain,
 		GatewayIP:    DockerGatewayIP(),
 		HeraldPort:   heraldPort,
+		Routes:       composeRoutes(routes),
 	}
 	if tls != nil {
 		data.DNS = true

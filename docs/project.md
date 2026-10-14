@@ -12,7 +12,7 @@ Without GitHub, the server repo is a bare repo on the server itself (`herald ini
 
 A single-binary daemon that runs on one server and reacts to GitHub events. Push app code, and the matching stack deploys. Push server config, and Herald pulls the server repo, reloads config, keeps webhooks and Caddy wiring current, and deploys path-sourced stacks that opted into auto-deploy. Secrets are encrypted. TLS is automatic. The server is reproducible from one repo.
 
-Everything herald manages is a **stack** — a compose project with a domain, secrets, and a source. Whether it's your app from GitHub or Nextcloud from your IaC repo, it's the same concept, same config, same deploy command.
+Herald manages **stacks** — compose projects with a domain, secrets, and a source — and **routes** from the server's Caddy to services on its network. Whether a stack is your app from GitHub or Nextcloud from your IaC repo, it's the same concept, same config, same deploy command. A route deploys nothing: it gives a domain on this server to a service that runs on another machine.
 
 ## Value Proposition
 
@@ -42,7 +42,7 @@ Herald is **not** a Docker Compose wrapper. If the user is running `herald` comm
 Herald stores state in files and git repos. No PostgreSQL, no Redis, no SQLite. Config lives in a git repo. Secrets live in an age-encrypted file. Runtime state is the filesystem and Docker itself.
 
 ### One server
-Herald manages one server. Multi-server orchestration is out of scope. If you need that, use Kubernetes or Nomad.
+Herald deploys to one server. Its Caddy may route to services on other machines of the network. Multi-server orchestration is out of scope. If you need that, use Kubernetes or Nomad.
 
 ### GitHub-native
 
@@ -72,7 +72,9 @@ TLS and routing are delegated to caddy-docker-proxy via container labels. Herald
 ## Design Principles
 
 ### One entity type: the stack
-Everything herald manages is a stack. A stack has a domain, secrets, and a source — either a GitHub repo (`repo:`) or a directory in the IaC repo (`path:`). That's the only fork. One config section (`stacks:`), one deploy command (`herald deploy`), one code path. No "apps vs services" distinction.
+Everything herald deploys is a stack. A stack has a domain, secrets, and a source — either a GitHub repo (`repo:`) or a directory in the IaC repo (`path:`). That's the only fork. One config section (`stacks:`), one deploy command (`herald deploy`), one code path. No "apps vs services" distinction.
+
+A route is not a second kind of stack. It has a domain and an upstream, and nothing to deploy, so it has its own section (`routes:`) and no deploy command.
 
 ### Herald owns the wiring, not the runtime
 Herald's job ends after `docker compose up` succeeds. It does not monitor containers, restart crashed services, or collect logs. Docker and compose own the runtime. Herald owns the path from "config changed" to "containers running."

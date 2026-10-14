@@ -31,6 +31,10 @@ services:
       caddy_0: "{{.DeployDomain}}"
       caddy_0.reverse_proxy: "{{.GatewayIP}}:{{.HeraldPort}}"
 {{- end}}
+{{- range .Routes}}
+      caddy_{{.Index}}: "{{.Domain}}"
+      caddy_{{.Index}}.reverse_proxy: "{{.Upstream}}"
+{{- end}}
 {{- if .DNS}}
       # One explicit issuer instead of acme_dns: Caddy fills acme_dns into an
       # issuer by replacing its DNS challenge config, which drops resolvers.

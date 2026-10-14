@@ -313,7 +313,7 @@ func TestEnsureCaddy_ReappliesDNSSetupWhileRunning(t *testing.T) {
 		want    string
 		applied bool
 	}{
-		{"stock Caddy is left alone", nil, "running", false},
+		{"stock Caddy is applied once, then left alone", nil, "running", false},
 		{"DNS-01 is re-applied", &config.TLSConfig{DNS: "hetzner"}, "started", true},
 	}
 	for _, tc := range cases {
@@ -328,6 +328,11 @@ func TestEnsureCaddy_ReappliesDNSSetupWhileRunning(t *testing.T) {
 
 			r := &Runner{Logger: discardLogger(t), HeraldPort: 9483, Secrets: secrets.NewStore(dir)}
 			cfg := &config.Config{Server: config.Server{ServicesDir: dir, TLS: tc.tls}}
+			if tc.tls == nil {
+				// First pass writes the compose file; the case under test is the next one.
+				r.ensureCaddy(context.Background(), cfg)
+				_ = os.Remove(applied)
+			}
 			if got := r.ensureCaddy(context.Background(), cfg); got != tc.want {
 				t.Errorf("ensureCaddy = %q, want %q", got, tc.want)
 			}
@@ -369,5 +374,43 @@ func TestCommitOutcome(t *testing.T) {
 	_, desc := (&Report{Config: ConfigResult{Error: long}}).CommitOutcome("/data/repo")
 	if n := len([]rune(desc)); n != 140 || !strings.HasSuffix(desc, "…") {
 		t.Errorf("long description: %d runes, ends %q; want 140 ending in …", n, desc[len(desc)-5:])
+	}
+}
+
+// A route added or removed changes the rendered compose file; a running Caddy
+// must be re-applied for the label change to take effect.
+func TestEnsureCaddy_ReappliesWhenRoutesChange(t *testing.T) {
+	dir := t.TempDir()
+	applied := filepath.Join(dir, "applied")
+	script := "#!/bin/sh\ncase \"$1\" in\n ps) echo abc123 ;;\n compose) touch " + applied + " ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	r := &Runner{Logger: discardLogger(t), HeraldPort: 9483, Secrets: secrets.NewStore(dir)}
+	cfg := &config.Config{Server: config.Server{ServicesDir: dir}}
+	ctx := context.Background()
+
+	steps := []struct {
+		name    string
+		routes  map[string]config.Route
+		want    string
+		applied bool
+	}{
+		{"first pass", nil, "started", true},
+		{"unchanged", nil, "running", false},
+		{"route added", map[string]config.Route{"sidenote": {Domain: "note.example.com", Upstream: "192.168.42.12:7300"}}, "started", true},
+		{"route unchanged", map[string]config.Route{"sidenote": {Domain: "note.example.com", Upstream: "192.168.42.12:7300"}}, "running", false},
+		{"route removed", nil, "started", true},
+	}
+	for _, s := range steps {
+		_ = os.Remove(applied)
+		cfg.Routes = s.routes
+		if got := r.ensureCaddy(ctx, cfg); got != s.want {
+			t.Errorf("%s: ensureCaddy = %q, want %q", s.name, got, s.want)
+		}
+		if _, err := os.Stat(applied); (err == nil) != s.applied {
+			t.Errorf("%s: compose up ran = %v, want %v", s.name, err == nil, s.applied)
+		}
 	}
 }
