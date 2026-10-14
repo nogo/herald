@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,9 +42,10 @@ const (
 	catWebhooks = "Webhooks"
 	catCaddy    = "Caddy"
 	catStacks   = "Stacks"
+	catRoutes   = "Routes"
 )
 
-var categoryOrder = []string{catSystem, catRepo, catGitHub, catWebhooks, catCaddy, catStacks}
+var categoryOrder = []string{catSystem, catRepo, catGitHub, catWebhooks, catCaddy, catRoutes, catStacks}
 
 // Severity orders checks from healthy to broken.
 type Severity int
@@ -116,6 +118,7 @@ func Run(ctx context.Context, d Deps) *Diagnosis {
 	di.checkConfigAndRepo(ctx, d)
 	di.checkGitHub(ctx, d)
 	di.checkCaddy(ctx, d)
+	di.checkRoutes(ctx, d)
 	di.checkStacks(ctx, d)
 	di.checkOrphans(ctx, d)
 
@@ -365,6 +368,30 @@ func humanDays(d time.Duration) string {
 		return fmt.Sprintf("%d days", days)
 	}
 	return "1 day"
+}
+
+// routeDialTimeout bounds the TCP connection to a route upstream.
+const routeDialTimeout = 3 * time.Second
+
+// checkRoutes dials each route upstream. A route deploys nothing, so an
+// accepted TCP connection is the only health signal herald has for it.
+func (di *Diagnosis) checkRoutes(ctx context.Context, d Deps) {
+	if d.Config == nil {
+		return
+	}
+	dialer := net.Dialer{Timeout: routeDialTimeout}
+	for _, name := range slices.Sorted(maps.Keys(d.Config.Routes)) {
+		route := d.Config.Routes[name]
+		label := name + " → " + route.Upstream
+		conn, err := dialer.DialContext(ctx, "tcp", route.Upstream)
+		if err != nil {
+			di.fail(catRoutes, label, "upstream does not accept a TCP connection: "+err.Error(),
+				"check that the service runs on "+route.Upstream+" and that the firewall allows this server")
+			continue
+		}
+		conn.Close()
+		di.pass(catRoutes, label)
+	}
 }
 
 func (di *Diagnosis) checkStacks(ctx context.Context, d Deps) {

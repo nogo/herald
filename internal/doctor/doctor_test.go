@@ -6,6 +6,7 @@ import (
 	"github.com/nogo/herald/internal/secrets"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"testing"
 
@@ -121,5 +122,41 @@ func TestCaddyDNSWarning(t *testing.T) {
 	di.Render(&out)
 	if !strings.Contains(out.String(), "DNS-01 is inactive") || !strings.Contains(out.String(), "herald/hetzner_token") {
 		t.Fatalf("missing DNS warning: %s", out.String())
+	}
+}
+
+func TestCheckRoutesDialsUpstream(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := closed.Addr().String()
+	closed.Close()
+
+	cfg := &config.Config{Routes: map[string]config.Route{
+		"up":   {Domain: "up.example.com", Upstream: ln.Addr().String()},
+		"down": {Domain: "down.example.com", Upstream: deadAddr},
+	}}
+	di := &Diagnosis{}
+	di.checkRoutes(context.Background(), Deps{Config: cfg})
+
+	got := map[string]Severity{}
+	for _, c := range di.Checks {
+		if c.Category != catRoutes {
+			t.Errorf("category = %q", c.Category)
+		}
+		got[c.Label] = c.Severity
+	}
+	want := map[string]Severity{
+		"down → " + deadAddr:         SeverityAttention,
+		"up → " + ln.Addr().String(): SeverityOK,
+	}
+	if len(got) != 2 || got["down → "+deadAddr] != SeverityAttention || got["up → "+ln.Addr().String()] != SeverityOK {
+		t.Errorf("checks = %v, want %v", got, want)
 	}
 }

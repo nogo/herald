@@ -12,6 +12,9 @@ server:    # required — server identity and global settings
 
 stacks:    # optional — everything herald deploys
   name: ...
+
+routes:    # optional — domains served for services on other machines
+  name: ...
 ```
 
 ---
@@ -247,6 +250,25 @@ override: |
 ```
 
 Without `!override`, the worker's `env_file` list would be appended to whatever the base compose file defines. With it, the list is replaced entirely.
+
+---
+
+## `routes`
+
+A route sends a domain through this server's Caddy to a service that runs on another machine of the network. A route deploys nothing: no container starts, and it has no secrets, previews or webhooks. Use a stack when herald should run the service.
+
+```yaml
+routes:
+  sidenote:
+    domain: note.home.example.com
+    upstream: 192.168.42.12:7300
+```
+
+- `domain` is required and must differ from every stack and route domain.
+- `upstream` is required: `<ip>:<port>`, over plain HTTP. `host:<port>` is not valid, because a route leaves this machine.
+- A name under `server.tls.wildcard` is served from the wildcard certificate, as a stack is.
+
+`herald sync` writes each route as a `caddy_N` label on the `herald-caddy` container and applies it. Removing a route removes its label. `herald doctor` lists each route and whether its upstream accepts a TCP connection. Routes do not appear on the public status page.
 
 ---
 

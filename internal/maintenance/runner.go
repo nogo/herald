@@ -189,7 +189,9 @@ func (r *Runner) ensureCaddy(ctx context.Context, cfg *config.Config) string {
 	// removed since the last pass switches Caddy between DNS-01 and stock. When
 	// nothing changed, the pinned image build is cached and compose leaves the
 	// container running, so this is cheap.
-	if running && cfg.Server.TLS == nil {
+	// Routes and label changes need the same: compose recreates Caddy only when
+	// the rendered file changed.
+	if running && cfg.Server.TLS == nil && !mgr.ComposeStale() {
 		return "running"
 	}
 	if err := mgr.Start(ctx); err != nil {

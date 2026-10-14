@@ -10,7 +10,7 @@ import (
 )
 
 func TestGenerateComposeContent(t *testing.T) {
-	content := generateComposeContent("admin@example.com", "", "deploy.example.com", 8080, nil)
+	content := generateComposeContent("admin@example.com", "", "deploy.example.com", 8080, nil, nil)
 
 	checks := []string{
 		"lucaslorentz/caddy-docker-proxy:2.9",
@@ -47,14 +47,14 @@ func TestGenerateComposeContent(t *testing.T) {
 
 func TestGenerateComposeContentAcmeCA(t *testing.T) {
 	const staging = "https://acme-staging-v02.api.letsencrypt.org/directory"
-	content := generateComposeContent("admin@example.com", staging, "deploy.example.com", 8080, nil)
+	content := generateComposeContent("admin@example.com", staging, "deploy.example.com", 8080, nil, nil)
 	if !strings.Contains(content, `caddy.acme_ca: "`+staging+`"`) {
 		t.Errorf("compose content missing acme_ca label, got:\n%s", content)
 	}
 }
 
 func TestGenerateComposeContentPort(t *testing.T) {
-	content := generateComposeContent("x@x.com", "", "x.com", 9483, nil)
+	content := generateComposeContent("x@x.com", "", "x.com", 9483, nil, nil)
 	if !strings.Contains(content, ":9483") {
 		t.Errorf("expected port 9483 in compose content")
 	}
@@ -129,7 +129,7 @@ func TestStockComposeUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := generateComposeContent("ops@example.com", "https://ca.example.com", "deploy.example.com", 9483, nil)
+	got := generateComposeContent("ops@example.com", "https://ca.example.com", "deploy.example.com", 9483, nil, nil)
 	if got != want.String() {
 		t.Fatalf("stock compose changed:\n%s", got)
 	}
@@ -138,7 +138,7 @@ func TestStockComposeUnchanged(t *testing.T) {
 func TestGenerateDNSCompose(t *testing.T) {
 	for _, wildcard := range []string{"", "*.example.com"} {
 		t.Run(wildcard, func(t *testing.T) {
-			content := generateComposeContent("ops@example.com", "", "deploy.example.com", 9483, &config.TLSConfig{DNS: "hetzner", Wildcard: wildcard})
+			content := generateComposeContent("ops@example.com", "", "deploy.example.com", 9483, &config.TLSConfig{DNS: "hetzner", Wildcard: wildcard}, nil)
 			// The provider sits in cert_issuer, not acme_dns: Caddy replaces an
 			// issuer's whole DNS challenge config with acme_dns, dropping resolvers.
 			for _, want := range []string{"build: .", "HETZNER_API_TOKEN=${HERALD_HETZNER_TOKEN:?}", `caddy.cert_issuer: "acme"`, `caddy.cert_issuer.dns: "hetzner {env.HETZNER_API_TOKEN}"`} {
@@ -165,30 +165,65 @@ func TestGenerateDNSCompose(t *testing.T) {
 }
 
 func TestGenerateDNSComposeResolvers(t *testing.T) {
-	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"})
+	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"}, nil)
 	if strings.Contains(without, "caddy.cert_issuer.resolvers") || strings.Contains(without, "caddy.acme_dns") {
 		t.Fatalf("compose without resolvers:\n%s", without)
 	}
-	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", Resolvers: []string{"1.1.1.1", "9.9.9.9"}})
+	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", Resolvers: []string{"1.1.1.1", "9.9.9.9"}}, nil)
 	if !strings.Contains(with, `caddy.cert_issuer.resolvers: "1.1.1.1 9.9.9.9"`) {
 		t.Fatalf("resolvers missing:\n%s", with)
 	}
 }
 
 func TestGenerateDNSComposePropagationDelay(t *testing.T) {
-	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"})
+	without := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner"}, nil)
 	if strings.Contains(without, "propagation_delay") {
 		t.Fatalf("compose without propagation_delay:\n%s", without)
 	}
-	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", PropagationDelay: "30s"})
+	with := generateComposeContent("ops@example.com", "", "", 9483, &config.TLSConfig{DNS: "hetzner", PropagationDelay: "30s"}, nil)
 	if !strings.Contains(with, `caddy.cert_issuer.propagation_delay: "30s"`) {
 		t.Fatalf("propagation_delay missing:\n%s", with)
 	}
 }
 
 func TestComposeOmitsHeraldSiteWithoutDeployDomain(t *testing.T) {
-	got := generateComposeContent("ops@example.com", "", "", 9483, nil)
+	got := generateComposeContent("ops@example.com", "", "", 9483, nil, nil)
 	if strings.Contains(got, "caddy_0") {
 		t.Fatalf("compose has a Herald site without deploy_domain:\n%s", got)
+	}
+}
+
+func TestComposeRoutes(t *testing.T) {
+	sidenote := config.Route{Domain: "note.example.com", Upstream: "192.168.42.12:7300"}
+	llama := config.Route{Domain: "llm.example.com", Upstream: "192.168.42.12:8080"}
+	tests := []struct {
+		name   string
+		routes map[string]config.Route
+		want   []string
+		absent []string
+	}{
+		{"none", nil, nil, []string{"caddy_2"}},
+		{"one", map[string]config.Route{"sidenote": sidenote},
+			[]string{`caddy_2: "note.example.com"`, `caddy_2.reverse_proxy: "192.168.42.12:7300"`}, []string{"caddy_3"}},
+		{"two in name order", map[string]config.Route{"sidenote": sidenote, "llama": llama},
+			[]string{`caddy_2: "llm.example.com"`, `caddy_2.reverse_proxy: "192.168.42.12:8080"`,
+				`caddy_3: "note.example.com"`, `caddy_3.reverse_proxy: "192.168.42.12:7300"`}, []string{"caddy_4"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generateComposeContent("ops@example.com", "", "deploy.example.com", 9483,
+				&config.TLSConfig{DNS: "hetzner", Wildcard: "*.example.com"}, tt.routes)
+			// The Herald site and the wildcard keep their labels beside the routes.
+			for _, want := range append([]string{`caddy_0: "deploy.example.com"`, `caddy_1: "*.example.com"`}, tt.want...) {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in:\n%s", want, got)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(got, bad) {
+					t.Errorf("unexpected %q in:\n%s", bad, got)
+				}
+			}
+		})
 	}
 }
